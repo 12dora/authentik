@@ -102,6 +102,11 @@ jobs:
             exit 1
           fi
 
+      - name: Prepare generated clients
+        run: |
+          mkdir -p upstream/gen-ts-api
+          mkdir -p upstream/gen-go-api
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
