@@ -89,6 +89,19 @@ jobs:
           echo "version=${VERSION}" > upstream/.patches/version.txt
           echo "commit=${{ github.sha }}" >> upstream/.patches/version.txt
 
+      - name: Resolve Dockerfile path
+        id: dockerfile
+        run: |
+          if [ -f upstream/Dockerfile ]; then
+            echo "file=upstream/Dockerfile" >> "$GITHUB_OUTPUT"
+          elif [ -f upstream/lifecycle/container/Dockerfile ]; then
+            echo "file=upstream/lifecycle/container/Dockerfile" >> "$GITHUB_OUTPUT"
+          else
+            echo "No supported upstream Dockerfile found" >&2
+            find upstream -name Dockerfile -print >&2
+            exit 1
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -103,7 +116,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: upstream
-          file: upstream/Dockerfile
+          file: ${{ steps.dockerfile.outputs.file }}
           platforms: linux/amd64
           push: true
           tags: |
