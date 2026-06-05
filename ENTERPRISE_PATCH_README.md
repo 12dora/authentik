@@ -7,7 +7,10 @@
 1. **企业 License 解锁** — 使部署获得完整的 enterprise 功能授权
 2. **简体中文翻译补全** — Django 后端 69 条 + Lit 前端 649 条翻译
 
-**不修改任何上游 Python/TypeScript 源码**，完全通过官方扩展机制实现，保证上游升级兼容性。
+---
+
+> **自动构建**：本仓库配置了 GitHub Actions 工作流，上游新版本发布后会**自动构建并推送** patched 镜像到 GHCR。
+> 使用方式见下文「自动构建工作流」。
 
 ---
 
@@ -115,3 +118,56 @@ npm run build-locales
 git add user_settings.py locale/zh-Hans/ web/xliff/zh-Hans.xlf
 git commit -m "enterprise: add license patch and complete zh-Hans i18n"
 ```
+
+---
+
+## 自动构建工作流
+
+### 原理
+
+仓库已配置 `.github/workflows/build-patched.yml`，工作流程如下：
+
+```
+每天 06:00 UTC 触发（或手动触发）
+  ↓
+查询 goauthentik/authentik 最新 release tag
+  ↓
+检查 GHCR 是否已有此版本的镜像
+  ↓
+若没有 →
+  检出上游源码 @ version/<tag>
+  检出本仓库补丁文件（.po / .xlf / user_settings.py）
+  覆盖补丁到上游源码
+  docker buildx build（复用缓存）
+  push 到 ghcr.io/12dora/authentik:<tag>
+  push 到 ghcr.io/12dora/authentik:latest
+```
+
+### 使用构建好的镜像
+
+部署时直接使用自动构建的镜像：
+
+```yaml
+services:
+  server:
+    image: ghcr.io/12dora/authentik:latest
+    # 不再需要挂载 user_settings.py
+```
+
+所有企业功能和简体中文翻译已直接内置在镜像中。
+
+### 手动触发
+
+```bash
+gh workflow run build-patched.yml -f version=2024.12.1
+```
+
+### 首次配置
+
+1. 进入 GitHub 仓库 → Settings → Actions → General
+   - 确保 **Allow GitHub Actions to create and approve pull requests** 已勾选
+2. 进入 Settings → Actions → General → Workflow permissions
+   - 选择 **Read and write permissions**
+   - 勾选 **Allow GitHub Actions to create and approve pull requests**
+
+内置的 `GITHUB_TOKEN` 已有 `packages: write` 权限用于推送到 GHCR，无需额外配置 Token。

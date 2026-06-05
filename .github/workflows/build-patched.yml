@@ -2,20 +2,18 @@ name: Build patched authentik image
 
 on:
   schedule:
-    # Check for upstream releases daily
+    # Check for new upstream releases daily
     - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
       version:
-        description: "Upstream version tag (e.g. 2024.12.1). Leave empty for auto-detect"
+        description: "Upstream version (e.g. 2024.12.1). Leave empty for auto-detect"
         required: false
         type: string
 
 env:
   REGISTRY: ghcr.io
-  # Change to your own image name
-  IMAGE_NAME: ${{ github.repository_owner }}/authentik-patched
-  PATCH_BRANCH: patches
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   detect:
@@ -25,8 +23,6 @@ jobs:
       should_build: ${{ steps.should-build.outputs.should_build }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.PATCH_BRANCH }}
 
       - name: Determine upstream version
         id: get-version
@@ -34,9 +30,8 @@ jobs:
           if [ -n "${{ inputs.version }}" ]; then
             echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
           else
-            # Fetch latest stable release tag from upstream
             LATEST=$(curl -s https://api.github.com/repos/goauthentik/authentik/releases/latest \
-              | jq -r '.tag_name' 2>/dev/null | sed 's/^v//')
+              | jq -r '.tag_name' | sed 's/^v//')
             echo "version=${LATEST}" >> $GITHUB_OUTPUT
           fi
 
@@ -44,10 +39,9 @@ jobs:
         id: should-build
         run: |
           VERSION="${{ steps.get-version.outputs.version }}"
-          # Check manifest in registry (or a version file)
-          if docker manifest inspect ${REGISTRY}/${IMAGE_NAME}:${VERSION} > /dev/null 2>&1; then
+          if docker manifest inspect ghcr.io/${{ github.repository }}:${VERSION} > /dev/null 2>&1; then
             echo "should_build=false" >> $GITHUB_OUTPUT
-            echo "Image already exists for version ${VERSION}"
+            echo "Image for version ${VERSION} already exists, skipping"
           else
             echo "should_build=true" >> $GITHUB_OUTPUT
             echo "Will build image for version ${VERSION}"
@@ -57,24 +51,31 @@ jobs:
     needs: detect
     if: needs.detect.outputs.should_build == 'true'
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        platform: [linux/amd64]
+    permissions:
+      contents: read
+      packages: write
+
     steps:
-      - name: Checkout upstream source
+      - name: Checkout upstream source at version
         uses: actions/checkout@v4
         with:
           repository: goauthentik/authentik
           ref: version/${{ needs.detect.outputs.version }}
           path: upstream
 
-      - name: Checkout patch files
+      - name: Checkout patch files from our fork
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.PATCH_BRANCH }}
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref_name }}
           path: patches
+          sparse-checkout: |
+            user_settings.py
+            locale/zh-Hans
+            web/xliff/zh-Hans.xlf
+            ENTERPRISE_PATCH_README.md
 
-      - name: Apply translations and patches
+      - name: Apply patches over upstream source
         run: |
           VERSION="${{ needs.detect.outputs.version }}"
 
@@ -84,19 +85,20 @@ jobs:
           cp -v patches/locale/zh-Hans/LC_MESSAGES/django.mo \
             upstream/locale/zh-Hans/LC_MESSAGES/django.mo
 
-          # Frontend translations (XLIFF — will be compiled at build time)
+          # Frontend translations (rebuilt at Docker build time)
           cp -v patches/web/xliff/zh-Hans.xlf \
             upstream/web/xliff/zh-Hans.xlf
 
-          # Enterprise license patch
+          # Enterprise license patch (placed in container for optional mount)
           cp -v patches/user_settings.py \
             upstream/authentik/authentik/enterprise/patch_license.py
 
-          # Record the applied patches
+          # Record patch info
           mkdir -p upstream/.patches
-          cp -r patches/ENTERPRISE_PATCH_README.md upstream/.patches/
+          cp -v patches/ENTERPRISE_PATCH_README.md upstream/.patches/
           echo "Upstream version: ${VERSION}" > upstream/.patches/version.txt
-          echo "Patches applied at: $(date -u)" >> upstream/.patches/version.txt
+          echo "Built at: $(date -u)" >> upstream/.patches/version.txt
+          echo "Commit: ${{ github.sha }}" >> upstream/.patches/version.txt
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -113,7 +115,7 @@ jobs:
         with:
           context: upstream
           file: upstream/lifecycle/container/Dockerfile
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.detect.outputs.version }}
@@ -126,14 +128,15 @@ jobs:
 
   notify:
     needs: build
-    if: always() && needs.build.result != 'skipped'
+    if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Build result
+      - name: Print result
         run: |
           STATUS="${{ needs.build.result }}"
           VERSION="${{ needs.detect.outputs.version }}"
-          echo "::notice::Patched image build ${STATUS} for version ${VERSION}"
           if [ "${STATUS}" = "success" ]; then
-            echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}"
+            echo "::notice::Patched image built: ghcr.io/${{ github.repository }}:${VERSION}"
+          else
+            echo "::warning::Patched image build ${STATUS} for version ${VERSION}"
           fi
