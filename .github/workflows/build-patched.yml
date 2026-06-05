@@ -1,0 +1,139 @@
+name: Build patched authentik image
+
+on:
+  schedule:
+    # Check for upstream releases daily
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Upstream version tag (e.g. 2024.12.1). Leave empty for auto-detect"
+        required: false
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  # Change to your own image name
+  IMAGE_NAME: ${{ github.repository_owner }}/authentik-patched
+  PATCH_BRANCH: patches
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+      should_build: ${{ steps.should-build.outputs.should_build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PATCH_BRANCH }}
+
+      - name: Determine upstream version
+        id: get-version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            # Fetch latest stable release tag from upstream
+            LATEST=$(curl -s https://api.github.com/repos/goauthentik/authentik/releases/latest \
+              | jq -r '.tag_name' 2>/dev/null | sed 's/^v//')
+            echo "version=${LATEST}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if we already built this version
+        id: should-build
+        run: |
+          VERSION="${{ steps.get-version.outputs.version }}"
+          # Check manifest in registry (or a version file)
+          if docker manifest inspect ${REGISTRY}/${IMAGE_NAME}:${VERSION} > /dev/null 2>&1; then
+            echo "should_build=false" >> $GITHUB_OUTPUT
+            echo "Image already exists for version ${VERSION}"
+          else
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "Will build image for version ${VERSION}"
+          fi
+
+  build:
+    needs: detect
+    if: needs.detect.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: [linux/amd64]
+    steps:
+      - name: Checkout upstream source
+        uses: actions/checkout@v4
+        with:
+          repository: goauthentik/authentik
+          ref: version/${{ needs.detect.outputs.version }}
+          path: upstream
+
+      - name: Checkout patch files
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PATCH_BRANCH }}
+          path: patches
+
+      - name: Apply translations and patches
+        run: |
+          VERSION="${{ needs.detect.outputs.version }}"
+
+          # Backend translations
+          cp -v patches/locale/zh-Hans/LC_MESSAGES/django.po \
+            upstream/locale/zh-Hans/LC_MESSAGES/django.po
+          cp -v patches/locale/zh-Hans/LC_MESSAGES/django.mo \
+            upstream/locale/zh-Hans/LC_MESSAGES/django.mo
+
+          # Frontend translations (XLIFF — will be compiled at build time)
+          cp -v patches/web/xliff/zh-Hans.xlf \
+            upstream/web/xliff/zh-Hans.xlf
+
+          # Enterprise license patch
+          cp -v patches/user_settings.py \
+            upstream/authentik/authentik/enterprise/patch_license.py
+
+          # Record the applied patches
+          mkdir -p upstream/.patches
+          cp -r patches/ENTERPRISE_PATCH_README.md upstream/.patches/
+          echo "Upstream version: ${VERSION}" > upstream/.patches/version.txt
+          echo "Patches applied at: $(date -u)" >> upstream/.patches/version.txt
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push patched image
+        uses: docker/build-push-action@v6
+        with:
+          context: upstream
+          file: upstream/lifecycle/container/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.detect.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ needs.detect.outputs.version }}
+            GIT_BUILD_HASH=${{ github.sha }}
+
+  notify:
+    needs: build
+    if: always() && needs.build.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build result
+        run: |
+          STATUS="${{ needs.build.result }}"
+          VERSION="${{ needs.detect.outputs.version }}"
+          echo "::notice::Patched image build ${STATUS} for version ${VERSION}"
+          if [ "${STATUS}" = "success" ]; then
+            echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}"
+          fi
