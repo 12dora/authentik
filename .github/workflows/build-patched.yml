@@ -1,13 +1,12 @@
-name: Build patched authentik image
+name: Build patched authentik
 
 on:
   schedule:
-    # Check for new upstream releases daily
     - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
       version:
-        description: "Upstream version (e.g. 2024.12.1). Leave empty for auto-detect"
+        description: "Upstream tag (e.g. 2024.12.1). Empty = auto-detect"
         required: false
         type: string
 
@@ -24,27 +23,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Determine upstream version
+      - name: Resolve upstream version
         id: get-version
         run: |
           if [ -n "${{ inputs.version }}" ]; then
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
           else
-            LATEST=$(curl -s https://api.github.com/repos/goauthentik/authentik/releases/latest \
+            LATEST=$(curl -sL https://api.github.com/repos/goauthentik/authentik/releases/latest \
               | jq -r '.tag_name' | sed 's/^v//')
-            echo "version=${LATEST}" >> $GITHUB_OUTPUT
+            echo "version=${LATEST}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Check if we already built this version
+      - name: Skip if already built
         id: should-build
         run: |
           VERSION="${{ steps.get-version.outputs.version }}"
           if docker manifest inspect ghcr.io/${{ github.repository }}:${VERSION} > /dev/null 2>&1; then
-            echo "should_build=false" >> $GITHUB_OUTPUT
-            echo "Image for version ${VERSION} already exists, skipping"
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            echo "Image for ${VERSION} already exists, skipping"
           else
-            echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "Will build image for version ${VERSION}"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "Will build ${VERSION}"
           fi
 
   build:
@@ -52,22 +51,20 @@ jobs:
     if: needs.detect.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
-      - name: Checkout upstream source at version
+      - name: Checkout upstream at version/${{ needs.detect.outputs.version }}
         uses: actions/checkout@v4
         with:
           repository: goauthentik/authentik
           ref: version/${{ needs.detect.outputs.version }}
           path: upstream
 
-      - name: Checkout patch files from our fork
+      - name: Checkout patch files
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository }}
-          ref: ${{ github.ref_name }}
           path: patches
           sparse-checkout: |
             user_settings.py
@@ -75,42 +72,33 @@ jobs:
             web/xliff/zh-Hans.xlf
             ENTERPRISE_PATCH_README.md
 
-      - name: Apply patches over upstream source
+      - name: Apply patches
         run: |
           VERSION="${{ needs.detect.outputs.version }}"
-
-          # Backend translations
           cp -v patches/locale/zh-Hans/LC_MESSAGES/django.po \
             upstream/locale/zh-Hans/LC_MESSAGES/django.po
           cp -v patches/locale/zh-Hans/LC_MESSAGES/django.mo \
             upstream/locale/zh-Hans/LC_MESSAGES/django.mo
-
-          # Frontend translations (rebuilt at Docker build time)
           cp -v patches/web/xliff/zh-Hans.xlf \
             upstream/web/xliff/zh-Hans.xlf
-
-          # Enterprise license patch (placed in container for optional mount)
           cp -v patches/user_settings.py \
             upstream/authentik/authentik/enterprise/patch_license.py
-
-          # Record patch info
           mkdir -p upstream/.patches
           cp -v patches/ENTERPRISE_PATCH_README.md upstream/.patches/
-          echo "Upstream version: ${VERSION}" > upstream/.patches/version.txt
-          echo "Built at: $(date -u)" >> upstream/.patches/version.txt
-          echo "Commit: ${{ github.sha }}" >> upstream/.patches/version.txt
+          echo "version=${VERSION}" > upstream/.patches/version.txt
+          echo "commit=${{ github.sha }}" >> upstream/.patches/version.txt
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GitHub Container Registry
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push patched image
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: upstream
@@ -126,17 +114,33 @@ jobs:
             VERSION=${{ needs.detect.outputs.version }}
             GIT_BUILD_HASH=${{ github.sha }}
 
-  notify:
-    needs: build
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Print result
-        run: |
-          STATUS="${{ needs.build.result }}"
-          VERSION="${{ needs.detect.outputs.version }}"
-          if [ "${STATUS}" = "success" ]; then
-            echo "::notice::Patched image built: ghcr.io/${{ github.repository }}:${VERSION}"
-          else
-            echo "::warning::Patched image build ${STATUS} for version ${VERSION}"
-          fi
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.detect.outputs.version }}
+          name: authentik patched ${{ needs.detect.outputs.version }}
+          body: |
+            ## 基于 upstream [${{ needs.detect.outputs.version }}](https://github.com/goauthentik/authentik/releases/tag/version/${{ needs.detect.outputs.version }}) 构建
+
+            ### 变更
+            - 企业 License 解锁（Enterprise 功能全开）
+            - 简体中文翻译补全（后端 69 条 + 前端 649 条）
+
+            ### 使用
+            ```yaml
+            services:
+              server:
+                image: ghcr.io/${{ github.repository }}:${{ needs.detect.outputs.version }}
+            ```
+
+            ### 拉取命令
+            ```bash
+            docker pull ghcr.io/${{ github.repository }}:${{ needs.detect.outputs.version }}
+            ```
+
+            ---
+
+            [部署文档](https://github.com/${{ github.repository }}/blob/main/ENTERPRISE_PATCH_README.md)
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: false
+          make_latest: true
