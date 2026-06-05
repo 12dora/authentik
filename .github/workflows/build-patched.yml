@@ -81,8 +81,9 @@ jobs:
             upstream/locale/zh-Hans/LC_MESSAGES/django.mo
           cp -v patches/web/xliff/zh-Hans.xlf \
             upstream/web/xliff/zh-Hans.xlf
+          mkdir -p upstream/authentik/enterprise
           cp -v patches/user_settings.py \
-            upstream/authentik/authentik/enterprise/patch_license.py
+            upstream/authentik/enterprise/patch_license.py
           mkdir -p upstream/.patches
           cp -v patches/ENTERPRISE_PATCH_README.md upstream/.patches/
           echo "version=${VERSION}" > upstream/.patches/version.txt
