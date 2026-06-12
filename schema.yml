@@ -24025,6 +24025,230 @@ paths:
           $ref: '#/components/responses/ValidationErrorResponse'
         '403':
           $ref: '#/components/responses/GenericErrorResponse'
+  /sources/oauth/dingtalk-allowlist/{source_slug}/departments/:
+    post:
+      operationId: sources_oauth_dingtalk_allowlist_departments_create
+      description: Fetch DingTalk departments with server-side source credentials.
+      parameters:
+      - in: path
+        name: source_slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - sources
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DingTalkAllowlistDepartmentsRequestRequest'
+      security:
+      - authentik: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DingTalkAllowlistDepartmentsResponse'
+          description: ''
+        '400':
+          $ref: '#/components/responses/ValidationErrorResponse'
+        '403':
+          $ref: '#/components/responses/GenericErrorResponse'
+  /sources/oauth/dingtalk-allowlist/{source_slug}/discover/start/:
+    post:
+      operationId: sources_oauth_dingtalk_allowlist_discover_start_create
+      description: Start DingTalk allowlist discovery.
+      parameters:
+      - in: path
+        name: source_slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - sources
+      security:
+      - authentik: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DingTalkAllowlistDiscoverStartResponse'
+          description: ''
+        '400':
+          $ref: '#/components/responses/ValidationErrorResponse'
+        '403':
+          $ref: '#/components/responses/GenericErrorResponse'
+  /sources/oauth/dingtalk-allowlist/{source_slug}/status/:
+    get:
+      operationId: sources_oauth_dingtalk_allowlist_status_retrieve
+      description: Return DingTalk allowlist status for a source.
+      parameters:
+      - in: path
+        name: source_slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - sources
+      security:
+      - authentik: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DingTalkAllowlistStatusResponse'
+          description: ''
+        '400':
+          $ref: '#/components/responses/ValidationErrorResponse'
+        '403':
+          $ref: '#/components/responses/GenericErrorResponse'
+  /sources/oauth/dingtalk-directory/{source_slug}/departments/:
+    get:
+      operationId: sources_oauth_dingtalk_directory_departments_list
+      parameters:
+      - $ref: '#/components/parameters/QueryPaginationOrdering'
+      - $ref: '#/components/parameters/QueryPaginationPage'
+      - $ref: '#/components/parameters/QueryPaginationPageSize'
+      - $ref: '#/components/parameters/QuerySearch'
+      - in: path
+        name: source_slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - sources
+      security:
+      - authentik: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDingTalkDirectoryDepartmentList'
+          description: ''
+        '400':
+          $ref: '#/components/responses/ValidationErrorResponse'
+        '403':
+          $ref: '#/components/responses/GenericErrorResponse'
+  /sources/oauth/dingtalk-directory/{source_slug}/status/:
+    get:
+      operationId: sources_oauth_dingtalk_directory_status_retrieve
+      parameters:
+      - in: path
+        name: source_slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - sources
+      security:
+      - authentik: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DingTalkDirectoryStatus'
+          description: ''
+        '400':
+          $ref: '#/components/responses/ValidationErrorResponse'
+        '403':
+          $ref: '#/components/responses/GenericErrorResponse'
+  /sources/oauth/dingtalk-directory/{source_slug}/sync/:
+    post:
+      operationId: sources_oauth_dingtalk_directory_sync_create
+      parameters:
+      - in: path
+        name: source_slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - sources
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DingTalkDirectorySyncRequestRequest'
+        required: true
+      security:
+      - authentik: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DingTalkDirectorySyncQueued'
+          description: ''
+        '400':
+          $ref: '#/components/responses/ValidationErrorResponse'
+        '403':
+          $ref: '#/components/responses/GenericErrorResponse'
+  /sources/oauth/dingtalk-directory/{source_slug}/users/:
+    get:
+      operationId: sources_oauth_dingtalk_directory_users_list
+      parameters:
+      - $ref: '#/components/parameters/QueryPaginationOrdering'
+      - $ref: '#/components/parameters/QueryPaginationPage'
+      - $ref: '#/components/parameters/QueryPaginationPageSize'
+      - $ref: '#/components/parameters/QuerySearch'
+      - in: path
+        name: source_slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - sources
+      security:
+      - authentik: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDingTalkDirectoryUserList'
+          description: ''
+        '400':
+          $ref: '#/components/responses/ValidationErrorResponse'
+        '403':
+          $ref: '#/components/responses/GenericErrorResponse'
+  /sources/oauth/dingtalk-directory/{source_slug}/users/{corp_id}/{user_id}/org/:
+    get:
+      operationId: sources_oauth_dingtalk_directory_users_org_retrieve
+      parameters:
+      - in: path
+        name: corp_id
+        schema:
+          type: string
+        required: true
+      - in: path
+        name: source_slug
+        schema:
+          type: string
+        required: true
+      - in: path
+        name: user_id
+        schema:
+          type: string
+        required: true
+      tags:
+      - sources
+      security:
+      - authentik: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DingTalkDirectoryOrgContext'
+          description: ''
+        '400':
+          $ref: '#/components/responses/ValidationErrorResponse'
+        '403':
+          $ref: '#/components/responses/GenericErrorResponse'
   /sources/oauth/source_types/:
     get:
       operationId: sources_oauth_source_types_list
@@ -37829,6 +38053,216 @@ components:
       - '6'
       - '8'
       type: string
+    DingTalkAllowlistDepartmentsRequestRequest:
+      type: object
+      properties:
+        corp_id:
+          type: string
+          minLength: 1
+    DingTalkAllowlistDepartmentsResponse:
+      type: object
+      properties:
+        corp_id:
+          type: string
+        label:
+          type: string
+        departments: {}
+      required:
+      - corp_id
+      - departments
+    DingTalkAllowlistDiscoverStartResponse:
+      type: object
+      properties:
+        state:
+          type: string
+        authorization_url:
+          type: string
+        url:
+          type: string
+      required:
+      - authorization_url
+      - state
+      - url
+    DingTalkAllowlistManagedPolicy:
+      type: object
+      properties:
+        exists:
+          type: boolean
+        pk:
+          type: string
+          nullable: true
+        name:
+          type: string
+          nullable: true
+      required:
+      - exists
+      - name
+      - pk
+    DingTalkAllowlistPolicyBinding:
+      type: object
+      properties:
+        exists:
+          type: boolean
+        pk:
+          type: string
+          nullable: true
+        enabled:
+          type: boolean
+      required:
+      - enabled
+      - exists
+      - pk
+    DingTalkAllowlistSourceLinkGuard:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+      required:
+      - enabled
+    DingTalkAllowlistStatusResponse:
+      type: object
+      properties:
+        config: {}
+        managed_policy:
+          $ref: '#/components/schemas/DingTalkAllowlistManagedPolicy'
+        policy_binding:
+          $ref: '#/components/schemas/DingTalkAllowlistPolicyBinding'
+        source_link_guard:
+          $ref: '#/components/schemas/DingTalkAllowlistSourceLinkGuard'
+        callback_url:
+          type: string
+      required:
+      - callback_url
+      - config
+      - managed_policy
+      - policy_binding
+      - source_link_guard
+    DingTalkDirectoryDepartment:
+      type: object
+      properties:
+        corp_id:
+          type: string
+        dept_id:
+          type: string
+        name:
+          type: string
+        parent_dept_id:
+          type: string
+        is_deleted:
+          type: boolean
+        last_seen_at:
+          type: string
+          format: date-time
+      required:
+      - corp_id
+      - dept_id
+      - last_seen_at
+    DingTalkDirectoryOrgContext:
+      type: object
+      properties:
+        corp_id:
+          type: string
+          nullable: true
+        user_id:
+          type: string
+          nullable: true
+        source_slug:
+          type: string
+        departments: {}
+        manager:
+          nullable: true
+        manager_chain: {}
+        stale:
+          type: boolean
+        last_synced_at:
+          type: string
+          nullable: true
+      required:
+      - corp_id
+      - departments
+      - last_synced_at
+      - manager
+      - manager_chain
+      - source_slug
+      - stale
+      - user_id
+    DingTalkDirectoryStatus:
+      type: object
+      properties:
+        source_slug:
+          type: string
+        sync:
+          type: array
+          items:
+            $ref: '#/components/schemas/DingTalkDirectorySyncStatus'
+      required:
+      - source_slug
+      - sync
+    DingTalkDirectorySyncQueued:
+      type: object
+      properties:
+        queued:
+          type: boolean
+        corp_id:
+          type: string
+      required:
+      - corp_id
+      - queued
+    DingTalkDirectorySyncRequestRequest:
+      type: object
+      properties:
+        corp_id:
+          type: string
+          minLength: 1
+      required:
+      - corp_id
+    DingTalkDirectorySyncStatus:
+      type: object
+      properties:
+        corp_id:
+          type: string
+        status:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        error:
+          type: string
+        counters: {}
+      required:
+      - corp_id
+    DingTalkDirectoryUser:
+      type: object
+      properties:
+        corp_id:
+          type: string
+        user_id:
+          type: string
+        name:
+          type: string
+        title:
+          type: string
+        avatar:
+          type: string
+        dept_id_list: {}
+        manager_user_id:
+          type: string
+        active:
+          type: boolean
+        is_deleted:
+          type: boolean
+        last_seen_at:
+          type: string
+          format: date-time
+      required:
+      - corp_id
+      - last_seen_at
+      - user_id
     Disk:
       type: object
       properties:
@@ -45331,6 +45765,36 @@ components:
       - autocomplete
       - pagination
       - results
+    PaginatedDingTalkDirectoryDepartmentList:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/DingTalkDirectoryDepartment'
+        autocomplete:
+          $ref: '#/components/schemas/Autocomplete'
+      required:
+      - autocomplete
+      - pagination
+      - results
+    PaginatedDingTalkDirectoryUserList:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/DingTalkDirectoryUser'
+        autocomplete:
+          $ref: '#/components/schemas/Autocomplete'
+      required:
+      - autocomplete
+      - pagination
+      - results
     PaginatedDockerServiceConnectionList:
       type: object
       properties:
@@ -52673,6 +53137,7 @@ components:
       - openidconnect
       - entraid
       - azuread
+      - dingtalk
       - discord
       - facebook
       - github

@@ -2,6 +2,7 @@ htmlcov
 *.env.yml
 node_modules
 **/node_modules
+**/.wireit
 dist/**
 build/**
 build_docs/**

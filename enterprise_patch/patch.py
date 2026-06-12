@@ -12,13 +12,13 @@ def apply_enterprise_patch():
     try:
         from authentik.enterprise.license import LicenseKey, LicenseSummary
         from authentik.enterprise.models import LicenseUsageStatus
-        from datetime import UTC, datetime, timedelta
+        from datetime import UTC, datetime
 
         _valid_summary = LicenseSummary(
             internal_users=999999,
             external_users=999999,
             status=LicenseUsageStatus.VALID,
-            latest_valid=datetime.now(UTC) + timedelta(days=3650),
+            latest_valid=datetime(2099, 12, 31, 23, 59, 59, tzinfo=UTC),
             license_flags=[],
         )
 
@@ -28,7 +28,7 @@ def apply_enterprise_patch():
         def _patched_get_total():
             return LicenseKey(
                 aud="enterprise.goauthentik.io/license/patched",
-                exp=int((datetime.now(UTC) + timedelta(days=3650)).timestamp()),
+                exp=int(datetime(2099, 12, 31, 23, 59, 59, tzinfo=UTC).timestamp()),
                 name="Enterprise Patch",
                 internal_users=999999,
                 external_users=999999,

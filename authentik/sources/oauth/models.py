@@ -17,6 +17,7 @@ from authentik.core.models import (
     UserSourceConnection,
 )
 from authentik.core.types import UILoginButton, UserSettingSerializer
+from authentik.lib.models import InternallyManagedMixin, SerializerModel
 
 if TYPE_CHECKING:
     from authentik.sources.oauth.types.registry import SourceType
@@ -314,6 +315,88 @@ class WeChatOAuthSource(CreatableType, OAuthSource):
         abstract = True
         verbose_name = _("WeChat OAuth Source")
         verbose_name_plural = _("WeChat OAuth Sources")
+
+
+class DingTalkOAuthSource(CreatableType, OAuthSource):
+    """Social Login using DingTalk."""
+
+    class Meta:
+        abstract = True
+        verbose_name = _("DingTalk OAuth Source")
+        verbose_name_plural = _("DingTalk OAuth Sources")
+
+
+class DingTalkDirectorySyncStatus(InternallyManagedMixin, SerializerModel):
+    """Per-source DingTalk directory sync status."""
+
+    source = models.ForeignKey("OAuthSource", on_delete=models.CASCADE)
+    corp_id = models.TextField()
+    status = models.TextField(default="unknown")
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    error = models.TextField(blank=True, default="")
+    counters = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        unique_together = (("source", "corp_id"),)
+        indexes = [
+            models.Index(fields=["source", "corp_id"]),
+            models.Index(fields=["status"]),
+            models.Index(fields=["finished_at"]),
+        ]
+
+
+class DingTalkDirectoryDepartment(InternallyManagedMixin, SerializerModel):
+    """Cached DingTalk department."""
+
+    source = models.ForeignKey("OAuthSource", on_delete=models.CASCADE)
+    corp_id = models.TextField()
+    dept_id = models.TextField()
+    name = models.TextField(blank=True, default="")
+    parent_dept_id = models.TextField(blank=True, default="")
+    raw = models.JSONField(default=dict, blank=True)
+    is_deleted = models.BooleanField(default=False)
+    last_seen_at = models.DateTimeField()
+    last_updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = (("source", "corp_id", "dept_id"),)
+        indexes = [
+            models.Index(fields=["source", "corp_id", "dept_id"]),
+            models.Index(fields=["source", "corp_id", "parent_dept_id"]),
+            models.Index(fields=["is_deleted"]),
+        ]
+
+
+class DingTalkDirectoryUser(InternallyManagedMixin, SerializerModel):
+    """Cached DingTalk directory user."""
+
+    source = models.ForeignKey("OAuthSource", on_delete=models.CASCADE)
+    corp_id = models.TextField()
+    user_id = models.TextField()
+    union_id = models.TextField(blank=True, default="")
+    open_id = models.TextField(blank=True, default="")
+    name = models.TextField(blank=True, default="")
+    avatar = models.TextField(blank=True, default="")
+    title = models.TextField(blank=True, default="")
+    email = models.TextField(blank=True, default="")
+    mobile = models.TextField(blank=True, default="")
+    job_number = models.TextField(blank=True, default="")
+    manager_user_id = models.TextField(blank=True, default="")
+    dept_id_list = models.JSONField(default=list, blank=True)
+    active = models.BooleanField(default=True)
+    raw = models.JSONField(default=dict, blank=True)
+    is_deleted = models.BooleanField(default=False)
+    last_seen_at = models.DateTimeField()
+    last_updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = (("source", "corp_id", "user_id"),)
+        indexes = [
+            models.Index(fields=["source", "corp_id", "user_id"]),
+            models.Index(fields=["source", "corp_id", "manager_user_id"]),
+            models.Index(fields=["source", "corp_id", "is_deleted"]),
+        ]
 
 
 class OAuthSourcePropertyMapping(PropertyMapping):

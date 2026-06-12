@@ -27,7 +27,9 @@ from authentik.sources.oauth.types.dingtalk import (
     DINGTALK_ACCESS_TOKEN_URL,
     DINGTALK_APP_ACCESS_TOKEN_URL,
     DINGTALK_DEPARTMENT_LIST_URL,
+    DINGTALK_ORG_AUTH_INFO_URL,
     DINGTALK_PROFILE_URL,
+    _extract_dingtalk_corp_label,
     fetch_dingtalk_departments,
 )
 
@@ -362,6 +364,65 @@ class TestDingTalkAllowlistAPI(APITestCase):
         self.assertTrue(token_mock.called)
         self.assertTrue(profile_mock.called)
 
+    def test_discovery_callback_posts_company_label_from_org_auth_info(self):
+        """Discovery callback enriches the selected corp with a human-readable company label."""
+        data = self.start_discovery()
+
+        with Mocker() as mocker:
+            mocker.post(
+                DINGTALK_ACCESS_TOKEN_URL,
+                json={"accessToken": "FAKE_USER_TOKEN", "corpId": "CORP_FAKE"},
+            )
+            mocker.get(
+                DINGTALK_PROFILE_URL,
+                json={"unionId": "UNION_FAKE", "corpId": "CORP_FAKE", "nick": "Ada"},
+            )
+            mocker.get(DINGTALK_APP_ACCESS_TOKEN_URL, json={"access_token": "FAKE_APP_TOKEN"})
+            org_mock = mocker.get(
+                DINGTALK_ORG_AUTH_INFO_URL,
+                json={
+                    "authOrgInfo": {
+                        "corpId": "CORP_FAKE",
+                        "corpName": "示例公司",
+                    }
+                },
+            )
+
+            response = self.client.get(
+                reverse(
+                    "authentik_sources_oauth:oauth-client-callback",
+                    kwargs={"source_slug": self.source.slug},
+                ),
+                {"code": "AUTH_CODE", "state": data["state"]},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn('"label": "示例公司"', content)
+        self.assertIn('"corp_name": "示例公司"', content)
+        self.assertEqual(
+            parse_qs(urlparse(org_mock.last_request.url).query)["targetCorpId"], ["CORP_FAKE"]
+        )
+        self.assertEqual(
+            org_mock.last_request.headers["x-acs-dingtalk-access-token"], "FAKE_APP_TOKEN"
+        )
+
+    def test_company_label_extractor_accepts_nested_auth_info_arrays(self):
+        """DingTalk org auth responses can nest the contact name in auth info lists."""
+        self.assertEqual(
+            _extract_dingtalk_corp_label(
+                {
+                    "authInfos": [
+                        {
+                            "targetCorpId": "CORP_FAKE",
+                            "contactName": "示例通讯录",
+                        }
+                    ]
+                }
+            ),
+            "示例通讯录",
+        )
+
     def test_non_admin_cannot_use_server_side_discovery_endpoints(self):
         """Server-side DingTalk endpoints require source read permissions."""
         self.client.force_login(create_test_user())
@@ -390,6 +451,15 @@ class TestDingTalkAllowlistAPI(APITestCase):
         """Departments API fetches via server-side credentials and omits secrets/tokens."""
         with Mocker() as mocker:
             mocker.get(DINGTALK_APP_ACCESS_TOKEN_URL, json={"access_token": "FAKE_APP_TOKEN"})
+            org_mock = mocker.get(
+                DINGTALK_ORG_AUTH_INFO_URL,
+                json={
+                    "auth_org_info": {
+                        "corpid": "CORP_FAKE",
+                        "corp_name": "示例公司",
+                    }
+                },
+            )
             mocker.post(
                 DINGTALK_DEPARTMENT_LIST_URL,
                 [
@@ -424,6 +494,7 @@ class TestDingTalkAllowlistAPI(APITestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["corp_id"], "CORP_FAKE")
+        self.assertEqual(data["label"], "示例公司")
         self.assertEqual(
             data["departments"],
             [
@@ -439,6 +510,42 @@ class TestDingTalkAllowlistAPI(APITestCase):
             token_request_qs,
             {"appkey": ["FAKE_CLIENT_ID"], "appsecret": ["FAKE_CLIENT_SECRET"]},
         )
+        self.assertEqual(
+            parse_qs(urlparse(org_mock.last_request.url).query)["targetCorpId"], ["CORP_FAKE"]
+        )
+
+    def test_departments_rejects_unverified_target_corp(self):
+        """Departments API does not show the app-bound company's departments for another corp."""
+        with Mocker() as mocker:
+            mocker.get(DINGTALK_APP_ACCESS_TOKEN_URL, json={"access_token": "FAKE_APP_TOKEN"})
+            mocker.get(DINGTALK_ORG_AUTH_INFO_URL, json={"errcode": 400002, "errmsg": "denied"})
+            department_mock = mocker.post(
+                DINGTALK_DEPARTMENT_LIST_URL,
+                [
+                    {
+                        "json": {
+                            "errcode": 0,
+                            "result": [
+                                {"dept_id": 10, "name": "Engineering", "parent_id": 1},
+                            ],
+                        }
+                    },
+                    {"json": {"errcode": 0, "result": []}},
+                ],
+            )
+
+            response = self.client.post(
+                f"/api/v3/sources/oauth/dingtalk-allowlist/{self.source.slug}/departments/",
+                {"corp_id": "CORP_FAKE"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(department_mock.called)
+        content = response.content.decode()
+        self.assertIn("authorized by this DingTalk application", content)
+        self.assertNotIn("FAKE_CLIENT_SECRET", content)
+        self.assertNotIn("FAKE_APP_TOKEN", content)
 
     def test_departments_error_response_does_not_leak_credentials(self):
         """Departments API hides upstream exception text containing query-string secrets."""
@@ -472,6 +579,10 @@ class TestDingTalkAllowlistAPI(APITestCase):
         """Department traversal fails closed when the configured depth limit is exceeded."""
         with Mocker() as mocker:
             mocker.get(DINGTALK_APP_ACCESS_TOKEN_URL, json={"access_token": "FAKE_APP_TOKEN"})
+            mocker.get(
+                DINGTALK_ORG_AUTH_INFO_URL,
+                json={"authOrgInfo": {"corpId": "CORP_FAKE", "corpName": "Fake Company"}},
+            )
             mocker.post(
                 DINGTALK_DEPARTMENT_LIST_URL,
                 [
@@ -490,6 +601,10 @@ class TestDingTalkAllowlistAPI(APITestCase):
         """Department traversal fails closed when the configured department limit is exceeded."""
         with Mocker() as mocker:
             mocker.get(DINGTALK_APP_ACCESS_TOKEN_URL, json={"access_token": "FAKE_APP_TOKEN"})
+            mocker.get(
+                DINGTALK_ORG_AUTH_INFO_URL,
+                json={"authOrgInfo": {"corpId": "CORP_FAKE", "corpName": "Fake Company"}},
+            )
             mocker.post(
                 DINGTALK_DEPARTMENT_LIST_URL,
                 [

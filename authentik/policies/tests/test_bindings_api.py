@@ -4,7 +4,7 @@ from django.urls import reverse
 from rest_framework.test import APITestCase
 
 from authentik.core.tests.utils import create_test_admin_user
-from authentik.policies.models import PolicyBindingModel
+from authentik.policies.models import PolicyBinding, PolicyBindingModel
 
 
 class TestBindingsAPI(APITestCase):
@@ -24,6 +24,26 @@ class TestBindingsAPI(APITestCase):
             data={"target": self.pbm.pk, "user": self.user.pk, "order": 0},
         )
         self.assertEqual(response.status_code, 201)
+
+    def test_partial_update_keeps_existing_binding_target(self):
+        """Test partial update validates against the existing binding target."""
+        binding = PolicyBinding.objects.create(target=self.pbm, user=self.user, order=0)
+
+        response = self.client.patch(
+            reverse("authentik_api:policybinding-detail", kwargs={"pk": binding.pk}),
+            data={
+                "enabled": True,
+                "order": 10,
+                "timeout": 30,
+                "failure_result": False,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        binding.refresh_from_db()
+        self.assertEqual(binding.target, self.pbm)
+        self.assertEqual(binding.user, self.user)
+        self.assertEqual(binding.order, 10)
 
     def test_invalid_too_much(self):
         """Test invalid binding (too much)"""

@@ -8,7 +8,7 @@ from requests import RequestException
 from structlog.stdlib import get_logger
 
 from authentik.lib.utils.http import get_http_session
-from authentik.sources.oauth.models import OAuthSource
+from authentik.sources.oauth.models import OAuthSource, UserOAuthSourceConnection
 from authentik.tasks.middleware import CurrentTask
 
 LOGGER = get_logger()
@@ -74,3 +74,31 @@ def update_well_known_jwks():
             source.oidc_jwks = config
             LOGGER.info("Updating sources' JWKS", source=source)
             source.save()
+
+
+@actor(description=_("Sync DingTalk directory cache."))
+def dingtalk_directory_sync(source_pk: str, corp_id: str):
+    source = OAuthSource.objects.filter(
+        pk=source_pk, enabled=True, provider_type="dingtalk"
+    ).first()
+    if not source:
+        return None
+    from authentik.sources.oauth.dingtalk.sync import sync_dingtalk_directory
+
+    return sync_dingtalk_directory(source, corp_id)
+
+
+@actor(description=_("Sync all DingTalk directory caches."))
+def dingtalk_directory_sync_all():
+    for source in OAuthSource.objects.filter(enabled=True, provider_type="dingtalk"):
+        corp_ids = (
+            UserOAuthSourceConnection.objects.filter(
+                source=source,
+                user__attributes__has_key="dingtalk",
+            )
+            .values_list("user__attributes__dingtalk__corp_id", flat=True)
+            .distinct()
+        )
+        for corp_id in corp_ids:
+            if corp_id:
+                dingtalk_directory_sync.send(str(source.pk), str(corp_id))

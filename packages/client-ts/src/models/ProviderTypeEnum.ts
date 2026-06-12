@@ -21,6 +21,7 @@ export const ProviderTypeEnum = {
     Openidconnect: "openidconnect",
     Entraid: "entraid",
     Azuread: "azuread",
+    Dingtalk: "dingtalk",
     Discord: "discord",
     Facebook: "facebook",
     Github: "github",

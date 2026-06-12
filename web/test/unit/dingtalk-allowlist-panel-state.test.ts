@@ -1,11 +1,17 @@
 import {
     addDingTalkDepartments,
+    buildDingTalkDepartmentTreeRows,
     dingtalkDepartmentFetchFailureStatus,
     dingtalkStatusLabelProperties,
+    invertLoadedDingTalkDepartmentInput,
+    mergeLoadedDingTalkDepartmentInput,
     removeDingTalkCompany,
     saveDingTalkAllowlistConfiguration,
+    selectLoadedDingTalkDepartmentInput,
     singleDingTalkLoginEntryStatusItem,
     splitDingTalkDepartmentIds,
+    toggleDingTalkDepartmentInput,
+    toggleDingTalkDepartmentTreeInput,
     updateDingTalkCompany,
     upsertDingTalkCompany,
 } from "#admin/sources/oauth/DingTalkAllowlistPanelState";
@@ -113,12 +119,155 @@ describe("DingTalkAllowlistPanelState", () => {
                     },
                 ],
             },
-            departmentInputs: { "corp-a": "" },
+            departmentInputs: { "corp-a": "10 20 30" },
         });
     });
 
     it("splits department IDs only on supported separators and removes duplicates", () => {
         expect(splitDingTalkDepartmentIds("10, 20，30 20\n40")).toEqual(["10", "20", "30", "40"]);
+    });
+
+    it("rejects unsupported department input without mutating the model", () => {
+        const model: DingTalkAllowlistModel = {
+            companies: [
+                {
+                    corpId: "corp-a",
+                    label: "Alpha",
+                    allowAll: false,
+                    deptIds: ["10"],
+                },
+            ],
+        };
+
+        const result = addDingTalkDepartments(model, { "corp-a": "20; drop" }, "corp-a");
+
+        expect(result).toEqual({
+            model,
+            departmentInputs: { "corp-a": "20; drop" },
+            error: "20; is not a valid DingTalk department ID.",
+            invalidDepartmentId: "20;",
+        });
+    });
+
+    it("keeps the department input as the editable source after adding departments", () => {
+        const result = addDingTalkDepartments(
+            {
+                companies: [
+                    {
+                        corpId: "corp-a",
+                        label: "Alpha",
+                        allowAll: false,
+                        deptIds: ["10"],
+                    },
+                ],
+            },
+            { "corp-a": "10 30" },
+            "corp-a",
+        );
+
+        expect(result).toEqual({
+            model: {
+                companies: [
+                    {
+                        corpId: "corp-a",
+                        label: "Alpha",
+                        allowAll: false,
+                        deptIds: ["10", "30"],
+                    },
+                ],
+            },
+            departmentInputs: { "corp-a": "10 30" },
+        });
+    });
+
+    it("lets an empty department input remove previously added department IDs", () => {
+        const result = addDingTalkDepartments(
+            {
+                companies: [
+                    {
+                        corpId: "corp-a",
+                        label: "Alpha",
+                        allowAll: false,
+                        deptIds: ["10", "30"],
+                    },
+                ],
+            },
+            { "corp-a": "" },
+            "corp-a",
+        );
+
+        expect(result.model.companies[0].deptIds).toEqual([]);
+        expect(result.departmentInputs).toEqual({ "corp-a": "" });
+    });
+
+    it("merges loaded department IDs into the input while preserving manual IDs", () => {
+        expect(
+            mergeLoadedDingTalkDepartmentInput("manual-1 10 20", ["10", "20"], ["20", "30"]),
+        ).toEqual("manual-1 20 30");
+    });
+
+    it("toggles loaded department IDs in the editable department input", () => {
+        expect(toggleDingTalkDepartmentInput("manual-1 20", "10", true)).toEqual(
+            "10 20 manual-1",
+        );
+        expect(toggleDingTalkDepartmentInput("manual-1 10 20", "10", false)).toEqual(
+            "20 manual-1",
+        );
+    });
+
+    it("builds hierarchical department rows with partial parent selection", () => {
+        const rows = buildDingTalkDepartmentTreeRows(
+            [
+                { deptId: "30", name: "Child B", parentId: "10" },
+                { deptId: "10", name: "Root", parentId: null },
+                { deptId: "20", name: "Child A", parentId: "10" },
+                { deptId: "40", name: "Grandchild", parentId: "20" },
+            ],
+            new Set(["20"]),
+        );
+
+        expect(
+            rows.map((row) => ({
+                deptId: row.department.deptId,
+                level: row.level,
+                selection: row.selection,
+            })),
+        ).toEqual([
+            { deptId: "10", level: 0, selection: "indeterminate" },
+            { deptId: "20", level: 1, selection: "indeterminate" },
+            { deptId: "40", level: 2, selection: "unchecked" },
+            { deptId: "30", level: 1, selection: "unchecked" },
+        ]);
+    });
+
+    it("toggles a parent department together with all loaded descendants", () => {
+        const departments = [
+            { deptId: "10", name: "Root", parentId: null },
+            { deptId: "20", name: "Child", parentId: "10" },
+            { deptId: "30", name: "Other", parentId: null },
+        ];
+
+        expect(toggleDingTalkDepartmentTreeInput("manual-1 30", departments, "10", true)).toEqual(
+            "10 20 30 manual-1",
+        );
+        expect(
+            toggleDingTalkDepartmentTreeInput("manual-1 10 20 30", departments, "10", false),
+        ).toEqual("30 manual-1");
+    });
+
+    it("selects and inverts only loaded department IDs while preserving manual IDs", () => {
+        const departments = [
+            { deptId: "10", name: "Root", parentId: null },
+            { deptId: "20", name: "Child", parentId: "10" },
+            { deptId: "30", name: "Other", parentId: null },
+        ];
+
+        expect(selectLoadedDingTalkDepartmentInput("manual-1 20", departments)).toEqual(
+            "10 20 30 manual-1",
+        );
+        expect(invertLoadedDingTalkDepartmentInput("manual-1 20 30", departments)).toEqual(
+            "10 manual-1",
+        );
     });
 
     it("saves and applies through policy, source, flows, bindings, and refresh in order", async () => {

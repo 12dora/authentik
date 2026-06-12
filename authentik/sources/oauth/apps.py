@@ -11,6 +11,7 @@ LOGGER = get_logger()
 AUTHENTIK_SOURCES_OAUTH_TYPES = [
     "authentik.sources.oauth.types.apple",
     "authentik.sources.oauth.types.azure_ad",
+    "authentik.sources.oauth.types.dingtalk",
     "authentik.sources.oauth.types.discord",
     "authentik.sources.oauth.types.entra_id",
     "authentik.sources.oauth.types.facebook",
@@ -48,11 +49,15 @@ class AuthentikSourceOAuthConfig(ManagedAppConfig):
 
     @property
     def tenant_schedule_specs(self) -> list[ScheduleSpec]:
-        from authentik.sources.oauth.tasks import update_well_known_jwks
+        from authentik.sources.oauth.tasks import dingtalk_directory_sync_all, update_well_known_jwks
 
         return [
             ScheduleSpec(
                 actor=update_well_known_jwks,
                 crontab=f"{fqdn_rand('update_well_known_jwks')} */3 * * *",
+            ),
+            ScheduleSpec(
+                actor=dingtalk_directory_sync_all,
+                crontab=f"{fqdn_rand('dingtalk_directory_sync_all')} */2 * * *",
             ),
         ]

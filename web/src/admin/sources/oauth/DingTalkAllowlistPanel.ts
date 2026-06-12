@@ -3,6 +3,7 @@ import "#elements/buttons/SpinnerButton/index";
 import "#elements/EmptyState";
 
 import { DEFAULT_CONFIG } from "#common/api/config";
+import { parseAPIResponseError, pluckErrorDetail } from "#common/errors/network";
 import { MessageLevel } from "#common/messages";
 
 import { AKElement } from "#elements/Base";
@@ -14,11 +15,20 @@ import { ExpressionPolicyForm } from "#admin/policies/expression/ExpressionPolic
 import type { StatusItem, StatusState } from "#admin/sources/oauth/DingTalkAllowlistPanelState";
 import {
     addDingTalkDepartments,
+    applyDingTalkDepartmentInputs,
+    buildDingTalkDepartmentTreeRows,
     dingtalkDepartmentFetchFailureStatus,
+    dingtalkDepartmentInputsFromModel,
     dingtalkStatusLabelProperties,
+    invertLoadedDingTalkDepartmentInput,
+    mergeLoadedDingTalkDepartmentInput,
     removeDingTalkCompany,
+    renderDingTalkDepartmentInput,
     saveDingTalkAllowlistConfiguration,
+    selectLoadedDingTalkDepartmentInput,
     singleDingTalkLoginEntryStatusItem,
+    splitDingTalkDepartmentIds,
+    toggleDingTalkDepartmentTreeInput,
     updateDingTalkCompany,
     upsertDingTalkCompany,
 } from "#admin/sources/oauth/DingTalkAllowlistPanelState";
@@ -68,6 +78,7 @@ interface DingTalkDepartment {
 
 interface DingTalkDepartmentResponse {
     corpId: string;
+    label?: string;
     departments: DingTalkDepartment[];
 }
 
@@ -197,6 +208,14 @@ class DingTalkAllowlistDiscoveryApi extends BaseAPI {
         return {
             corpId:
                 this.normalizeOptionalString(record.corp_id ?? record.corpId) || requestedCorpId,
+            label: this.normalizeOptionalString(
+                record.label ??
+                    record.company ??
+                    record.company_name ??
+                    record.companyName ??
+                    record.corp_name ??
+                    record.corpName,
+            ),
             departments: departments
                 .map((department) => this.normalizeDepartment(department))
                 .filter((department): department is DingTalkDepartment => department !== null),
@@ -329,6 +348,10 @@ export class DingTalkAllowlistPanel extends AKElement {
                 min-width: 12rem;
             }
 
+            .ak-dingtalk-department-input {
+                min-width: 18rem;
+            }
+
             .ak-dingtalk-status {
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
@@ -352,6 +375,18 @@ export class DingTalkAllowlistPanel extends AKElement {
                 display: flex;
                 gap: var(--pf-global--spacer--sm);
                 flex-wrap: wrap;
+            }
+
+            .ak-dingtalk-department-actions {
+                display: flex;
+                gap: var(--pf-global--spacer--sm);
+                margin-block: var(--pf-global--spacer--sm);
+            }
+
+            .ak-dingtalk-department-tree-cell {
+                display: flex;
+                align-items: center;
+                gap: var(--pf-global--spacer--sm);
             }
         `,
     ];
@@ -419,7 +454,14 @@ export class DingTalkAllowlistPanel extends AKElement {
         }
         return {
             corpId,
-            label: this.normalizeString(payload.label ?? payload.company ?? payload.company_name),
+            label: this.normalizeString(
+                payload.label ??
+                    payload.company ??
+                    payload.company_name ??
+                    payload.companyName ??
+                    payload.corp_name ??
+                    payload.corpName,
+            ),
             userId: this.normalizeString(payload.userId ?? payload.userid ?? payload.user_id),
         };
     }
@@ -468,6 +510,7 @@ export class DingTalkAllowlistPanel extends AKElement {
         const parsed = parseDingTalkAllowlistPolicy(this.policy.expression);
         if (parsed) {
             this.model = parsed;
+            this.departmentInputs = dingtalkDepartmentInputsFromModel(parsed);
             this.expressionValid = true;
         } else {
             this.expressionValid = false;
@@ -543,6 +586,10 @@ export class DingTalkAllowlistPanel extends AKElement {
         deptIds: string[],
     ): void {
         this.model = upsertDingTalkCompany(this.model, corpId, label, allowAll, deptIds);
+        this.departmentInputs = {
+            ...this.departmentInputs,
+            [corpId]: allowAll ? "" : renderDingTalkDepartmentInput(deptIds),
+        };
     }
 
     private addManualCompany(): void {
@@ -571,22 +618,92 @@ export class DingTalkAllowlistPanel extends AKElement {
 
     private addDepartments(corpId: string): void {
         const result = addDingTalkDepartments(this.model, this.departmentInputs, corpId);
+        if (result.error) {
+            showMessage({
+                level: MessageLevel.error,
+                message: result.invalidDepartmentId
+                    ? msg(
+                          str`${result.invalidDepartmentId} is not a valid DingTalk department ID.`,
+                          {
+                              id: "sources.oauth.dingtalk-allowlist.validation.department-id-invalid",
+                          },
+                      )
+                    : result.error,
+            });
+            return;
+        }
         this.model = result.model;
         this.departmentInputs = result.departmentInputs;
     }
 
-    private toggleDepartment(corpId: string, deptId: string, selected: boolean): void {
+    private currentDepartmentInput(
+        company: DingTalkAllowlistModel["companies"][0],
+        corpId: string,
+    ): string {
+        return (
+            this.departmentInputs[corpId] ?? renderDingTalkDepartmentInput(company.deptIds.map(String))
+        );
+    }
+
+    private applyDepartmentInput(corpId: string, departmentInput: string): void {
         const company = this.model.companies.find((candidate) => candidate.corpId === corpId);
         if (!company || company.allowAll) {
             return;
         }
-        const deptIds = selected
-            ? Array.from(new Set([...company.deptIds.map((value) => String(value)), deptId]))
-            : company.deptIds.map((value) => String(value)).filter((value) => value !== deptId);
-        this.updateCompany(corpId, {
-            deptIds,
-            allowAll: false,
-        });
+        const result = addDingTalkDepartments(
+            this.model,
+            { ...this.departmentInputs, [corpId]: departmentInput },
+            corpId,
+        );
+        if (result.error) {
+            return;
+        }
+        this.model = result.model;
+        this.departmentInputs = result.departmentInputs;
+    }
+
+    private toggleLoadedDepartment(corpId: string, deptId: string, selected: boolean): void {
+        const company = this.model.companies.find((candidate) => candidate.corpId === corpId);
+        if (!company || company.allowAll) {
+            return;
+        }
+        this.applyDepartmentInput(
+            corpId,
+            toggleDingTalkDepartmentTreeInput(
+                this.currentDepartmentInput(company, corpId),
+                this.fetchedDepartments[corpId] || [],
+                deptId,
+                selected,
+            ),
+        );
+    }
+
+    private selectAllLoadedDepartments(corpId: string): void {
+        const company = this.model.companies.find((candidate) => candidate.corpId === corpId);
+        if (!company || company.allowAll) {
+            return;
+        }
+        this.applyDepartmentInput(
+            corpId,
+            selectLoadedDingTalkDepartmentInput(
+                this.currentDepartmentInput(company, corpId),
+                this.fetchedDepartments[corpId] || [],
+            ),
+        );
+    }
+
+    private invertLoadedDepartments(corpId: string): void {
+        const company = this.model.companies.find((candidate) => candidate.corpId === corpId);
+        if (!company || company.allowAll) {
+            return;
+        }
+        this.applyDepartmentInput(
+            corpId,
+            invertLoadedDingTalkDepartmentInput(
+                this.currentDepartmentInput(company, corpId),
+                this.fetchedDepartments[corpId] || [],
+            ),
+        );
     }
 
     private async discoverCompany(): Promise<void> {
@@ -603,10 +720,36 @@ export class DingTalkAllowlistPanel extends AKElement {
         }
         try {
             const response = await this.discoveryApi.departments(this.source.slug, corpId);
+            const previousLoadedDeptIds = (this.fetchedDepartments[corpId] || []).map(
+                (department) => department.deptId,
+            );
+            const loadedDeptIds = response.departments.map((department) => department.deptId);
+            const departmentInput = mergeLoadedDingTalkDepartmentInput(
+                this.departmentInputs[corpId] ||
+                    renderDingTalkDepartmentInput(
+                        this.model.companies
+                            .find((company) => company.corpId === corpId)
+                            ?.deptIds.map(String) || [],
+                    ),
+                previousLoadedDeptIds,
+                loadedDeptIds,
+            );
             this.fetchedDepartments = {
                 ...this.fetchedDepartments,
                 [corpId]: response.departments,
             };
+            this.departmentInputs = {
+                ...this.departmentInputs,
+                [corpId]: departmentInput,
+            };
+            this.updateCompany(corpId, {
+                label:
+                    response.label ||
+                    this.model.companies.find((company) => company.corpId === corpId)?.label ||
+                    corpId,
+                allowAll: false,
+                deptIds: departmentInput ? departmentInput.split(/\s+/u) : [],
+            });
             this.lastDepartmentFetch = {
                 label: this.lastDepartmentFetch.label,
                 state: "good",
@@ -615,17 +758,42 @@ export class DingTalkAllowlistPanel extends AKElement {
                 }),
             };
         } catch (error) {
+            const detail = await this.apiErrorMessage(error);
             this.lastDepartmentFetch = dingtalkDepartmentFetchFailureStatus(
                 this.lastDepartmentFetch,
-                this.errorMessage(error),
+                detail,
             );
-            throw error;
+            showMessage({
+                level: MessageLevel.error,
+                message: detail,
+            });
         }
     }
 
     private async saveAndApply(): Promise<void> {
+        const departmentInputResult = applyDingTalkDepartmentInputs(
+            this.model,
+            this.departmentInputs,
+        );
+        if (departmentInputResult.error) {
+            showMessage({
+                level: MessageLevel.error,
+                message: departmentInputResult.invalidDepartmentId
+                    ? msg(
+                          str`${departmentInputResult.invalidDepartmentId} is not a valid DingTalk department ID.`,
+                          {
+                              id: "sources.oauth.dingtalk-allowlist.validation.department-id-invalid",
+                          },
+                      )
+                    : departmentInputResult.error,
+            });
+            return;
+        }
+        this.model = departmentInputResult.model;
+        this.departmentInputs = departmentInputResult.departmentInputs;
+
         const result = await saveDingTalkAllowlistConfiguration({
-            model: this.model,
+            model: departmentInputResult.model,
             sourceSlug: this.source?.slug,
             createOrUpdatePolicy: (expression) => this.createOrUpdatePolicy(expression),
             retrieveSource: (slug) =>
@@ -759,9 +927,35 @@ export class DingTalkAllowlistPanel extends AKElement {
 
     private errorMessage(error: unknown): string {
         if (error instanceof Error) {
-            return error.message;
+            return this.localizeDingTalkDepartmentError(error.message);
         }
-        return String(error);
+        return this.localizeDingTalkDepartmentError(String(error));
+    }
+
+    private async apiErrorMessage(error: unknown): Promise<string> {
+        const parsedError = await parseAPIResponseError(error);
+        return this.localizeDingTalkDepartmentError(pluckErrorDetail(parsedError));
+    }
+
+    private localizeDingTalkDepartmentError(detail: string): string {
+        if (
+            detail.includes(
+                "DingTalk departments can only be loaded for a company authorized by this DingTalk application",
+            )
+        ) {
+            return msg(
+                "DingTalk departments can only be loaded for a company authorized by this DingTalk application. Edit the company label manually, or bind/authorize this company in the DingTalk developer console before loading departments.",
+                {
+                    id: "sources.oauth.dingtalk-allowlist.departments.unauthorized-corp",
+                },
+            );
+        }
+        if (detail) {
+            return detail;
+        }
+        return msg("An unknown error occurred.", {
+            id: "sources.oauth.dingtalk-allowlist.departments.unknown-error",
+        });
     }
 
     private statusItems(): StatusItem[] {
@@ -937,10 +1131,9 @@ export class DingTalkAllowlistPanel extends AKElement {
                     id: "sources.oauth.dingtalk-allowlist.table.company",
                 })}
             >
-                <div>${company.corpId}</div>
                 <input
                     class="pf-c-form-control"
-                    value=${company.label}
+                    .value=${company.label}
                     aria-label=${msg("Company label", {
                         id: "sources.oauth.dingtalk-allowlist.company.label.aria-label",
                     })}
@@ -950,6 +1143,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                         });
                     }}
                 />
+                <div class="ak-dingtalk-muted">${company.corpId}</div>
             </td>
             <td data-label=${msg("Mode", { id: "sources.oauth.dingtalk-allowlist.table.mode" })}>
                 <label>
@@ -978,12 +1172,12 @@ export class DingTalkAllowlistPanel extends AKElement {
                               id: "sources.oauth.dingtalk-allowlist.company.departments-ignored",
                           })}</span
                       >`
-                    : html`${company.deptIds.join(", ") || "-"}`}
+                    : nothing}
                 <div class="ak-dingtalk-input-row">
                     <input
-                        class="pf-c-form-control"
+                        class="pf-c-form-control ak-dingtalk-department-input"
                         ?disabled=${company.allowAll}
-                        value=${this.departmentInputs[company.corpId] || ""}
+                        .value=${this.departmentInputs[company.corpId] ?? company.deptIds.join(" ")}
                         placeholder=${msg("IDs separated by commas or spaces", {
                             id: "sources.oauth.dingtalk-allowlist.departments.placeholder",
                         })}
@@ -1038,8 +1232,38 @@ export class DingTalkAllowlistPanel extends AKElement {
         if (departments.length < 1) {
             return html``;
         }
-        const selected = new Set(company.deptIds.map((deptId) => String(deptId)));
+        const selected = new Set(
+            splitDingTalkDepartmentIds(
+                this.departmentInputs[company.corpId] ??
+                    renderDingTalkDepartmentInput(company.deptIds.map(String)),
+            ),
+        );
+        const rows = buildDingTalkDepartmentTreeRows(departments, selected);
         return html`<table class="pf-c-table pf-m-compact pf-m-grid-md" role="grid">
+            <caption>
+                <div class="ak-dingtalk-department-actions">
+                    <button
+                        type="button"
+                        class="pf-c-button pf-m-secondary pf-m-small"
+                        ?disabled=${company.allowAll}
+                        @click=${() => this.selectAllLoadedDepartments(company.corpId)}
+                    >
+                        ${msg("Select all", {
+                            id: "sources.oauth.dingtalk-allowlist.departments.select-all",
+                        })}
+                    </button>
+                    <button
+                        type="button"
+                        class="pf-c-button pf-m-secondary pf-m-small"
+                        ?disabled=${company.allowAll}
+                        @click=${() => this.invertLoadedDepartments(company.corpId)}
+                    >
+                        ${msg("Invert selection", {
+                            id: "sources.oauth.dingtalk-allowlist.departments.invert",
+                        })}
+                    </button>
+                </div>
+            </caption>
             <thead>
                 <tr>
                     <th>
@@ -1063,8 +1287,8 @@ export class DingTalkAllowlistPanel extends AKElement {
                 </tr>
             </thead>
             <tbody>
-                ${departments.map(
-                    (department) =>
+                ${rows.map(
+                    (row) =>
                         html`<tr>
                             <td
                                 data-label=${msg("Allowed", {
@@ -1074,11 +1298,12 @@ export class DingTalkAllowlistPanel extends AKElement {
                                 <input
                                     type="checkbox"
                                     ?disabled=${company.allowAll}
-                                    ?checked=${selected.has(department.deptId)}
+                                    ?checked=${row.selection === "checked"}
+                                    .indeterminate=${row.selection === "indeterminate"}
                                     @change=${(event: InputEvent) => {
-                                        this.toggleDepartment(
+                                        this.toggleLoadedDepartment(
                                             company.corpId,
-                                            department.deptId,
+                                            row.department.deptId,
                                             (event.target as HTMLInputElement).checked,
                                         );
                                     }}
@@ -1089,21 +1314,26 @@ export class DingTalkAllowlistPanel extends AKElement {
                                     id: "sources.oauth.dingtalk-allowlist.department.id",
                                 })}
                             >
-                                ${department.deptId}
+                                <span
+                                    class="ak-dingtalk-department-tree-cell"
+                                    style=${`padding-inline-start: ${row.level * 1.5}rem;`}
+                                >
+                                    ${row.department.deptId}
+                                </span>
                             </td>
                             <td
                                 data-label=${msg("Name", {
                                     id: "sources.oauth.dingtalk-allowlist.department.name",
                                 })}
                             >
-                                ${department.name}
+                                ${row.department.name}
                             </td>
                             <td
                                 data-label=${msg("Parent ID", {
                                     id: "sources.oauth.dingtalk-allowlist.department.parent-id",
                                 })}
                             >
-                                ${department.parentId || "-"}
+                                ${row.department.parentId || "-"}
                             </td>
                         </tr>`,
                 )}

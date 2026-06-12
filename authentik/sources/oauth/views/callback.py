@@ -131,6 +131,28 @@ class OAuthSourceFlowManager(SourceFlowManager):
     user_connection_type = UserOAuthSourceConnection
     group_connection_type = GroupOAuthSourceConnection
 
+    def _dingtalk_source_link_allowed(self) -> bool:
+        """Check DingTalk allowlist before linking a source to an authenticated user."""
+        if getattr(self.source, "provider_type", "") != "dingtalk":
+            return True
+        from authentik.sources.oauth.types.dingtalk import (
+            evaluate_dingtalk_allowlist,
+            get_dingtalk_allowlist_binding,
+        )
+
+        _, _, config = get_dingtalk_allowlist_binding(self.source)
+        if config is None:
+            return True
+        userinfo = self.policy_context.get("oauth_userinfo") or {}
+        return evaluate_dingtalk_allowlist(config, userinfo)
+
+    def handle_existing_link(self, connection: UserOAuthSourceConnection) -> HttpResponse:
+        if self.request.user.is_authenticated and not self._dingtalk_source_link_allowed():
+            return self.error_handler(
+                Exception(_("钉钉登录失败：当前企业或部门未被允许，请联系管理员。"))
+            )
+        return super().handle_existing_link(connection)
+
     def update_user_connection(
         self,
         connection: UserOAuthSourceConnection,

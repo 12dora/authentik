@@ -56,10 +56,24 @@ export const OR_LIST_FORMATTERS: Intl.ListFormat = new Intl.ListFormat("default"
     type: "disjunction",
 });
 
-const UI_FIELDS: { [key: string]: string } = {
-    [UserFieldsEnum.Username]: msg("Username"),
-    [UserFieldsEnum.Email]: msg("Email"),
-    [UserFieldsEnum.Upn]: msg("UPN"),
+const identificationFieldLabel = (fields: UserFieldsEnum[]): string => {
+    if (
+        fields.length === 2 &&
+        fields.includes(UserFieldsEnum.Email) &&
+        fields.includes(UserFieldsEnum.Username)
+    ) {
+        return msg("Email or username", {
+            id: "flow.identification.email-or-username",
+        });
+    }
+
+    const labels: Partial<Record<UserFieldsEnum, string>> = {
+        [UserFieldsEnum.Username]: msg("Username"),
+        [UserFieldsEnum.Email]: msg("Email"),
+        [UserFieldsEnum.Upn]: msg("UPN"),
+    };
+
+    return OR_LIST_FORMATTERS.format(fields.map((field) => labels[field] ?? field));
 };
 
 const sortLoginSources = (a: LoginSource, b: LoginSource) =>
@@ -340,7 +354,7 @@ export class IdentificationStage extends BaseStage<
         const { flowDesignation, passwordFields, passwordlessUrl, primaryAction, userFields } =
             challenge;
 
-        const fields = (userFields || []).sort();
+        const fields = [...(userFields || [])].sort() as UserFieldsEnum[];
         if (fields.length === 0) {
             return html`<p>${msg("Select one of the options below to continue.")}</p>`;
         }
@@ -353,7 +367,7 @@ export class IdentificationStage extends BaseStage<
 
         const offerRecovery = flowDesignation === FlowDesignationEnum.Recovery;
         const type = fields.length === 1 && fields[0] === UserFieldsEnum.Email ? "email" : "text";
-        const label = OR_LIST_FORMATTERS.format(fields.map((f) => UI_FIELDS[f]));
+        const label = identificationFieldLabel(fields);
 
         // prettier-ignore
         return html`${offerRecovery ? this.renderRecoveryMessage() : nothing}

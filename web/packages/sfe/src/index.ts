@@ -180,6 +180,27 @@ class LoadingStage extends Stage<FlowInfoChallenge> {
 
 const IS_INVALID = "is-invalid";
 
+const FALLBACK_MESSAGES = {
+    identifier: {
+        default: "Email / Username",
+        zh: "邮箱或用户名",
+    },
+    password: {
+        default: "Password",
+        zh: "密码",
+    },
+};
+
+function fallbackMessage(key: keyof typeof FALLBACK_MESSAGES): string {
+    const language = (
+        window.navigator.languages?.[0] ||
+        window.navigator.language ||
+        ""
+    ).toLowerCase();
+
+    return language.startsWith("zh") ? FALLBACK_MESSAGES[key].zh : FALLBACK_MESSAGES[key].default;
+}
+
 class IdentificationStage extends Stage<IdentificationChallenge> {
     render() {
         this.html(
@@ -202,7 +223,7 @@ class IdentificationStage extends Stage<IdentificationChallenge> {
                         autofocus
                         class="form-control"
                         name="uid_field"
-                        placeholder="Email / Username"
+                        placeholder=${fallbackMessage("identifier")}
                     />
                 </div>
                 ${this.challenge.passwordFields
@@ -213,7 +234,7 @@ class IdentificationStage extends Stage<IdentificationChallenge> {
                                   ? IS_INVALID
                                   : ""}"
                               name="password"
-                              placeholder="Password"
+                              placeholder=${fallbackMessage("password")}
                           />
                           ${this.renderInputError("password")}
                       </div>`
@@ -255,7 +276,7 @@ class PasswordStage extends Stage<PasswordChallenge> {
                         autofocus
                         class="form-control ${this.error("password").length > 0 ? IS_INVALID : ""}"
                         name="password"
-                        placeholder="Password"
+                        placeholder=${fallbackMessage("password")}
                     />
                     ${this.renderInputError("password")}
                 </div>

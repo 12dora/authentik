@@ -5,7 +5,9 @@ from urllib.parse import quote, urlencode
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.views import View
+from drf_spectacular.utils import extend_schema
 from requests.exceptions import RequestException
+from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
@@ -17,6 +19,7 @@ from authentik.sources.oauth.types.dingtalk import (
     DINGTALK_ALLOWLIST_MARKER,
     DINGTALK_ALLOWLIST_SCOPES,
     DINGTALK_AUTHORIZE_URL,
+    DingTalkDepartmentCorpUnavailable,
     create_dingtalk_discovery_state,
     dingtalk_oauth_callback_url,
     evaluate_dingtalk_allowlist,
@@ -35,6 +38,46 @@ __all__ = [
 ]
 
 DINGTALK_ALLOWLIST_EXTERNAL_ERROR = "Could not fetch DingTalk departments."
+
+
+class DingTalkAllowlistManagedPolicySerializer(serializers.Serializer):
+    exists = serializers.BooleanField()
+    pk = serializers.CharField(allow_null=True)
+    name = serializers.CharField(allow_null=True)
+
+
+class DingTalkAllowlistPolicyBindingSerializer(serializers.Serializer):
+    exists = serializers.BooleanField()
+    pk = serializers.CharField(allow_null=True)
+    enabled = serializers.BooleanField()
+
+
+class DingTalkAllowlistSourceLinkGuardSerializer(serializers.Serializer):
+    enabled = serializers.BooleanField()
+
+
+class DingTalkAllowlistStatusResponseSerializer(serializers.Serializer):
+    config = serializers.JSONField()
+    managed_policy = DingTalkAllowlistManagedPolicySerializer()
+    policy_binding = DingTalkAllowlistPolicyBindingSerializer()
+    source_link_guard = DingTalkAllowlistSourceLinkGuardSerializer()
+    callback_url = serializers.CharField()
+
+
+class DingTalkAllowlistDiscoverStartResponseSerializer(serializers.Serializer):
+    state = serializers.CharField()
+    authorization_url = serializers.CharField()
+    url = serializers.CharField()
+
+
+class DingTalkAllowlistDepartmentsRequestSerializer(serializers.Serializer):
+    corp_id = serializers.CharField(required=False)
+
+
+class DingTalkAllowlistDepartmentsResponseSerializer(serializers.Serializer):
+    corp_id = serializers.CharField()
+    label = serializers.CharField(required=False, allow_blank=True)
+    departments = serializers.JSONField()
 
 
 def get_dingtalk_source(source_slug: str) -> OAuthSource:
@@ -94,6 +137,7 @@ class DingTalkAllowlistStatusView(APIView):
 
     permission_classes = [CanViewDingTalkSource]
 
+    @extend_schema(responses={200: DingTalkAllowlistStatusResponseSerializer})
     def get(self, request: Request, source_slug: str) -> Response:
         source = get_dingtalk_view_source(self, source_slug)
         binding, policy, config = get_dingtalk_allowlist_binding(source)
@@ -127,6 +171,10 @@ class DingTalkAllowlistDiscoverStartView(APIView):
 
     permission_classes = [CanViewDingTalkSource]
 
+    @extend_schema(
+        request=None,
+        responses={200: DingTalkAllowlistDiscoverStartResponseSerializer},
+    )
     def post(self, request: Request, source_slug: str) -> Response:
         source = get_dingtalk_view_source(self, source_slug)
         state = create_dingtalk_discovery_state(request, source)
@@ -145,6 +193,10 @@ class DingTalkAllowlistDepartmentsView(APIView):
 
     permission_classes = [CanViewDingTalkSource]
 
+    @extend_schema(
+        request=DingTalkAllowlistDepartmentsRequestSerializer,
+        responses={200: DingTalkAllowlistDepartmentsResponseSerializer},
+    )
     def post(self, request: Request, source_slug: str) -> Response:
         source = get_dingtalk_view_source(self, source_slug)
         corp_id = request.data.get("corp_id") or request.data.get("corpId")
@@ -152,6 +204,8 @@ class DingTalkAllowlistDepartmentsView(APIView):
             raise ValidationError({"corp_id": "This field is required."})
         try:
             return Response(fetch_dingtalk_departments(source, str(corp_id)))
+        except DingTalkDepartmentCorpUnavailable as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
         except (RequestException, ValueError) as exc:
             raise ValidationError({"detail": DINGTALK_ALLOWLIST_EXTERNAL_ERROR}) from exc
 

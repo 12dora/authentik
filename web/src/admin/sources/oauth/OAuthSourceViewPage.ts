@@ -1,5 +1,7 @@
 import "#admin/policies/BoundPoliciesList";
 import "#admin/rbac/ak-rbac-object-permission-page";
+import "#admin/sources/oauth/DingTalkAllowlistPanel";
+import "#admin/sources/oauth/DingTalkDirectoryPanel";
 import "#admin/sources/oauth/OAuthSourceDiagram";
 import "#admin/events/ObjectChangelog";
 import "#elements/CodeMirror";
@@ -39,6 +41,8 @@ export function ProviderToLabel(provider?: ProviderTypeEnum): string {
             return "Apple";
         case ProviderTypeEnum.Azuread:
             return "Azure Active Directory (Deprecated)";
+        case ProviderTypeEnum.Dingtalk:
+            return "DingTalk";
         case ProviderTypeEnum.Discord:
             return "Discord";
         case ProviderTypeEnum.Facebook:
@@ -178,6 +182,42 @@ export class OAuthSourceViewPage extends AKElement {
                         </div>
                     </div>
                 </div>
+                ${this.source.providerType === ProviderTypeEnum.Dingtalk
+                    ? html`<div
+                              role="tabpanel"
+                              tabindex="0"
+                              slot="page-dingtalk-allowlist"
+                              id="page-dingtalk-allowlist"
+                              aria-label="${msg("DingTalk Allowlist", {
+                                  id: "sources.oauth.dingtalk-allowlist.tab",
+                              })}"
+                              class="pf-c-page__main-section pf-m-no-padding-mobile"
+                          >
+                              <div class="pf-l-grid pf-m-gutter">
+                                  <ak-source-oauth-dingtalk-allowlist
+                                      class="pf-l-grid__item pf-m-12-col"
+                                      .source=${this.source}
+                                  ></ak-source-oauth-dingtalk-allowlist>
+                              </div>
+                          </div>
+                          <div
+                              role="tabpanel"
+                              tabindex="0"
+                              slot="page-dingtalk-directory"
+                              id="page-dingtalk-directory"
+                              aria-label="${msg("DingTalk Directory", {
+                                  id: "sources.oauth.dingtalk-directory.tab",
+                              })}"
+                              class="pf-c-page__main-section pf-m-no-padding-mobile"
+                          >
+                              <div class="pf-l-grid pf-m-gutter">
+                                  <ak-source-oauth-dingtalk-directory
+                                      class="pf-l-grid__item pf-m-12-col"
+                                      .source=${this.source}
+                                  ></ak-source-oauth-dingtalk-directory>
+                              </div>
+                          </div>`
+                    : nothing}
                 <div
                     role="tabpanel"
                     tabindex="0"
