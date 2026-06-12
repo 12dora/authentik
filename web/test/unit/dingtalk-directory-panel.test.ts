@@ -184,14 +184,20 @@ describe("DingTalkDirectoryPanel", () => {
             ).renderSummary(),
         );
 
-        expect(template).toContain("ak-dingtalk-directory-summary__value");
-        expect(template).toContain("ak-dingtalk-directory-summary__label");
+        expect(template).toContain("ak-dingtalk-directory-summary-item");
+        expect(template).toContain("ak-dingtalk-directory-summary-value");
+        expect(template).toContain("ak-dingtalk-directory-summary-label");
     });
 
     it("covers DingTalk directory message ids in zh-Hans", () => {
         const zhHans = readFileSync(new URL("../../xliff/zh-Hans.xlf", import.meta.url), "utf8");
         const requiredIds = [
             "sources.oauth.dingtalk-directory.title",
+            "sources.oauth.dingtalk-directory.summary.total",
+            "sources.oauth.dingtalk-directory.summary.success",
+            "sources.oauth.dingtalk-directory.summary.error",
+            "sources.oauth.dingtalk-directory.summary.running",
+            "sources.oauth.dingtalk-directory.summary.unknown",
             "sources.oauth.dingtalk-directory.summary.total.label",
             "sources.oauth.dingtalk-directory.summary.success.label",
             "sources.oauth.dingtalk-directory.summary.error.label",

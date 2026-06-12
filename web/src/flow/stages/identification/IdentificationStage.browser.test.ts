@@ -10,4 +10,9 @@ describe("IdentificationStage labels", () => {
         expect(identificationStageSource).not.toContain("EMAIL_OR_USERNAME_LABEL");
         expect(zhHansMessages).toContain("<target>邮箱或用户名</target>");
     });
+
+    it("localizes the Chinese login prelude and source button labels", () => {
+        expect(zhHansMessages).toContain("<target>登录以继续访问");
+        expect(zhHansMessages).toContain("继续使用");
+    });
 });

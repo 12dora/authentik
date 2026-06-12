@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Restore the DingTalk admin allowlist corpId discovery UI and login page polish: one visible DingTalk entry, a valid icon, and a fully localized Chinese username/email label.
+**Goal:** Restore the DingTalk admin allowlist corpId discovery UI and login page polish: one visible DingTalk entry, an official DingTalk icon, and a fully localized Chinese username/email label.
 
 **Architecture:** This is a narrow UI/static-asset regression fix. The backend is already returning exactly one DingTalk source, so the fix should not change OAuth source discovery or identification-stage source selection unless a later browser verification disproves the current evidence.
 
@@ -32,8 +32,11 @@
 ```
 
 - Database confirms exactly one OAuth source and exactly one source bound to `default-authentication-identification`.
-- `GET /static/authentik/sources/dingtalk.svg` returns `404`.
-- Browser DOM snapshot currently shows one DingTalk button, but the username/email label renders as `Email或Username`.
+- Earlier deployed image: `GET /static/authentik/sources/dingtalk.svg` returned `404`.
+- Current local image: `GET /static/authentik/sources/dingtalk.svg` returns `200`, but the SVG is a hand-drawn/approximate blue-circle mark and does not match DingTalk official branding.
+- Current browser DOM snapshot shows one DingTalk button and the username/email label renders as `邮箱或用户名`; if the user still sees two buttons or English/mixed labels, verify browser cache, host, and static bundle version before changing backend source discovery.
+- Current database check shows one enabled DingTalk OAuth source and one DingTalk source bound to `default-authentication-identification`.
+- The flow renderer does not deduplicate sources; if an operator binds two enabled DingTalk sources to an identification stage, the frontend will render both.
 - The current admin source page bundle registers `ak-source-oauth-dingtalk-directory` but not `ak-source-oauth-dingtalk-allowlist`.
 - Current `web/src/admin/sources/oauth/OAuthSourceViewPage.ts` imports and renders only `DingTalkDirectoryPanel`; it no longer imports or renders `DingTalkAllowlistPanel`.
 - `DingTalkDirectoryPanel.ts` uses `sources.oauth.dingtalk-directory.*` localization IDs, but `web/xliff/zh-Hans.xlf` has no matching DingTalk directory entries, so the directory panel renders English in Chinese UI.
@@ -44,16 +47,16 @@
 ## Root Cause
 
 1. **Missing allowlist UI:** The directory-service patch added `DingTalkDirectoryPanel` to `OAuthSourceViewPage.ts` but did not preserve the existing `DingTalkAllowlistPanel` import/render path. Result: the corpId discovery UI (`Discover company`) is no longer mounted.
-2. **Broken DingTalk icon:** `DingTalkType.name = "dingtalk"` makes `SourceType.icon_url()` resolve to `/static/authentik/sources/dingtalk.svg`, but `web/authentik/sources/dingtalk.svg` does not exist.
+2. **DingTalk icon regression:** `DingTalkType.name = "dingtalk"` makes `SourceType.icon_url()` resolve to `/static/authentik/sources/dingtalk.svg`. The path is correct, but the current asset is an approximate custom drawing rather than the official DingTalk logo/app icon.
 3. **Directory i18n missing:** The new DingTalk directory panel introduced strings with `msg(..., { id })`, but the zh-Hans catalog was not updated with those IDs.
 4. **Directory summary layout unstable:** The summary list uses inline prose per metric and flex wrapping, so the numbers/labels cannot align consistently and can overlap in narrow card widths or translated text.
 5. **Chinese label regression:** `IdentificationStage.ts` builds the label with `Intl.ListFormat` from translated `Email` and `Username`, but the active build/runtime currently renders `Email或Username`. A stable product fix should use a dedicated localized label for the common `email + username` case instead of composing two generic nouns.
-6. **Two-button report:** Current runtime evidence does not show duplicate source rows or duplicate flow sources. If the user still sees two entries after a hard reload, treat it as a frontend rendering/cache issue and verify shadow DOM plus static bundle version. Do not add backend source de-duplication until a duplicate `sources` array is observed.
+6. **Two-button report:** Current runtime evidence does not show duplicate source rows or duplicate flow sources. If the user still sees two entries after a hard reload, treat it as a frontend rendering/cache issue and verify shadow DOM plus static bundle version. Separately, add a real admin-side check because the existing “single visible DingTalk login entry” status item is hard-coded to `good` and would not catch duplicate DingTalk source bindings.
 
 ## File Structure
 
 - Modify: `web/authentik/sources/dingtalk.svg`
-  - Add the missing static icon so the provider default URL resolves.
+  - Replace the approximate custom SVG with an official DingTalk logo/app icon asset, keeping the same filename unless the implementation deliberately overrides `DingTalkType.icon_url()`.
 - Modify: `web/src/admin/sources/oauth/OAuthSourceViewPage.ts`
   - Render both DingTalk allowlist and DingTalk directory panels for DingTalk sources.
 - Modify: `web/src/admin/sources/oauth/DingTalkDirectoryPanel.ts`
@@ -66,6 +69,10 @@
   - Add/adjust Chinese translation for the dedicated label.
 - Modify if needed: `web/packages/sfe/src/index.ts`
   - Replace hard-coded placeholders with localized strings or align the fallback SFE placeholder with the desired Chinese text.
+- Modify: `web/src/admin/sources/oauth/DingTalkAllowlistPanelState.ts`
+  - Replace the hard-coded single-entry `good` status with a real check or remove the misleading status until the backend can report it.
+- Modify if needed: `authentik/stages/identification/stage.py`
+  - Add defensive duplicate diagnostics only if a duplicate `challenge.sources` array is reproduced.
 - Test: `web/test/unit/...`
   - Add focused tests if an existing test harness covers identification stage labels or source icon rendering.
 
@@ -405,21 +412,29 @@ Expected:
 - metric values and labels do not overlap
 - wrapping keeps cards aligned and readable
 
-### Task 4: Restore DingTalk Static Icon
+### Task 4: Replace DingTalk Static Icon With Official Asset
 
 **Files:**
-- Create: `web/authentik/sources/dingtalk.svg`
+- Modify: `web/authentik/sources/dingtalk.svg`
+- Modify if needed: `authentik/sources/oauth/types/dingtalk.py`
+- Test if URL changes: `authentik/sources/oauth/tests/test_type_dingtalk.py`
 
-- [ ] **Step 1: Add the icon asset**
+- [ ] **Step 1: Source the official icon**
 
-Use the official/local DingTalk mark if licensing permits. If a copied asset is not available, create a minimal monochrome SVG that matches existing source-icon dimensions and style.
+Use DingTalk's official design/material page as the primary source:
 
-```xml
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="DingTalk">
-  <path fill="#1677ff" d="M512 64c247.4 0 448 200.6 448 448S759.4 960 512 960 64 759.4 64 512 264.6 64 512 64z"/>
-  <path fill="#fff" d="M703.7 297.8c-84.5-47.9-228.5-88.5-364.8-102.6-22.7-2.3-35.7 25.3-19.1 40.9l70.8 66.5-98.5-21.4c-23.6-5.1-39.5 23.3-23.2 41.1l72.9 79.7-72.5-11.7c-23.1-3.7-36.5 25.2-18.9 40.7 72.5 63.8 174.9 111.8 302.8 142l-75.6 162.8c-6.9 14.9 10.5 28.9 23.5 18.9l229.8-176.4c18.5-14.2 12.6-43.5-9.9-49.6l-73.8-20c45.4-25.5 78.9-60.9 99.8-105.5 18.8-40.2-4.8-82.6-43.3-105.4z"/>
-</svg>
-```
+- Official page: `https://open.dingtalk.com/document/design`
+- The page advertises DingTalk VIS/logo material download and DingTalk App icon download.
+- Do not use third-party icon aggregators unless official assets are unavailable and the fallback is explicitly documented.
+
+Preferred implementation:
+
+- If the official download provides SVG, optimize that SVG and save it as `web/authentik/sources/dingtalk.svg`.
+- If the official download provides PNG only, either:
+  - embed the official PNG inside a same-path SVG wrapper so the existing `/static/authentik/sources/dingtalk.svg` contract remains unchanged, or
+  - add the PNG under `web/authentik/sources/`, override `DingTalkType.icon_url()` to return the PNG path, and update the path assertion test.
+
+Do not keep the current blue-circle hand-drawn approximation.
 
 - [ ] **Step 2: Verify static asset locally**
 
@@ -430,6 +445,15 @@ curl -fsSI http://localhost:19000/static/authentik/sources/dingtalk.svg
 ```
 
 Expected after rebuild/redeploy: `HTTP/1.1 200 OK`.
+
+- [ ] **Step 3: Verify asset provenance and visual match**
+
+Record the official source URL in the commit or PR notes. After deployment, verify:
+
+- the rendered login button uses the official DingTalk icon, not the old blue-circle approximation;
+- the image loads from `/static/authentik/sources/dingtalk.svg` or the intentionally updated static URL;
+- browser devtools/network shows no 404 for the DingTalk icon;
+- a hard refresh does not show the old asset.
 
 ### Task 5: Make Email/Username Label Deterministically Chinese
 

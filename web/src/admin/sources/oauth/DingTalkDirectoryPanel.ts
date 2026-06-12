@@ -262,21 +262,28 @@ export class DingTalkDirectoryPanel extends AKElement {
                 list-style: none;
             }
 
-            .ak-dingtalk-directory-summary__item {
+            .ak-dingtalk-directory-summary-item {
                 min-width: 0;
+                padding: var(--pf-global--spacer--sm);
+                border: 1px solid var(--pf-global--BorderColor--100);
+                border-radius: 4px;
             }
 
-            .ak-dingtalk-directory-summary__value {
+            .ak-dingtalk-directory-summary-value,
+            .ak-dingtalk-directory-summary-label {
                 display: block;
+                overflow-wrap: anywhere;
+            }
+
+            .ak-dingtalk-directory-summary-value {
                 font-size: var(--pf-global--FontSize--xl);
                 font-weight: var(--pf-global--FontWeight--bold);
-                line-height: var(--pf-global--LineHeight--sm);
+                line-height: 1.2;
             }
 
-            .ak-dingtalk-directory-summary__label {
-                display: block;
+            .ak-dingtalk-directory-summary-label {
                 color: var(--pf-global--Color--200);
-                overflow-wrap: anywhere;
+                font-size: var(--pf-global--FontSize--sm);
             }
 
             .ak-dingtalk-directory-muted {
@@ -404,9 +411,9 @@ export class DingTalkDirectoryPanel extends AKElement {
         return html`<ul class="ak-dingtalk-directory-summary">
             ${dingtalkDirectorySummaryMetrics(this.statuses).map(
                 (metric) =>
-                    html`<li class="ak-dingtalk-directory-summary__item">
-                        <span class="ak-dingtalk-directory-summary__value">${metric.value}</span>
-                        <span class="ak-dingtalk-directory-summary__label">${metric.label}</span>
+                    html`<li class="ak-dingtalk-directory-summary-item">
+                        <span class="ak-dingtalk-directory-summary-value">${metric.value}</span>
+                        <span class="ak-dingtalk-directory-summary-label">${metric.label}</span>
                     </li>`,
             )}
         </ul>`;
