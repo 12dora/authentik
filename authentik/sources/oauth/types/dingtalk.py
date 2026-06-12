@@ -207,12 +207,11 @@ def get_dingtalk_allowlist_binding(
     source: OAuthSource, enabled_only: bool = True
 ) -> tuple[PolicyBinding | None, ExpressionPolicy | None, dict[str, Any] | None]:
     targets = [source.pbm_uuid]
-    if source.authentication_flow_id:
-        targets.append(source.authentication_flow.pbm_uuid)
+    flows = [source.authentication_flow, source.enrollment_flow]
+    for flow in [flow for flow in flows if flow]:
+        targets.append(flow.pbm_uuid)
         targets.extend(
-            FlowStageBinding.objects.filter(target=source.authentication_flow).values_list(
-                "pbm_uuid", flat=True
-            )
+            FlowStageBinding.objects.filter(target=flow).values_list("pbm_uuid", flat=True)
         )
     bindings = PolicyBinding.objects.filter(policy__isnull=False, target_id__in=targets).order_by(
         "order", "pk"
@@ -609,7 +608,9 @@ class DingTalkType(SourceType):
         raw_profile = getattr(client, "dingtalk_raw_profile", info)
         user_id = info.get("userid") or info.get("userId")
         corp_id = info.get("corpId") or info.get("corp_id")
-        username = DingTalkOAuth2Callback().get_user_id(info)
+        username = (
+            info.get("name") or info.get("nick") or DingTalkOAuth2Callback().get_user_id(info)
+        )
         dingtalk = {
             "union_id": info.get("unionId"),
             "open_id": info.get("openId"),

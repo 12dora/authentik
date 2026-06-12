@@ -1,4 +1,4 @@
-export const DINGTALK_ALLOWLIST_MARKER = "authentik-jiefa-dingtalk-allowlist:v1";
+export const DINGTALK_ALLOWLIST_MARKER = "authentik-managed-dingtalk-allowlist";
 
 export interface DingTalkAllowlistCompany {
     corpId: string;

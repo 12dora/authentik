@@ -45,7 +45,7 @@ If the allowlist is managed by an admin UI or automation, keep this marker and
 single-line JSON configuration comment at the top of the policy body:
 
 ```python
-# authentik-jiefa-dingtalk-allowlist:v1
+# authentik-managed-dingtalk-allowlist
 # config: {"companies":[{"corp_id":"ding_example_corp_a","label":"Example Company A","allow_all":false,"dept_ids":["dept_example_sales","dept_example_hr"]},{"corp_id":"ding_example_corp_b","label":"Example Company B","allow_all":true,"dept_ids":[]}]}
 ```
 
@@ -62,7 +62,7 @@ values. Prefer the DingTalk allowlist panel/API when available so both sections
 are regenerated together.
 
 ```python
-# authentik-jiefa-dingtalk-allowlist:v1
+# authentik-managed-dingtalk-allowlist
 # config: {"companies":[{"corp_id":"ding_example_corp_a","label":"Example Company A","allow_all":false,"dept_ids":["dept_example_sales","dept_example_hr"]},{"corp_id":"ding_example_corp_b","label":"Example Company B","allow_all":true,"dept_ids":[]}]}
 
 # If this policy is reused in shared default source flows, do not affect other

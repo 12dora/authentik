@@ -8,6 +8,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.urls import reverse
 from django.utils.translation import gettext as _
+from guardian.shortcuts import get_anonymous_user
 from structlog.stdlib import get_logger
 
 from authentik.core.models import (
@@ -38,6 +39,9 @@ from authentik.flows.stage import StageView
 from authentik.flows.views.executor import NEXT_ARG_NAME, SESSION_KEY_GET
 from authentik.lib.views import bad_request_message
 from authentik.policies.denied import AccessDeniedResponse
+from authentik.policies.engine import PolicyEngine
+from authentik.policies.exceptions import PolicyEngineException
+from authentik.policies.types import PolicyResult
 from authentik.policies.utils import delete_none_values
 from authentik.stages.password import BACKEND_INBUILT
 from authentik.stages.password.stage import PLAN_CONTEXT_AUTHENTICATION_BACKEND
@@ -148,8 +152,30 @@ class SourceFlowManager:
         """Optionally make changes to the user connection after it is looked up/created."""
         return connection
 
+    def source_policy_result(self) -> PolicyResult:
+        """Evaluate policies bound directly to the source before deciding the source action."""
+        user = self.request.user if self.request.user.is_authenticated else get_anonymous_user()
+        engine = PolicyEngine(self.source, user, self.request)
+        engine.use_cache = False
+        engine.request.context.update(self.policy_context)
+        engine.request.context.update(
+            {
+                PLAN_CONTEXT_SOURCE: self.source,
+                PLAN_CONTEXT_PROMPT: delete_none_values(self.user_properties),
+                "prompt_data": delete_none_values(self.user_properties),
+            }
+        )
+        return engine.build().result
+
     def get_flow(self, **kwargs) -> HttpResponse:
         """Get the flow response based on user_matching_mode"""
+        try:
+            source_policy_result = self.source_policy_result()
+        except PolicyEngineException as exc:
+            self._logger.warning("failed to evaluate source policy", exc=exc)
+            source_policy_result = PolicyResult(False, str(exc))
+        if not source_policy_result.passing:
+            return self.error_handler(FlowNonApplicableException(source_policy_result))
         try:
             action, connection = self.get_action(**kwargs)
         except IntegrityError as exc:

@@ -52,7 +52,7 @@ Managed policies must keep this marker and JSON comment at the top of the
 Expression Policy body:
 
 ```python
-# authentik-jiefa-dingtalk-allowlist:v1
+# authentik-managed-dingtalk-allowlist
 # config: {"companies":[{"corp_id":"ding_example_corp_a","label":"Example Company A","allow_all":false,"dept_ids":["dept_example_sales","dept_example_hr"]}]}
 ```
 

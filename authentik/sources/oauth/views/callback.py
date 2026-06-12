@@ -132,7 +132,7 @@ class OAuthSourceFlowManager(SourceFlowManager):
     group_connection_type = GroupOAuthSourceConnection
 
     def _dingtalk_source_link_allowed(self) -> bool:
-        """Check DingTalk allowlist before linking a source to an authenticated user."""
+        """Check DingTalk allowlist before accepting a DingTalk source result."""
         if getattr(self.source, "provider_type", "") != "dingtalk":
             return True
         from authentik.sources.oauth.types.dingtalk import (
@@ -146,12 +146,28 @@ class OAuthSourceFlowManager(SourceFlowManager):
         userinfo = self.policy_context.get("oauth_userinfo") or {}
         return evaluate_dingtalk_allowlist(config, userinfo)
 
+    def _dingtalk_allowlist_denied_response(self) -> HttpResponse | None:
+        """Return a deny response when a source-bound DingTalk allowlist rejects this login."""
+        if self._dingtalk_source_link_allowed():
+            return None
+        return self.error_handler(
+            Exception(_("钉钉登录失败：当前企业或部门未被允许，请联系管理员。"))
+        )
+
     def handle_existing_link(self, connection: UserOAuthSourceConnection) -> HttpResponse:
-        if self.request.user.is_authenticated and not self._dingtalk_source_link_allowed():
-            return self.error_handler(
-                Exception(_("钉钉登录失败：当前企业或部门未被允许，请联系管理员。"))
-            )
+        if denied_response := self._dingtalk_allowlist_denied_response():
+            return denied_response
         return super().handle_existing_link(connection)
+
+    def handle_auth(self, connection: UserOAuthSourceConnection) -> HttpResponse:
+        if denied_response := self._dingtalk_allowlist_denied_response():
+            return denied_response
+        return super().handle_auth(connection)
+
+    def handle_enroll(self, connection: UserOAuthSourceConnection) -> HttpResponse:
+        if denied_response := self._dingtalk_allowlist_denied_response():
+            return denied_response
+        return super().handle_enroll(connection)
 
     def update_user_connection(
         self,

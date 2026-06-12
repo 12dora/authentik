@@ -160,6 +160,40 @@ class TestDingTalkAllowlistPolicyHelpers(TestCase):
             },
         )
 
+    def test_parser_accepts_managed_marker(self):
+        """Parser accepts the single managed allowlist policy marker."""
+        body = (
+            "# authentik-managed-dingtalk-allowlist\n"
+            '# config: {"companies":[{"corp_id":"CORP_FAKE","label":"Fake",'
+            '"dept_ids":[20,"10"],"allow_all":false}]}'
+        )
+
+        self.assertEqual(
+            parse_dingtalk_allowlist_policy(body),
+            {
+                "companies": [
+                    {
+                        "allow_all": False,
+                        "corp_id": "CORP_FAKE",
+                        "dept_ids": ["10", "20"],
+                        "label": "Fake",
+                    }
+                ]
+            },
+        )
+
+    def test_parser_accepts_managed_marker_and_empty_config_denies_all(self):
+        """Parser recognizes the managed marker and keeps empty allowlists fail-closed."""
+        body = (
+            "# authentik-managed-dingtalk-allowlist\n"
+            '# config: {"companies":[]}'
+        )
+
+        parsed = parse_dingtalk_allowlist_policy(body)
+
+        self.assertEqual(parsed, {"companies": []})
+        self.assertFalse(evaluate_dingtalk_allowlist(parsed, {"corpId": "CORP_FAKE"}))
+
 
 class TestDingTalkAllowlistAPI(APITestCase):
     """Test DingTalk allowlist discovery API."""

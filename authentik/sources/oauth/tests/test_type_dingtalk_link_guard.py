@@ -152,11 +152,40 @@ class TestDingTalkSourceLinkGuard(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())
 
+    def test_authenticated_link_denies_managed_marker_allowlist_before_save(self):
+        """Source-link guard recognizes the managed marker before linking."""
+        self.bind_allowlist(
+            [{"corp_id": "CORP_FAKE", "allow_all": False, "dept_ids": ["10"], "label": ""}]
+        )
+        state = self.start_login()
+
+        with Mocker() as mocker:
+            self.mock_dingtalk_callback(mocker, depts=[30])
+            response = self.callback(state)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())
+
     def test_authenticated_link_denies_when_allowlist_bound_to_authentication_flow(self):
         """Source-link guard finds the UI-managed policy on the authentication flow."""
         self.bind_allowlist(
             [{"corp_id": "CORP_FAKE", "dept_ids": [10]}],
             target=self.source.authentication_flow,
+        )
+        state = self.start_login()
+
+        with Mocker() as mocker:
+            self.mock_dingtalk_callback(mocker, depts=[30])
+            response = self.callback(state)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())
+
+    def test_authenticated_link_denies_when_allowlist_bound_to_enrollment_flow(self):
+        """Source-link guard finds the UI-managed policy on the enrollment flow."""
+        self.bind_allowlist(
+            [{"corp_id": "CORP_FAKE", "dept_ids": [10]}],
+            target=self.source.enrollment_flow,
         )
         state = self.start_login()
 
@@ -201,6 +230,31 @@ class TestDingTalkSourceLinkGuard(TestCase):
             [{"corp_id": "CORP_FAKE", "dept_ids": [10]}],
             target=self.source.authentication_flow,
         )
+        self.client.logout()
+        state = self.start_login()
+
+        with Mocker() as mocker:
+            self.mock_dingtalk_callback(mocker, depts=[30])
+            response = self.callback(state)
+
+        self.assertEqual(response.status_code, 200)
+        connection = UserOAuthSourceConnection.objects.get(
+            source=self.source, identifier="CORP_FAKE:USER_FAKE"
+        )
+        self.assertEqual(connection.access_token, "OLD_ACCESS_TOKEN")
+        self.assertEqual(connection.refresh_token, "OLD_REFRESH_TOKEN")
+
+    def test_unauthenticated_auth_flow_denies_source_bound_allowlist_before_connection_write(self):
+        """Source-bound DingTalk allowlist denies existing-user login before token update."""
+        existing_user = create_test_user("dingtalk-existing")
+        UserOAuthSourceConnection.objects.create(
+            source=self.source,
+            user=existing_user,
+            identifier="CORP_FAKE:USER_FAKE",
+            access_token="OLD_ACCESS_TOKEN",
+            refresh_token="OLD_REFRESH_TOKEN",
+        )
+        self.bind_allowlist([{"corp_id": "CORP_FAKE", "dept_ids": [10]}])
         self.client.logout()
         state = self.start_login()
 

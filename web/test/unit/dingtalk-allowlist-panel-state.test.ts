@@ -296,7 +296,7 @@ describe("DingTalkAllowlistPanelState", () => {
             sourceSlug: "dingtalk",
             createOrUpdatePolicy: async (expression) => {
                 calls.push("policy");
-                expect(expression).toContain("authentik-jiefa-dingtalk-allowlist:v1");
+                expect(expression).toContain("authentik-managed-dingtalk-allowlist");
                 return policy;
             },
             retrieveSource: async () => {

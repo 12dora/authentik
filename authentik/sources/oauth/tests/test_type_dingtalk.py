@@ -317,7 +317,7 @@ class TestTypeDingTalk(TestCase):
             source=self.source, info=profile, client=None, token={}
         )
 
-        self.assertEqual(context["username"], "CORP_ID:USER_ID")
+        self.assertEqual(context["username"], "Ada Lovelace")
         self.assertEqual(context["email"], "ada@company.example")
         self.assertEqual(context["name"], "Ada Lovelace")
         self.assertEqual(context["attributes"]["dingtalk"]["union_id"], "UNION_ID")
@@ -331,6 +331,15 @@ class TestTypeDingTalk(TestCase):
             "https://example.invalid/detail-avatar.png",
         )
         self.assertEqual(context["attributes"]["dingtalk"]["raw_profile"], profile)
+
+    def test_base_user_properties_username_falls_back_to_nick(self):
+        """Test DingTalk username uses nick when enhanced profile has no name."""
+        context = DingTalkType().get_base_user_properties(
+            source=self.source, info=DINGTALK_ME_PROFILE, client=None, token={}
+        )
+
+        self.assertEqual(context["username"], "Ada")
+        self.assertEqual(context["name"], "Ada")
 
     def test_registry(self):
         """Test DingTalk registry entry"""
@@ -416,7 +425,7 @@ class TestTypeDingTalk(TestCase):
         dingtalk = prompt_data["attributes"]["dingtalk"]
         connection = plan.context[PLAN_CONTEXT_SOURCES_CONNECTION]
 
-        self.assertEqual(prompt_data["username"], "CORP_ID:USER_ID")
+        self.assertEqual(prompt_data["username"], "Ada Lovelace")
         self.assertEqual(prompt_data["email"], "ada@company.example")
         self.assertEqual(prompt_data["name"], "Ada Lovelace")
         self.assertEqual(dingtalk["name"], "Ada Lovelace")
