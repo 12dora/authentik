@@ -98,6 +98,11 @@ class DingTalkDirectorySyncQueuedSerializer(serializers.Serializer):
     corp_id = serializers.CharField()
 
 
+class DingTalkDirectorySyncDeletedSerializer(serializers.Serializer):
+    deleted = serializers.BooleanField()
+    corp_id = serializers.CharField()
+
+
 class DingTalkDirectoryOrgContextSerializer(serializers.Serializer):
     corp_id = serializers.CharField(allow_null=True)
     user_id = serializers.CharField(allow_null=True)
@@ -179,6 +184,21 @@ class DingTalkDirectorySyncView(APIView):
         dingtalk_directory_sync.send(str(source.pk), str(corp_id))
         return Response({"queued": True, "corp_id": str(corp_id)})
 
+    @extend_schema(
+        request=DingTalkDirectorySyncRequestSerializer,
+        responses={200: DingTalkDirectorySyncDeletedSerializer},
+    )
+    def delete(self, request: Request, source_slug: str) -> Response:
+        source = self.dingtalk_source
+        corp_id = request.data.get("corp_id") or request.data.get("corpId")
+        if not corp_id:
+            raise ValidationError({"corp_id": "This field is required."})
+        corp_id = str(corp_id)
+        DingTalkDirectorySyncStatus.objects.filter(source=source, corp_id=corp_id).delete()
+        DingTalkDirectoryDepartment.objects.filter(source=source, corp_id=corp_id).delete()
+        DingTalkDirectoryUser.objects.filter(source=source, corp_id=corp_id).delete()
+        return Response({"deleted": True, "corp_id": corp_id})
+
 
 class DingTalkDirectoryDepartmentsView(generics.ListAPIView):
     permission_classes = [CanViewDingTalkDirectoryDepartment]
@@ -190,7 +210,7 @@ class DingTalkDirectoryDepartmentsView(generics.ListAPIView):
         if getattr(self, "swagger_fake_view", False):
             return DingTalkDirectoryDepartment.objects.none()
         source = self.dingtalk_source
-        return DingTalkDirectoryDepartment.objects.filter(source=source).order_by(
+        return DingTalkDirectoryDepartment.objects.filter(source=source, is_deleted=False).order_by(
             "corp_id", "dept_id"
         )
 
@@ -205,7 +225,9 @@ class DingTalkDirectoryUsersView(generics.ListAPIView):
         if getattr(self, "swagger_fake_view", False):
             return DingTalkDirectoryUser.objects.none()
         source = self.dingtalk_source
-        return DingTalkDirectoryUser.objects.filter(source=source).order_by("corp_id", "user_id")
+        return DingTalkDirectoryUser.objects.filter(source=source, is_deleted=False).order_by(
+            "corp_id", "user_id"
+        )
 
 
 class DingTalkDirectoryUserOrgView(APIView):

@@ -1,4 +1,5 @@
 {% load authentik_stages_email %}
+{% load i18n %}
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtm=l">
   <head>
@@ -96,7 +97,7 @@
                 <table width="100%" style="background-color: #FFFFFF; border-spacing: 0; margin-top: 15px;">
                   <tr height="80">
                     <td align="center" style="padding: 20px 0;">
-                      <img src="{% block logo_url %}cid:logo{% endblock %}" border="0=" alt="authentik logo" class="flexibleImage logo">
+                      <img src="{% block logo_url %}cid:logo{% endblock %}" border="0=" alt="{% translate 'authentik logo' %}" class="flexibleImage logo">
                     </td>
                   </tr>
                   {% block content %}
@@ -120,7 +121,7 @@
             </tr>
             <tr>
               <td align="center">
-                Powered by <a rel="noopener noreferrer" target="_blank" href="https://goauthentik.io?utm_source=authentik&utm_medium=email">authentik</a>.
+                {% translate "Powered by" %} <a rel="noopener noreferrer" target="_blank" href="https://goauthentik.io?utm_source=authentik&utm_medium=email">authentik</a>.
               </td>
             </tr>
           </table>

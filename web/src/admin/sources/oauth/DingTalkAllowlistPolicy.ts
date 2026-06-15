@@ -40,10 +40,10 @@ function sortStrings(values: string[]): string[] {
 function toStoredModel(model: DingTalkAllowlistModel): StoredDingTalkAllowlistModel {
     return {
         companies: model.companies.map((company) => ({
-            corp_id: company.corpId,
-            label: company.label,
             allow_all: company.allowAll,
+            corp_id: company.corpId,
             dept_ids: company.deptIds.map((deptId) => String(deptId)),
+            label: company.label,
         })),
     };
 }
@@ -113,6 +113,25 @@ export function validateDingTalkAllowlistModel(
     };
 }
 
+export function dingTalkAllowlistModelFromStoredConfig(
+    value: unknown,
+): DingTalkAllowlistModel | null {
+    if (!value || typeof value !== "object") {
+        return null;
+    }
+    const record = value as Partial<StoredDingTalkAllowlistModel>;
+    if (!Array.isArray(record.companies)) {
+        return null;
+    }
+    try {
+        return validateDingTalkAllowlistModel(
+            fromStoredModel(record as StoredDingTalkAllowlistModel),
+        );
+    } catch {
+        return null;
+    }
+}
+
 function pythonString(value: string): string {
     return JSON.stringify(value);
 }
@@ -145,9 +164,10 @@ export function renderDingTalkAllowlistPolicy(
 ): string {
     const normalized = validateDingTalkAllowlistModel(model);
     const storedModel = toStoredModel(normalized);
+    const configVersion = JSON.stringify(storedModel);
 
     return `# ${DINGTALK_ALLOWLIST_MARKER}
-# config: ${JSON.stringify(storedModel)}
+# config: ${configVersion}
 
 source = context.get("source")
 if source and getattr(source, "slug", None) != ${pythonString(sourceSlug)}:
@@ -175,6 +195,24 @@ dept_ids = (
     if isinstance(raw_dept_ids, (list, tuple, set))
     else None
 )
+
+if not corp_id:
+    if request.obj.__class__.__name__ != "Application":
+        return True
+    marker = context.get("authentik/sources/oauth/dingtalk/allowlist") or {}
+    if not marker:
+        ak_message("钉钉登录失败：请通过允许的钉钉组织登录后访问此应用。")
+        return False
+    if marker.get("config_version") != ${pythonString(configVersion)}:
+        ak_message("钉钉登录失败：当前白名单状态已更新，请重新通过钉钉登录。")
+        return False
+    corp_id = marker.get("corp_id")
+    raw_dept_ids = marker.get("dept_ids")
+    dept_ids = (
+        {str(dept_id) for dept_id in raw_dept_ids if dept_id is not None}
+        if isinstance(raw_dept_ids, (list, tuple, set))
+        else None
+    )
 
 ${renderPythonAllowlist(normalized)}
 
@@ -204,18 +242,25 @@ return False
 }
 
 export function parseDingTalkAllowlistPolicy(expression: string): DingTalkAllowlistModel | null {
-    const lines = expression.split("\n");
-    if (!lines.some((line) => line.trim() === `# ${DINGTALK_ALLOWLIST_MARKER}`)) {
+    if (!hasDingTalkAllowlistPolicyMarker(expression)) {
         return null;
     }
 
+    const lines = expression.split("\n");
     const configLine = lines.find((line) => line.startsWith("# config: "));
     if (!configLine) {
-        throw new Error("Managed DingTalk allowlist policy is missing its config block.");
+        return null;
     }
 
-    const parsed = JSON.parse(
-        configLine.slice("# config: ".length),
-    ) as StoredDingTalkAllowlistModel;
-    return validateDingTalkAllowlistModel(fromStoredModel(parsed));
+    try {
+        return dingTalkAllowlistModelFromStoredConfig(
+            JSON.parse(configLine.slice("# config: ".length)),
+        );
+    } catch {
+        return null;
+    }
+}
+
+export function hasDingTalkAllowlistPolicyMarker(expression: string): boolean {
+    return expression.split("\n").some((line) => line.trim() === `# ${DINGTALK_ALLOWLIST_MARKER}`);
 }

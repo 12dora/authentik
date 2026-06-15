@@ -136,7 +136,8 @@ class OAuthSourceFlowManager(SourceFlowManager):
         if getattr(self.source, "provider_type", "") != "dingtalk":
             return True
         from authentik.sources.oauth.types.dingtalk import (
-            evaluate_dingtalk_allowlist,
+            DINGTALK_ALLOWLIST_PLAN_CONTEXT,
+            build_dingtalk_allowlist_session_marker,
             get_dingtalk_allowlist_binding,
         )
 
@@ -144,7 +145,17 @@ class OAuthSourceFlowManager(SourceFlowManager):
         if config is None:
             return True
         userinfo = self.policy_context.get("oauth_userinfo") or {}
-        return evaluate_dingtalk_allowlist(config, userinfo)
+        marker = build_dingtalk_allowlist_session_marker(
+            config,
+            userinfo,
+            self.source,
+            self.identifier,
+        )
+        if not marker:
+            self.policy_context.pop(DINGTALK_ALLOWLIST_PLAN_CONTEXT, None)
+            return False
+        self.policy_context[DINGTALK_ALLOWLIST_PLAN_CONTEXT] = marker
+        return True
 
     def _dingtalk_allowlist_denied_response(self) -> HttpResponse | None:
         """Return a deny response when a source-bound DingTalk allowlist rejects this login."""

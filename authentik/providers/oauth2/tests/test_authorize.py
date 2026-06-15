@@ -18,6 +18,8 @@ from authentik.flows.stage import PLAN_CONTEXT_PENDING_USER_IDENTIFIER
 from authentik.flows.views.executor import SESSION_KEY_PLAN
 from authentik.lib.generators import generate_id
 from authentik.lib.utils.time import timedelta_from_string
+from authentik.policies.expression.models import ExpressionPolicy
+from authentik.policies.models import PolicyBinding
 from authentik.providers.oauth2.errors import AuthorizeError, ClientIdError, RedirectUriError
 from authentik.providers.oauth2.models import (
     AccessToken,
@@ -30,6 +32,7 @@ from authentik.providers.oauth2.models import (
 )
 from authentik.providers.oauth2.tests.utils import OAuthTestCase
 from authentik.providers.oauth2.views.authorize import OAuthAuthorizationParams
+from authentik.sources.oauth.types.dingtalk import render_dingtalk_allowlist_policy
 from authentik.stages.dummy.models import DummyStage
 from authentik.stages.password.stage import PLAN_CONTEXT_METHOD
 
@@ -352,6 +355,40 @@ class TestAuthorize(OAuthTestCase):
             timedelta_from_string(provider.access_code_validity).total_seconds(),
             delta=5,
         )
+
+    def test_full_code_denies_dingtalk_protected_app_without_allowlist_marker(self):
+        """Protected OIDC applications deny logged-in sessions without DingTalk allowlist marker."""
+        flow = create_test_flow()
+        provider = OAuth2Provider.objects.create(
+            name=generate_id(),
+            client_id="test",
+            authorization_flow=flow,
+            redirect_uris=[RedirectURI(RedirectURIMatchingMode.STRICT, "foo://localhost")],
+            grant_types=[GrantType.AUTHORIZATION_CODE],
+        )
+        application = Application.objects.create(name="app", slug="app", provider=provider)
+        policy = ExpressionPolicy.objects.create(
+            name="require-dingtalk-allowlist-marker",
+            expression=render_dingtalk_allowlist_policy(
+                {"companies": [{"corp_id": "CORP_ALLOWED", "allow_all": True}]}
+            ),
+        )
+        PolicyBinding.objects.create(target=application, policy=policy, order=0)
+        user = create_test_admin_user()
+        self.client.force_login(user)
+
+        response = self.client.get(
+            reverse("authentik_providers_oauth2:authorize"),
+            data={
+                "response_type": "code",
+                "client_id": "test",
+                "state": generate_id(),
+                "redirect_uri": "foo://localhost",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(AuthorizationCode.objects.filter(user=user).exists())
 
     @apply_blueprint("system/providers-oauth2.yaml")
     def test_full_implicit(self):

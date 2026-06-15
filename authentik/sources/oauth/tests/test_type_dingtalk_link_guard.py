@@ -7,12 +7,15 @@ from requests_mock import Mocker
 from authentik.core.models import User
 from authentik.core.tests.utils import create_test_admin_user, create_test_flow, create_test_user
 from authentik.flows.models import FlowStageBinding
+from authentik.flows.views.executor import SESSION_KEY_PLAN
 from authentik.policies.expression.models import ExpressionPolicy
 from authentik.policies.models import PolicyBinding
 from authentik.sources.oauth.api.dingtalk_allowlist import render_dingtalk_allowlist_policy
 from authentik.sources.oauth.models import OAuthSource, UserOAuthSourceConnection
 from authentik.sources.oauth.types.dingtalk import (
     DINGTALK_ACCESS_TOKEN_URL,
+    DINGTALK_ALLOWLIST_PLAN_CONTEXT,
+    DINGTALK_ALLOWLIST_SESSION_KEY,
     DINGTALK_APP_ACCESS_TOKEN_URL,
     DINGTALK_GET_BY_UNION_ID_URL,
     DINGTALK_PROFILE_URL,
@@ -139,6 +142,7 @@ class TestDingTalkSourceLinkGuard(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())
+        self.assertNotIn(DINGTALK_ALLOWLIST_SESSION_KEY, self.client.session)
 
     def test_authenticated_link_denies_rejected_department_before_save(self):
         """Rejected department does not create a user source connection."""
@@ -151,6 +155,15 @@ class TestDingTalkSourceLinkGuard(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())
+
+    def test_user_settings_lists_dingtalk_source_when_source_allowlist_has_no_oauth_userinfo(self):
+        """User settings should not hide DingTalk when OAuth-only allowlist data is absent."""
+        self.bind_allowlist([{"corp_id": "CORP_FAKE", "allow_all": True}])
+
+        response = self.client.get(reverse("authentik_api:source-user-settings"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(self.source.slug, [item["object_uid"] for item in response.json()])
 
     def test_authenticated_link_denies_managed_marker_allowlist_before_save(self):
         """Source-link guard recognizes the managed marker before linking."""
@@ -243,6 +256,34 @@ class TestDingTalkSourceLinkGuard(TestCase):
         )
         self.assertEqual(connection.access_token, "OLD_ACCESS_TOKEN")
         self.assertEqual(connection.refresh_token, "OLD_REFRESH_TOKEN")
+
+    def test_unauthenticated_auth_flow_sets_allowlist_plan_marker_when_allowed(self):
+        """Allowed DingTalk auth carries allowlist evidence into the login flow plan."""
+        existing_user = create_test_user("dingtalk-existing")
+        UserOAuthSourceConnection.objects.create(
+            source=self.source,
+            user=existing_user,
+            identifier="CORP_FAKE:USER_FAKE",
+            access_token="OLD_ACCESS_TOKEN",
+            refresh_token="OLD_REFRESH_TOKEN",
+        )
+        self.bind_allowlist(
+            [{"corp_id": "CORP_FAKE", "dept_ids": [10]}],
+            target=self.source.authentication_flow,
+        )
+        self.client.logout()
+        state = self.start_login()
+
+        with Mocker() as mocker:
+            self.mock_dingtalk_callback(mocker, depts=[10])
+            response = self.callback(state)
+
+        self.assertEqual(response.status_code, 302)
+        plan = self.client.session[SESSION_KEY_PLAN]
+        marker = plan.context[DINGTALK_ALLOWLIST_PLAN_CONTEXT]
+        self.assertEqual(marker["source_slug"], self.source.slug)
+        self.assertEqual(marker["corp_id"], "CORP_FAKE")
+        self.assertEqual(marker["dept_ids"], ["10"])
 
     def test_unauthenticated_auth_flow_denies_source_bound_allowlist_before_connection_write(self):
         """Source-bound DingTalk allowlist denies existing-user login before token update."""

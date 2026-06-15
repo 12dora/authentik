@@ -5,7 +5,9 @@ import type {
     DingTalkDirectorySyncStatus,
 } from "#admin/sources/oauth/DingTalkDirectoryPanel";
 
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+
+vi.mock("#elements/tasks/ScheduleList", () => ({}));
 
 let dingtalkDirectoryStatusSummary: (
     statuses: DingTalkDirectorySyncStatus[],
@@ -16,6 +18,7 @@ let dingtalkDirectorySummaryMetrics: (statuses: DingTalkDirectorySyncStatus[]) =
     label: string;
 }[];
 let DingTalkDirectoryPanelElement: new () => HTMLElement;
+let directoryPanelSource = "";
 
 function templateText(value: unknown): string {
     if (!value) {
@@ -39,12 +42,17 @@ function templateText(value: unknown): string {
 
 describe("DingTalkDirectoryPanel", () => {
     beforeAll(async () => {
+        directoryPanelSource = readFileSync(
+            new URL("../../src/admin/sources/oauth/DingTalkDirectoryPanel.ts", import.meta.url),
+            "utf8",
+        );
         globalThis.CSSStyleSheet ??= class CSSStyleSheet {
             replaceSync(): void {
                 return undefined;
             }
         } as unknown as typeof CSSStyleSheet;
         globalThis.HTMLElement ??= class HTMLElement {} as typeof HTMLElement;
+        globalThis.HTMLIFrameElement ??= class HTMLIFrameElement {} as typeof HTMLIFrameElement;
         globalThis.customElements ??= {
             define: () => {},
             get: () => undefined,
@@ -189,6 +197,27 @@ describe("DingTalkDirectoryPanel", () => {
         expect(template).toContain("ak-dingtalk-directory-summary-label");
     });
 
+    it("renders a delete action for existing corp sync records", () => {
+        expect(directoryPanelSource).toContain("deleteSyncStatus(");
+        expect(directoryPanelSource).toContain("sources.oauth.dingtalk-directory.delete");
+    });
+
+    it("renders the DingTalk directory sync schedule so its interval can be edited", () => {
+        expect(directoryPanelSource).toContain("<ak-schedule-list");
+        expect(directoryPanelSource).toContain(
+            '.actorName=${"authentik.sources.oauth.tasks.dingtalk_directory_sync_all"}',
+        );
+    });
+
+    it("keeps summary cards from overlapping long localized labels", () => {
+        expect(directoryPanelSource).toContain(
+            "grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr))",
+        );
+        expect(directoryPanelSource).toContain("display: grid;");
+        expect(directoryPanelSource).toContain("row-gap: var(--pf-global--spacer--xs);");
+        expect(directoryPanelSource).toContain("line-height: 1.35;");
+    });
+
     it("covers DingTalk directory message ids in zh-Hans", () => {
         const zhHans = readFileSync(new URL("../../xliff/zh-Hans.xlf", import.meta.url), "utf8");
         const requiredIds = [
@@ -220,10 +249,14 @@ describe("DingTalkDirectoryPanel", () => {
             "sources.oauth.dingtalk-directory.table.finished",
             "sources.oauth.dingtalk-directory.table.counters",
             "sources.oauth.dingtalk-directory.table.error",
+            "sources.oauth.dingtalk-directory.table.actions",
             "sources.oauth.dingtalk-directory.timestamp.empty",
             "sources.oauth.dingtalk-directory.counters.empty",
             "sources.oauth.dingtalk-directory.error.empty",
             "sources.oauth.dingtalk-directory.docs",
+            "sources.oauth.dingtalk-directory.delete",
+            "sources.oauth.dingtalk-directory.delete.success",
+            "sources.oauth.dingtalk-directory.schedules.title",
         ];
 
         for (const id of requiredIds) {

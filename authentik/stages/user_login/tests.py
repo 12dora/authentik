@@ -21,6 +21,10 @@ from authentik.flows.views.executor import NEXT_ARG_NAME, SESSION_KEY_PLAN
 from authentik.lib.generators import generate_id
 from authentik.lib.utils.time import timedelta_from_string
 from authentik.root.middleware import ClientIPMiddleware
+from authentik.sources.oauth.types.dingtalk import (
+    DINGTALK_ALLOWLIST_PLAN_CONTEXT,
+    DINGTALK_ALLOWLIST_SESSION_KEY,
+)
 from authentik.stages.user_login.middleware import (
     SESSION_KEY_BINDING_NET,
     BoundSessionMiddleware,
@@ -70,6 +74,28 @@ class TestUserLoginStage(FlowTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertStageRedirects(response, reverse("authentik_core:root-redirect"))
+
+    def test_dingtalk_allowlist_marker_is_persisted_after_login(self):
+        """DingTalk allowlist evidence is written to the post-login session."""
+        marker = {
+            "source_slug": "dingtalk",
+            "corp_id": "CORP_ALLOWED",
+            "dept_ids": ["10"],
+            "user_pk": self.user.pk,
+        }
+        plan = FlowPlan(flow_pk=self.flow.pk.hex, bindings=[self.binding], markers=[StageMarker()])
+        plan.context[PLAN_CONTEXT_PENDING_USER] = self.user
+        plan.context[DINGTALK_ALLOWLIST_PLAN_CONTEXT] = marker
+        session = self.client.session
+        session[SESSION_KEY_PLAN] = plan
+        session.save()
+
+        response = self.client.get(
+            reverse("authentik_api:flow-executor", kwargs={"flow_slug": self.flow.slug})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.session[DINGTALK_ALLOWLIST_SESSION_KEY], marker)
 
     def test_terminate_other_sessions(self):
         """Test terminate_other_sessions"""

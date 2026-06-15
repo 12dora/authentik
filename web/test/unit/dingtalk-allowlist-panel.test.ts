@@ -44,9 +44,7 @@ describe("DingTalkAllowlistPanel localization and controls", () => {
     it("renders bulk loaded-department selection controls", () => {
         expect(allowlistPanel).toContain("selectAllLoadedDepartments(");
         expect(allowlistPanel).toContain("invertLoadedDepartments(");
-        expect(allowlistPanel).toContain(
-            "sources.oauth.dingtalk-allowlist.departments.select-all",
-        );
+        expect(allowlistPanel).toContain("sources.oauth.dingtalk-allowlist.departments.select-all");
         expect(allowlistPanel).toContain("sources.oauth.dingtalk-allowlist.departments.invert");
     });
 
@@ -54,5 +52,11 @@ describe("DingTalkAllowlistPanel localization and controls", () => {
         expect(allowlistPanel).toContain("payload.companyName");
         expect(allowlistPanel).toContain("payload.corp_name");
         expect(allowlistPanel).toContain("payload.corpName");
+    });
+
+    it("allows a discovered company to be saved without first selecting departments", () => {
+        expect(allowlistPanel).toContain(
+            "this.upsertCompany(result.corpId, result.label || result.corpId, true, []);",
+        );
     });
 });

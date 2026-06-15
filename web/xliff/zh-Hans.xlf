@@ -1358,12 +1358,15 @@
 </trans-unit>
 <trans-unit id="s030ac0829bb50a49">
   <source>Policy <x id="0" equiv-text="${item.policyObj?.name}"/></source>
+  <target>策略 <x id="0" equiv-text="${item.policyObj?.name}"/></target>
 </trans-unit>
 <trans-unit id="s2a64d2dca3da9b0e">
   <source>Group <x id="0" equiv-text="${item.groupObj?.name}"/></source>
+  <target>组 <x id="0" equiv-text="${item.groupObj?.name}"/></target>
 </trans-unit>
 <trans-unit id="se5dc026819a32ff8">
   <source>User <x id="0" equiv-text="${item.userObj?.name || item.userObj?.username}"/></source>
+  <target>用户 <x id="0" equiv-text="${item.userObj?.name || item.userObj?.username}"/></target>
 </trans-unit>
 <trans-unit id="sc387b20e6d629087">
   <source>Configure Policy/User/Group Bindings</source>
@@ -1795,6 +1798,7 @@
 </trans-unit>
 <trans-unit id="s37018999e29f65b3">
   <source>URI to send logout notifications to when users log out. Required for OpenID Connect Logout functionality.</source>
+  <target>用户注销时用于发送注销通知的 URI。OpenID Connect 注销功能需要此项。</target>
 </trans-unit>
 <trans-unit id="s2dcb6d1fd145b834">
   <source>Logout Method</source>
@@ -1802,6 +1806,7 @@
 </trans-unit>
 <trans-unit id="s2e527acc2a73da87">
   <source>The logout method determines how the logout URI is called — back-channel (server-to-server) or front-channel (browser iframe).</source>
+  <target>注销方法决定如何调用注销 URI：反向通道（服务器到服务器）或正向通道（浏览器 iframe）。</target>
 </trans-unit>
 <trans-unit id="s55787f4dfcdce52b">
   <source>Signing Key</source>
@@ -2200,6 +2205,7 @@
 </trans-unit>
 <trans-unit id="s885ea9abccda30d8">
   <source>Front-channel (Native)</source>
+  <target>正向通道（原生）</target>
 </trans-unit>
 <trans-unit id="s34cd8ae3ee828045">
   <source>Back-channel (POST)</source>
@@ -9236,9 +9242,11 @@ Bindings to groups/users are checked against the user of the event.</source>
 </trans-unit>
 <trans-unit id="s8aa73079812f56b2">
   <source>Refresh other flow tabs upon authentication</source>
+  <target>认证后刷新其他流程标签页</target>
 </trans-unit>
 <trans-unit id="s696386b762cd516c">
   <source>When enabled, other flow tabs in a session will refresh upon a successful authentication.</source>
+  <target>启用后，会话中的其他流程标签页将在认证成功后刷新。</target>
 </trans-unit>
 <trans-unit id="s1af2337b6d11d4c6">
   <source>Data export ready</source>
@@ -9290,6 +9298,7 @@ Bindings to groups/users are checked against the user of the event.</source>
 </trans-unit>
 <trans-unit id="sb541f02499d73b4e">
   <source>Outgoing syncs will not be triggered.</source>
+  <target>不会触发传出同步。</target>
 </trans-unit>
 <trans-unit id="s967b3abf2608649a">
   <source>Immediate</source>
@@ -9297,6 +9306,7 @@ Bindings to groups/users are checked against the user of the event.</source>
 </trans-unit>
 <trans-unit id="sba0b0ee7c8b8f04a">
   <source>Outgoing syncs will be triggered immediately for each object that is updated. This can create many background tasks and is therefore not recommended</source>
+  <target>每个对象更新后都会立即触发传出同步。这可能会创建大量后台任务，因此不推荐使用</target>
 </trans-unit>
 <trans-unit id="sd3dfc2a1c3647e77">
   <source>Deferred until end</source>
@@ -9304,9 +9314,11 @@ Bindings to groups/users are checked against the user of the event.</source>
 </trans-unit>
 <trans-unit id="secd492de6e1ae305">
   <source>Outgoing syncs will be triggered at the end of the source synchronization.</source>
+  <target>传出同步将在源同步结束时触发。</target>
 </trans-unit>
 <trans-unit id="s0c476074a4fc4d95">
   <source>Outgoing sync trigger mode</source>
+  <target>传出同步触发模式</target>
 </trans-unit>
 <trans-unit id="s4bb6f209647072f4">
   <source>Successfully connected source</source>
@@ -9582,9 +9594,11 @@ Bindings to groups/users are checked against the user of the event.</source>
 </trans-unit>
 <trans-unit id="user.library.application-count-singular-with-query">
   <source><x id="0" equiv-text="${count}"/> application found for "<x id="1" equiv-text="${query}"/>"</source>
+  <target>为“<x id="1" equiv-text="${query}"/>”找到 <x id="0" equiv-text="${count}"/> 个应用程序</target>
 </trans-unit>
 <trans-unit id="user.library.application-count-plural-with-query">
   <source><x id="0" equiv-text="${count}"/> applications found for "<x id="1" equiv-text="${query}"/>"</source>
+  <target>为“<x id="1" equiv-text="${query}"/>”找到 <x id="0" equiv-text="${count}"/> 个应用程序</target>
 </trans-unit>
 <trans-unit id="user.library.application-count-singular">
   <source><x id="0" equiv-text="${count}"/> application available</source>
@@ -9656,27 +9670,35 @@ Bindings to groups/users are checked against the user of the event.</source>
 </trans-unit>
 <trans-unit id="s6173e24ed3ba956e">
   <source>Successfully updated Fleet connector.</source>
+  <target>已成功更新 Fleet 连接器。</target>
 </trans-unit>
 <trans-unit id="sc9b84fdc2119ed1f">
   <source>Successfully created Fleet connector.</source>
+  <target>已成功创建 Fleet 连接器。</target>
 </trans-unit>
 <trans-unit id="sc8a067f02f4cf520">
   <source>Fleet settings</source>
+  <target>Fleet 设置</target>
 </trans-unit>
 <trans-unit id="sd5434d21a084c48f">
   <source>Fleet Server URL</source>
+  <target>Fleet 服务器 URL</target>
 </trans-unit>
 <trans-unit id="s10320a36724d7e1a">
   <source>Fleet API Token</source>
+  <target>Fleet API 令牌</target>
 </trans-unit>
 <trans-unit id="s4f0d6329461ac269">
   <source>Map users</source>
+  <target>映射用户</target>
 </trans-unit>
 <trans-unit id="s0770384b6d1e7075">
   <source>When enabled, users detected by Fleet will be mapped in authentik, granting them access to the device.</source>
+  <target>启用后，Fleet 检测到的用户将映射到 authentik，并授予他们访问设备的权限。</target>
 </trans-unit>
 <trans-unit id="s140417fe6bad13ab">
   <source>Map teams to device access group</source>
+  <target>将团队映射到设备访问组</target>
 </trans-unit>
 <trans-unit id="sa8383f7f7ff1a62e">
   <source>When enabled, Fleet teams will be mapped to Device access groups. Missing device access groups are automatically created. Devices assigned to a different group are not re-assigned</source>
@@ -12069,9 +12091,21 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>Error</source>
   <target>错误</target>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.table.actions">
+  <source>Actions</source>
+  <target>操作</target>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.error.empty">
   <source>-</source>
   <target>-</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete">
+  <source>Delete</source>
+  <target>删除</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.success">
+  <source>Deleted DingTalk directory sync record for <x id="0" equiv-text="${response.corp_id}"/></source>
+  <target>已删除 <x id="0" equiv-text="${response.corp_id}"/> 的钉钉目录同步记录</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.title">
   <source>DingTalk directory sync</source>
@@ -12080,6 +12114,26 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-directory.docs">
   <source>Open DingTalk source documentation</source>
   <target>打开钉钉源文档</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.schedules.title">
+  <source>Schedules</source>
+  <target>计划任务</target>
+</trans-unit>
+<trans-unit id="s5386dae4609f411c">
+  <source>Allow Show Password</source>
+  <target>允许显示密码</target>
+</trans-unit>
+<trans-unit id="scc2e420c54dc8089">
+  <source>Bind existing stage</source>
+  <target>绑定现有阶段</target>
+</trans-unit>
+<trans-unit id="s01167737884b54a2">
+  <source>unread</source>
+  <target>未读</target>
+</trans-unit>
+<trans-unit id="s49e763aed00877a8">
+  <source>Main</source>
+  <target>主区域</target>
 </trans-unit>
 </body>
 </file>

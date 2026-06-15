@@ -47,7 +47,7 @@ class AuthenticatorSMSChallengeResponse(ChallengeResponse):
         """Check"""
         if "code" not in attrs:
             if "phone_number" not in attrs:
-                raise ValidationError("phone_number required")
+                raise ValidationError(_("phone_number required"))
             self.device.phone_number = attrs["phone_number"]
             self.stage.validate_and_send(attrs["phone_number"])
             return super().validate(attrs)
@@ -104,7 +104,7 @@ class AuthenticatorSMSStageView(ChallengeStageView):
         stage: AuthenticatorSMSStage = self.executor.current_stage
 
         if PLAN_CONTEXT_SMS_DEVICE not in self.executor.plan.context:
-            device = SMSDevice(user=user, confirmed=False, stage=stage, name="SMS Device")
+            device = SMSDevice(user=user, confirmed=False, stage=stage, name=_("SMS Device"))
             device.generate_token(commit=False)
             self.executor.plan.context[PLAN_CONTEXT_SMS_DEVICE] = device
             if phone_number := self._has_phone_number():

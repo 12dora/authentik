@@ -1,6 +1,7 @@
 import "#components/ak-status-label";
 import "#elements/EmptyState";
 import "#elements/buttons/SpinnerButton/index";
+import "#elements/tasks/ScheduleList";
 
 import { DEFAULT_CONFIG } from "#common/api/config";
 import { MessageLevel } from "#common/messages";
@@ -39,6 +40,11 @@ interface DingTalkDirectoryStatusResponse {
 
 interface DingTalkDirectorySyncResponse {
     queued: boolean;
+    corp_id: string;
+}
+
+interface DingTalkDirectoryDeleteResponse {
+    deleted: boolean;
     corp_id: string;
 }
 
@@ -158,6 +164,20 @@ class DingTalkDirectoryApi extends BaseAPI {
         return this.normalizeSyncResponse(await response.json(), corpId);
     }
 
+    async deleteSyncStatus(
+        sourceSlug: string,
+        corpId: string,
+    ): Promise<DingTalkDirectoryDeleteResponse> {
+        const response = await this.request({
+            path: `/sources/oauth/dingtalk-directory/${encodeURIComponent(sourceSlug)}/sync/`,
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            query: {},
+            body: { corp_id: corpId },
+        });
+        return this.normalizeDeleteResponse(await response.json(), corpId);
+    }
+
     private normalizeStatus(value: unknown, sourceSlug: string): DingTalkDirectoryStatusResponse {
         if (!value || typeof value !== "object") {
             return { source_slug: sourceSlug, sync: [] };
@@ -202,6 +222,20 @@ class DingTalkDirectoryApi extends BaseAPI {
         const record = value as Record<string, unknown>;
         return {
             queued: record.queued === true,
+            corp_id: this.normalizeString(record.corp_id ?? record.corpId) || corpId,
+        };
+    }
+
+    private normalizeDeleteResponse(
+        value: unknown,
+        corpId: string,
+    ): DingTalkDirectoryDeleteResponse {
+        if (!value || typeof value !== "object") {
+            return { deleted: false, corp_id: corpId };
+        }
+        const record = value as Record<string, unknown>;
+        return {
+            deleted: record.deleted === true,
             corp_id: this.normalizeString(record.corp_id ?? record.corpId) || corpId,
         };
     }
@@ -255,7 +289,7 @@ export class DingTalkDirectoryPanel extends AKElement {
 
             .ak-dingtalk-directory-summary {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+                grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
                 gap: var(--pf-global--spacer--sm);
                 margin: 0;
                 padding: 0;
@@ -263,10 +297,14 @@ export class DingTalkDirectoryPanel extends AKElement {
             }
 
             .ak-dingtalk-directory-summary-item {
+                display: grid;
+                row-gap: var(--pf-global--spacer--xs);
+                align-content: start;
                 min-width: 0;
                 padding: var(--pf-global--spacer--sm);
                 border: 1px solid var(--pf-global--BorderColor--100);
                 border-radius: 4px;
+                line-height: 1.35;
             }
 
             .ak-dingtalk-directory-summary-value,
@@ -339,6 +377,22 @@ export class DingTalkDirectoryPanel extends AKElement {
             });
         }
         this.manualCorpId = "";
+        await this.refreshStatus();
+    }
+
+    private async deleteSyncStatus(corpId: string): Promise<void> {
+        if (!this.source?.slug) {
+            return;
+        }
+        const response = await this.api.deleteSyncStatus(this.source.slug, corpId);
+        if (response.deleted) {
+            showMessage({
+                level: MessageLevel.success,
+                message: msg(str`Deleted DingTalk directory sync record for ${response.corp_id}`, {
+                    id: "sources.oauth.dingtalk-directory.delete.success",
+                }),
+            });
+        }
         await this.refreshStatus();
     }
 
@@ -487,6 +541,11 @@ export class DingTalkDirectoryPanel extends AKElement {
                         })}
                     </th>
                     <th>${msg("Error", { id: "sources.oauth.dingtalk-directory.table.error" })}</th>
+                    <th>
+                        ${msg("Actions", {
+                            id: "sources.oauth.dingtalk-directory.table.actions",
+                        })}
+                    </th>
                 </tr>
             </thead>
             <tbody>
@@ -543,6 +602,20 @@ export class DingTalkDirectoryPanel extends AKElement {
                                           })}</span
                                       >`}
                             </td>
+                            <td
+                                data-label=${msg("Actions", {
+                                    id: "sources.oauth.dingtalk-directory.table.actions",
+                                })}
+                            >
+                                <ak-spinner-button
+                                    class="pf-m-danger pf-m-secondary"
+                                    .callAction=${() => this.deleteSyncStatus(status.corp_id)}
+                                >
+                                    ${msg("Delete", {
+                                        id: "sources.oauth.dingtalk-directory.delete",
+                                    })}
+                                </ak-spinner-button>
+                            </td>
                         </tr>`,
                 )}
             </tbody>
@@ -572,6 +645,16 @@ export class DingTalkDirectoryPanel extends AKElement {
             </div>
             <div class="pf-c-card__body pf-c-form">${this.renderActions()}</div>
             <div class="pf-c-card__body">${this.renderTable()}</div>
+            <div class="pf-c-card__title">
+                ${msg("Schedules", {
+                    id: "sources.oauth.dingtalk-directory.schedules.title",
+                })}
+            </div>
+            <div class="pf-c-card__body">
+                <ak-schedule-list
+                    .actorName=${"authentik.sources.oauth.tasks.dingtalk_directory_sync_all"}
+                ></ak-schedule-list>
+            </div>
         </div>`;
     }
 }

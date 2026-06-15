@@ -5,6 +5,7 @@ from urllib.parse import quote, urlparse
 
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404
+from django.utils.translation import gettext as _
 from jwt import PyJWTError
 from jwt import decode as jwt_decode
 
@@ -121,7 +122,9 @@ class EndSessionView(PolicyAccessView):
         # (being called from an iframe during single logout)
         if SESSION_KEY_PLAN in request.session:
             return HttpResponse(
-                "<html><body>Logout successful</body></html>", content_type="text/html", status=200
+                f"<html><body>{_('Logout successful')}</body></html>",
+                content_type="text/html",
+                status=200,
             )
 
         return super().dispatch(request, *args, **kwargs)

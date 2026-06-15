@@ -1,5 +1,6 @@
 """DingTalk OAuth Views"""
 
+from hashlib import sha256
 from json import dumps, loads
 from secrets import token_urlsafe
 from typing import Any
@@ -8,6 +9,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
 from django.core import signing
 from django.http import HttpRequest, HttpResponse
 from django.urls import reverse
+from django.utils.timezone import now
 from requests import Session
 from requests.exceptions import JSONDecodeError, RequestException
 
@@ -32,6 +34,8 @@ DINGTALK_GET_BY_UNION_ID_URL = "https://oapi.dingtalk.com/topapi/user/getbyunion
 DINGTALK_DEPARTMENT_LIST_URL = "https://oapi.dingtalk.com/topapi/v2/department/listsub"
 DINGTALK_USER_DETAIL_URL = "https://oapi.dingtalk.com/topapi/v2/user/get"
 DINGTALK_ALLOWLIST_MARKER = "# authentik-managed-dingtalk-allowlist"
+DINGTALK_ALLOWLIST_SESSION_KEY = "authentik/sources/oauth/dingtalk/allowlist"
+DINGTALK_ALLOWLIST_PLAN_CONTEXT = "authentik/sources/oauth/dingtalk/allowlist/pending"
 DINGTALK_ALLOWLIST_SCOPES = ["openid", "corpid", "Contact.User.Read"]
 DINGTALK_ALLOWLIST_STATE_SALT = "authentik.sources.oauth.dingtalk.allowlist"
 DINGTALK_MAX_DEPARTMENT_DEPTH = 50
@@ -139,6 +143,21 @@ def normalize_dingtalk_allowlist_config(config: dict[str, Any]) -> dict[str, Any
     return {"companies": companies}
 
 
+def dingtalk_allowlist_config_hash(config: dict[str, Any]) -> str:
+    """Return a stable hash for a normalized DingTalk allowlist config."""
+    return sha256(dingtalk_allowlist_config_version(config).encode("utf-8")).hexdigest()
+
+
+def dingtalk_allowlist_config_version(config: dict[str, Any]) -> str:
+    """Return a stable serialized version for a normalized DingTalk allowlist config."""
+    return dumps(
+        normalize_dingtalk_allowlist_config(config),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
 def parse_dingtalk_allowlist_policy(expression: str) -> dict[str, Any] | None:
     if DINGTALK_ALLOWLIST_MARKER not in expression:
         return None
@@ -168,10 +187,67 @@ def evaluate_dingtalk_allowlist(config: dict[str, Any], userinfo: dict[str, Any]
     return False
 
 
+def _matching_dingtalk_allowlist_company(
+    config: dict[str, Any], userinfo: dict[str, Any]
+) -> dict[str, Any] | None:
+    corp_id = userinfo.get("corp_id") or userinfo.get("corpId")
+    dept_ids = _normalize_id_list(userinfo.get("dept_id_list") or userinfo.get("deptIdList"))
+    if not corp_id:
+        return None
+    for company in normalize_dingtalk_allowlist_config(config).get("companies", []):
+        if company["corp_id"] != str(corp_id):
+            continue
+        if company["allow_all"] or (dept_ids and set(dept_ids).intersection(company["dept_ids"])):
+            return company
+        return None
+    return None
+
+
+def build_dingtalk_allowlist_session_marker(
+    config: dict[str, Any],
+    userinfo: dict[str, Any],
+    source: OAuthSource,
+    identifier: str,
+) -> dict[str, Any] | None:
+    """Build current-login DingTalk allowlist evidence for downstream application policies."""
+    matched = _matching_dingtalk_allowlist_company(config, userinfo)
+    if not matched:
+        return None
+    corp_id = userinfo.get("corp_id") or userinfo.get("corpId")
+    dept_ids = _normalize_id_list(userinfo.get("dept_id_list") or userinfo.get("deptIdList"))
+    return {
+        "source_slug": source.slug,
+        "source_pk": str(source.pk),
+        "source_identifier": str(identifier),
+        "corp_id": str(corp_id),
+        "dept_ids": dept_ids,
+        "dingtalk_user_id": userinfo.get("userid") or userinfo.get("userId"),
+        "dingtalk_union_id": userinfo.get("unionId"),
+        "config_hash": dingtalk_allowlist_config_hash(config),
+        "config_version": dingtalk_allowlist_config_version(config),
+        "checked_at": now().isoformat(),
+    }
+
+
+def inject_dingtalk_allowlist_policy_context(policy_request) -> None:
+    """Expose current-session DingTalk allowlist evidence to application policies."""
+    http_request = getattr(policy_request, "http_request", None)
+    if not http_request or not hasattr(http_request, "session"):
+        return
+    marker = http_request.session.get(DINGTALK_ALLOWLIST_SESSION_KEY)
+    if not isinstance(marker, dict):
+        return
+    marker_user_pk = marker.get("user_pk")
+    if marker_user_pk is not None and str(marker_user_pk) != str(policy_request.user.pk):
+        return
+    policy_request.context[DINGTALK_ALLOWLIST_SESSION_KEY] = marker
+
+
 def render_dingtalk_allowlist_policy(config: dict[str, Any]) -> str:
     normalized = normalize_dingtalk_allowlist_config(config)
     config_json = dumps(normalized, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     config_python = repr(normalized)
+    config_hash = dingtalk_allowlist_config_hash(normalized)
     return f'''{DINGTALK_ALLOWLIST_MARKER}
 # config: {config_json}
 expected_source_slug = None
@@ -183,8 +259,28 @@ if not isinstance(dept_values, (list, tuple, set)):
 else:
     dept_ids = sorted({{str(item) for item in dept_values if item is not None}})
 if not corp_id:
-    ak_message("钉钉登录失败：当前企业未被允许，请联系管理员。")
-    return False
+    if request.obj.__class__.__name__ != "Application":
+        return True
+    marker = request.context.get("{DINGTALK_ALLOWLIST_SESSION_KEY}") or {{}}
+    if not marker:
+        ak_message("钉钉登录失败：请通过允许的钉钉组织登录后访问此应用。")
+        return False
+    marker_current = (
+        marker.get("config_hash") == "{config_hash}"
+        or marker.get("config_version") == {config_json!r}
+    )
+    if not marker_current:
+        ak_message("钉钉登录失败：当前白名单状态已更新，请重新通过钉钉登录。")
+        return False
+    corp_id = marker.get("corp_id")
+    dept_ids = marker.get("dept_ids") or []
+    if not isinstance(dept_ids, (list, tuple, set)):
+        dept_ids = []
+    else:
+        dept_ids = sorted({{str(item) for item in dept_ids if item is not None}})
+    if not corp_id:
+        ak_message("钉钉登录失败：当前企业未被允许，请联系管理员。")
+        return False
 config = {config_python}
 matched = None
 for company in config.get("companies", []):

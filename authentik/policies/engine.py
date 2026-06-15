@@ -11,7 +11,7 @@ from sentry_sdk import start_span
 from sentry_sdk.tracing import Span
 from structlog.stdlib import BoundLogger, get_logger
 
-from authentik.core.models import User
+from authentik.core.models import Application, User
 from authentik.lib.utils.reflection import class_to_path
 from authentik.policies.apps import HIST_POLICIES_ENGINE_TOTAL_TIME, HIST_POLICIES_EXECUTION_TIME
 from authentik.policies.exceptions import PolicyEngineException
@@ -63,6 +63,12 @@ class PolicyEngine:
         self.request.obj = pbm
         if request:
             self.request.set_http_request(request)
+        if isinstance(pbm, Application):
+            from authentik.sources.oauth.types.dingtalk import (
+                inject_dingtalk_allowlist_policy_context,
+            )
+
+            inject_dingtalk_allowlist_policy_context(self.request)
         self.__cached_policies: list[PolicyResult] = []
         self.__processes: list[PolicyProcessInfo] = []
         self.use_cache = True

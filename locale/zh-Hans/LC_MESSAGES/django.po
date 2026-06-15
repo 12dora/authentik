@@ -5001,3 +5001,55 @@ msgstr "定时任务"
 #: packages/django-dramatiq-postgres/django_dramatiq_postgres/models.py
 msgid "Schedules"
 msgstr "定时任务"
+
+#: authentik/core/templates/login/base_full.html
+msgid "Authentication form"
+msgstr "身份验证表单"
+
+#: authentik/core/templates/login/base_full.html
+msgid "authentik Logo"
+msgstr "authentik 标志"
+
+#: authentik/stages/email/templates/email/base.html
+msgid "authentik logo"
+msgstr "authentik 标志"
+
+#: authentik/stages/email/templates/email/base.html
+msgid "Powered by"
+msgstr "由"
+
+#: authentik/providers/oauth2/views/end_session.py
+msgid "Logout successful"
+msgstr "注销成功"
+
+#: authentik/enterprise/endpoints/connectors/agent/views/auth_interactive.py
+msgid "Invalid device token"
+msgstr "设备令牌无效"
+
+#: authentik/enterprise/endpoints/connectors/agent/views/auth_interactive.py
+msgid "No authorization flow configured"
+msgstr "未配置授权流程"
+
+#: authentik/enterprise/endpoints/connectors/agent/views/auth_interactive.py
+msgid "Failed to generate token"
+msgstr "生成令牌失败"
+
+#: authentik/enterprise/providers/ws_federation/views.py
+msgid "Invalid WS-Federation action"
+msgstr "WS-Federation 操作无效"
+
+#: authentik/enterprise/providers/ws_federation/views.py
+msgid "Invalid WS-Federation request"
+msgstr "WS-Federation 请求无效"
+
+#: authentik/enterprise/providers/ws_federation/views.py
+msgid "Unsupported WS-Federation action"
+msgstr "不支持的 WS-Federation 操作"
+
+#: authentik/stages/authenticator_email/stage.py
+msgid "email required"
+msgstr "需要电子邮箱"
+
+#: authentik/stages/authenticator_sms/stage.py
+msgid "phone_number required"
+msgstr "需要电话号码"

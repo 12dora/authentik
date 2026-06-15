@@ -127,7 +127,7 @@ export class NavigationButtons extends WithNotifications(WithSession(AKElement))
                             aria-live="polite"
                         >
                             ${notificationCount}
-                            <span class="sr-only">unread</span>
+                            <span class="sr-only">${msg("unread")}</span>
                         </span>
                     </span>
                 </button>

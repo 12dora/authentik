@@ -34,6 +34,8 @@ import {
 } from "#admin/sources/oauth/DingTalkAllowlistPanelState";
 import {
     DingTalkAllowlistModel,
+    dingTalkAllowlistModelFromStoredConfig,
+    hasDingTalkAllowlistPolicyMarker,
     parseDingTalkAllowlistPolicy,
 } from "#admin/sources/oauth/DingTalkAllowlistPolicy";
 
@@ -83,6 +85,7 @@ interface DingTalkDepartmentResponse {
 }
 
 interface DingTalkStatusResponse {
+    config?: unknown;
     sourceLinkGuard?: StatusState | boolean;
     sourceLinkGuardDetail?: string;
     expressionValid?: boolean | null;
@@ -139,6 +142,7 @@ class DingTalkAllowlistDiscoveryApi extends BaseAPI {
         const expressionValid = record.expression_valid ?? record.expressionValid;
 
         return {
+            config: record.config,
             sourceLinkGuard: this.normalizeStatusValue(guard),
             sourceLinkGuardDetail: this.normalizeOptionalString(
                 record.source_link_guard_detail ?? record.sourceLinkGuardDetail,
@@ -420,7 +424,7 @@ export class DingTalkAllowlistPanel extends AKElement {
             return;
         }
         this.lastDiscovery = result;
-        this.upsertCompany(result.corpId, result.label || result.corpId, false, []);
+        this.upsertCompany(result.corpId, result.label || result.corpId, true, []);
         showMessage({
             level: MessageLevel.success,
             message: msg(str`Discovered DingTalk company ${result.corpId}`, {
@@ -531,6 +535,19 @@ export class DingTalkAllowlistPanel extends AKElement {
     }
 
     private applyBackendStatus(status: DingTalkStatusResponse): void {
+        const config = status.config as { companies?: unknown } | undefined;
+        if (config && Array.isArray(config.companies) && config.companies.length > 0) {
+            try {
+                const model = dingTalkAllowlistModelFromStoredConfig(config);
+                if (model) {
+                    this.model = model;
+                    this.departmentInputs = dingtalkDepartmentInputsFromModel(model);
+                }
+            } catch (error) {
+                this.partialFailures = [...this.partialFailures, this.errorMessage(error)];
+            }
+        }
+
         if (status.expressionValid !== undefined) {
             this.expressionValid = status.expressionValid;
         }
@@ -641,7 +658,8 @@ export class DingTalkAllowlistPanel extends AKElement {
         corpId: string,
     ): string {
         return (
-            this.departmentInputs[corpId] ?? renderDingTalkDepartmentInput(company.deptIds.map(String))
+            this.departmentInputs[corpId] ??
+            renderDingTalkDepartmentInput(company.deptIds.map(String))
         );
     }
 
@@ -864,7 +882,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                 },
             });
         }
-        if (!parseDingTalkAllowlistPolicy(policy.expression)) {
+        if (!hasDingTalkAllowlistPolicyMarker(policy.expression)) {
             throw new Error(
                 msg(
                     "A policy with the managed DingTalk allowlist name exists but does not contain the managed marker.",

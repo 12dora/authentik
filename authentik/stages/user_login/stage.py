@@ -169,6 +169,22 @@ class UserLoginStageView(ChallengeStageView):
                 user,
                 backend=backend,
             )
+        from authentik.sources.oauth.types.dingtalk import (
+            DINGTALK_ALLOWLIST_PLAN_CONTEXT,
+            DINGTALK_ALLOWLIST_SESSION_KEY,
+        )
+
+        dingtalk_allowlist_marker = self.executor.plan.context.get(
+            DINGTALK_ALLOWLIST_PLAN_CONTEXT
+        )
+        if isinstance(dingtalk_allowlist_marker, dict):
+            self.request.session[DINGTALK_ALLOWLIST_SESSION_KEY] = {
+                **dingtalk_allowlist_marker,
+                "user_pk": user.pk,
+            }
+        else:
+            self.request.session.pop(DINGTALK_ALLOWLIST_SESSION_KEY, None)
+        self.request.session.modified = True
         self.logger.debug(
             "Logged in",
             backend=backend,

@@ -118,6 +118,12 @@ by hand:
    are enabled, and the single DingTalk source is attached to the expected
    flows.
 
+When code changes alter the generated Expression Policy body, rebuilding and
+recreating the Docker containers is not enough to update existing database
+rows. Save and apply the allowlist again from the panel/API, or re-render the
+managed policy with an operational script, so the stored `ExpressionPolicy`
+body contains the newest logic.
+
 Discovery is an admin convenience, not a login-time dependency. Manual entry is
 the fallback when DingTalk discovery or department permissions are unavailable,
 and a failed department fetch should not prevent saving a manually entered
@@ -172,6 +178,80 @@ Production rollout must satisfy one of these conditions:
 Do not treat the allowlist as production-ready until source-link behavior has
 been validated.
 
+## Downstream Application Guard
+
+The DingTalk allowlist has two enforcement layers:
+
+1. DingTalk OAuth callback denies non-allowlisted `corpId` or department data
+   before a login, enrollment, or source-link result is accepted.
+2. Protected downstream applications bind the same managed DingTalk allowlist
+   Expression Policy to their `Application` object. In that context the policy
+   requires a current browser session marker that was written by a successful
+   DingTalk allowlist login.
+
+The session marker is server-side Django session data under:
+
+```text
+authentik/sources/oauth/dingtalk/allowlist
+```
+
+It includes the DingTalk source slug, source identifier, `corp_id`, department
+IDs, DingTalk user identifiers, the authenticated authentik user primary key,
+`checked_at`, and a stable allowlist `config_hash`. Application policy
+evaluation injects this marker only for `Application` targets. This keeps
+source settings, user settings, and unrelated policy surfaces from receiving
+OAuth-only DingTalk state.
+
+When the managed allowlist policy is bound to an `Application`, the policy:
+
+- denies password logins, other social logins, and stale sessions that do not
+  have the DingTalk marker;
+- denies markers from an older allowlist config hash, requiring the user to log
+  in through DingTalk again after an allowlist change;
+- re-checks the marker `corp_id` and department IDs against the current policy
+  config instead of trusting a stored `allowed=True` flag.
+
+Bind the managed policy only to applications that require DingTalk organization
+membership, such as the EasyAuth Portal application. Do not bind it globally to
+every application by default: that can lock operators out of admin, user
+settings, recovery, device, or internal applications. If the same downstream
+resource is exposed through multiple Authentik applications or providers, bind
+the policy to every entry point for that resource.
+
+For the local EasyAuth deployment, the current runtime protection path is:
+
+- re-render the managed DingTalk allowlist policy after deploying code that
+  changes the generated policy body;
+- bind that managed policy to the `EasyAuth Portal` `Application`;
+- remove obsolete OAuth source-level allowlist bindings so user settings and
+  source listing views are not filtered by OAuth callback-only state;
+- keep authentication and enrollment flow bindings enabled for DingTalk login.
+
+Refresh-token behavior is intentionally not fail-closed on the browser session
+marker. OAuth2 refresh requests often arrive without the browser session, and
+the upstream Authentik model keeps refresh tokens alive even after a session is
+terminated. Treat `offline_access` as a separate risk decision for protected
+applications: either do not grant offline access to these apps, or add a later
+token/grant-level revocation design that persists DingTalk allowlist metadata
+with the grant and revokes it when the allowlist changes.
+
+## Wrong Source Connection Cleanup
+
+If a DingTalk identifier was accidentally connected to the wrong user, such as
+`akadmin`, fix the data after deploying the guard:
+
+1. Find the DingTalk OAuth source by slug, normally `dingtalk`.
+2. Find `UserOAuthSourceConnection` rows for that source whose `user` is the
+   wrong account.
+3. Delete only the incorrect DingTalk connection row. Do not delete the user or
+   the DingTalk source.
+4. Log out of Authentik, start a fresh DingTalk login, and confirm the source
+   connection is created for the intended user.
+
+This cleanup should be done with a private operational command or Django shell
+using real identifiers from the tenant database. Do not paste real identifiers,
+tokens, or secrets into committed docs.
+
 ## Validation Checklist
 
 Run these checks after deployment and after each allowlist change:
@@ -185,7 +265,15 @@ Run these checks after deployment and after each allowlist change:
   restrictions exist.
 - Source-link attempt with no allowed DingTalk connection is denied and does
   not create or update a source connection.
+- A password login or other social login cannot access a DingTalk-protected
+  downstream application.
+- A successful allowlisted DingTalk login can access the protected downstream
+  application.
+- Updating the allowlist config hash makes old DingTalk session markers fail and
+  requires a fresh DingTalk login.
 - The login page still shows one DingTalk entry.
+- A no-cache request to the reverse-proxied admin asset contains the newest
+  DingTalk allowlist policy code after rebuild and container recreation.
 - Downstream mappings still receive the expected attributes for allowed users:
 
 ```text

@@ -105,9 +105,14 @@ describe("renderDingTalkAllowlistPolicy", () => {
 
         expect(policy).toContain(`# ${DINGTALK_ALLOWLIST_MARKER}`);
         expect(policy).toContain(
-            '# config: {"companies":[{"corp_id":"corp-a","label":"Alpha","allow_all":false,"dept_ids":["1","2"]},{"corp_id":"corp-b","label":"Beta","allow_all":true,"dept_ids":[]}]}',
+            '# config: {"companies":[{"allow_all":false,"corp_id":"corp-a","dept_ids":["1","2"],"label":"Alpha"},{"allow_all":true,"corp_id":"corp-b","dept_ids":[],"label":"Beta"}]}',
         );
         expect(policy).toContain('if source and getattr(source, "slug", None) != "dingtalk":');
+        expect(policy).toContain('if request.obj.__class__.__name__ != "Application":');
+        expect(policy).toContain(
+            'marker = context.get("authentik/sources/oauth/dingtalk/allowlist")',
+        );
+        expect(policy).toContain('marker.get("config_version")');
         expect(policy).toContain('"corp-a": {"allow_all": False, "dept_ids": {"1", "2"}}');
         expect(policy).toContain('"corp-b": {"allow_all": True, "dept_ids": set()}');
     });
@@ -128,6 +133,12 @@ describe("renderDingTalkAllowlistPolicy", () => {
         );
 
         expect(policy).toContain('ak_message("钉钉登录失败：无法确认企业信息，请联系管理员。")');
+        expect(policy).toContain(
+            'ak_message("钉钉登录失败：请通过允许的钉钉组织登录后访问此应用。")',
+        );
+        expect(policy).toContain(
+            'ak_message("钉钉登录失败：当前白名单状态已更新，请重新通过钉钉登录。")',
+        );
         expect(policy).toContain('ak_message("钉钉登录失败：当前企业未被允许，请联系管理员。")');
         expect(policy).toContain('ak_message("钉钉登录失败：无法确认部门信息，请联系管理员。")');
         expect(policy).toContain('ak_message("钉钉登录失败：当前部门未被允许，请联系管理员。")');
@@ -182,5 +193,19 @@ describe("parseDingTalkAllowlistPolicy", () => {
                 },
             ],
         });
+    });
+
+    it("returns null for a marked policy with an empty stored company list", () => {
+        const policy = `# ${DINGTALK_ALLOWLIST_MARKER}
+# config: {"companies":[]}`;
+
+        expect(parseDingTalkAllowlistPolicy(policy)).toBeNull();
+    });
+
+    it("returns null for a marked policy with a malformed stored config", () => {
+        const policy = `# ${DINGTALK_ALLOWLIST_MARKER}
+# config: {`;
+
+        expect(parseDingTalkAllowlistPolicy(policy)).toBeNull();
     });
 });
