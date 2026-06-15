@@ -2,11 +2,6 @@
 name: CI - Outpost
 
 on:
-  push:
-    branches:
-      - main
-      - next
-      - version-*
   pull_request:
     branches:
       - main
