@@ -2,14 +2,6 @@
 name: Gen - Compress images
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "**.jpg"
-      - "**.jpeg"
-      - "**.png"
-      - "**.webp"
   pull_request:
     paths:
       - "**.jpg"
