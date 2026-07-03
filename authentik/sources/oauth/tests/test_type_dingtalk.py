@@ -7,6 +7,7 @@ from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from requests_mock import Mocker
 
+from authentik.core.models import UserTypes
 from authentik.core.sources.stage import PLAN_CONTEXT_SOURCES_CONNECTION
 from authentik.core.tests.utils import create_test_admin_user, create_test_flow
 from authentik.flows.views.executor import SESSION_KEY_PLAN
@@ -320,6 +321,7 @@ class TestTypeDingTalk(TestCase):
         self.assertEqual(context["username"], "Ada Lovelace")
         self.assertEqual(context["email"], "ada@company.example")
         self.assertEqual(context["name"], "Ada Lovelace")
+        self.assertEqual(context["type"], UserTypes.INTERNAL)
         self.assertEqual(context["attributes"]["dingtalk"]["union_id"], "UNION_ID")
         self.assertEqual(context["attributes"]["dingtalk"]["open_id"], "OPEN_ID")
         self.assertEqual(context["attributes"]["dingtalk"]["user_id"], "USER_ID")

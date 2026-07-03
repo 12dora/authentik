@@ -13,6 +13,7 @@ from django.utils.translation import gettext as _
 from django.views.generic import View
 from structlog.stdlib import get_logger
 
+from authentik.core.models import UserTypes
 from authentik.core.sources.flow_manager import SourceFlowManager
 from authentik.events.models import Event, EventAction
 from authentik.sources.oauth.clients.base import BaseOAuthClient
@@ -165,14 +166,30 @@ class OAuthSourceFlowManager(SourceFlowManager):
             Exception(_("钉钉登录失败：当前企业或部门未被允许，请联系管理员。"))
         )
 
+    def _dingtalk_promote_user_to_internal(self, connection: UserOAuthSourceConnection) -> None:
+        """Promote DingTalk-linked users to internal so they can use the user interface.
+
+        Users enrolled before the DingTalk source set the user type were created as
+        external and are locked out of /if/user/ when the brand has no default
+        application."""
+        if getattr(self.source, "provider_type", "") != "dingtalk":
+            return
+        user = getattr(connection, "user", None)
+        if not user or not user.pk or user.type != UserTypes.EXTERNAL:
+            return
+        user.type = UserTypes.INTERNAL
+        user.save(update_fields=["type"])
+
     def handle_existing_link(self, connection: UserOAuthSourceConnection) -> HttpResponse:
         if denied_response := self._dingtalk_allowlist_denied_response():
             return denied_response
+        self._dingtalk_promote_user_to_internal(connection)
         return super().handle_existing_link(connection)
 
     def handle_auth(self, connection: UserOAuthSourceConnection) -> HttpResponse:
         if denied_response := self._dingtalk_allowlist_denied_response():
             return denied_response
+        self._dingtalk_promote_user_to_internal(connection)
         return super().handle_auth(connection)
 
     def handle_enroll(self, connection: UserOAuthSourceConnection) -> HttpResponse:

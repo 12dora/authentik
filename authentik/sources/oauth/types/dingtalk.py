@@ -13,6 +13,7 @@ from django.utils.timezone import now
 from requests import Session
 from requests.exceptions import JSONDecodeError, RequestException
 
+from authentik.core.models import UserTypes
 from authentik.events.models import Event, EventAction
 from authentik.flows.models import FlowStageBinding
 from authentik.lib.utils.http import get_http_session
@@ -260,6 +261,8 @@ else:
     dept_ids = sorted({{str(item) for item in dept_values if item is not None}})
 if not corp_id:
     if request.obj.__class__.__name__ != "Application":
+        return True
+    if request.user and request.user.is_superuser:
         return True
     marker = request.context.get("{DINGTALK_ALLOWLIST_SESSION_KEY}") or {{}}
     if not marker:
@@ -734,6 +737,10 @@ class DingTalkType(SourceType):
             "username": username,
             "email": info.get("email"),
             "name": info.get("name") or info.get("nick"),
+            # DingTalk logins are company employees; without this the user_write stage
+            # defaults to external users, which are locked out of /if/user/ unless the
+            # brand has a default application.
+            "type": UserTypes.INTERNAL,
             "attributes": {
                 "dingtalk": dingtalk,
             },

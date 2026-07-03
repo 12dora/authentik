@@ -218,6 +218,8 @@ dept_ids = (
 if not corp_id:
     if request.obj.__class__.__name__ != "Application":
         return True
+    if request.user and request.user.is_superuser:
+        return True
     marker = context.get("authentik/sources/oauth/dingtalk/allowlist") or {}
     if not marker:
         ak_message("钉钉登录失败：请通过允许的钉钉组织登录后访问此应用。")

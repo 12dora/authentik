@@ -204,12 +204,21 @@ OAuth-only DingTalk state.
 
 When the managed allowlist policy is bound to an `Application`, the policy:
 
-- denies password logins, other social logins, and stale sessions that do not
-  have the DingTalk marker;
+- allows superusers without a DingTalk marker, so local admin accounts such as
+  `akadmin` keep seeing and reaching protected applications (including the
+  `/if/user/` application library) after a password login;
+- denies non-superuser password logins, other social logins, and stale sessions
+  that do not have the DingTalk marker;
 - denies markers from an older allowlist config hash, requiring the user to log
   in through DingTalk again after an allowlist change;
 - re-checks the marker `corp_id` and department IDs against the current policy
   config instead of trusting a stored `allowed=True` flag.
+
+Managed policy bodies stored in the database are re-rendered automatically by
+the `authentik_sources_oauth` migration
+`0015_rerender_dingtalk_allowlist_policies` on upgrade, so the superuser bypass
+does not require re-saving the allowlist from the admin panel. Re-saving from
+the panel produces an equivalent policy.
 
 Bind the managed policy only to applications that require DingTalk organization
 membership, such as the EasyAuth Portal application. Do not bind it globally to
@@ -234,6 +243,16 @@ terminated. Treat `offline_access` as a separate risk decision for protected
 applications: either do not grant offline access to these apps, or add a later
 token/grant-level revocation design that persists DingTalk allowlist metadata
 with the grant and revokes it when the allowlist changes.
+
+## User Type For DingTalk Logins
+
+DingTalk logins represent company employees, so the DingTalk source now creates
+enrolled users as `internal` users, and an allowed DingTalk login promotes an
+existing `external` linked user to `internal`. Without this, users enrolled via
+the default source enrollment flow default to `external` and are rejected at
+`/if/user/` with "Interface can only be accessed by internal users." whenever
+the brand has no default application. A denied DingTalk login never changes the
+linked user's type.
 
 ## Wrong Source Connection Cleanup
 

@@ -127,6 +127,7 @@ describe("renderDingTalkAllowlistPolicy", () => {
         );
         expect(policy).toContain('if source and getattr(source, "slug", None) != "dingtalk":');
         expect(policy).toContain('if request.obj.__class__.__name__ != "Application":');
+        expect(policy).toContain("if request.user and request.user.is_superuser:");
         expect(policy).toContain(
             'marker = context.get("authentik/sources/oauth/dingtalk/allowlist")',
         );

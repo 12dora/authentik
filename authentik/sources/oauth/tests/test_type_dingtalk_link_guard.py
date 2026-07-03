@@ -4,7 +4,7 @@ from django.test import TestCase
 from django.urls import reverse
 from requests_mock import Mocker
 
-from authentik.core.models import User
+from authentik.core.models import User, UserTypes
 from authentik.core.tests.utils import create_test_admin_user, create_test_flow, create_test_user
 from authentik.flows.models import FlowStageBinding
 from authentik.flows.views.executor import SESSION_KEY_PLAN
@@ -284,6 +284,60 @@ class TestDingTalkSourceLinkGuard(TestCase):
         self.assertEqual(marker["source_slug"], self.source.slug)
         self.assertEqual(marker["corp_id"], "CORP_FAKE")
         self.assertEqual(marker["dept_ids"], ["10"])
+
+    def test_unauthenticated_auth_flow_promotes_existing_external_user_to_internal(self):
+        """Allowed DingTalk auth promotes previously-enrolled external users to internal."""
+        existing_user = create_test_user("dingtalk-existing")
+        existing_user.type = UserTypes.EXTERNAL
+        existing_user.save(update_fields=["type"])
+        UserOAuthSourceConnection.objects.create(
+            source=self.source,
+            user=existing_user,
+            identifier="CORP_FAKE:USER_FAKE",
+            access_token="OLD_ACCESS_TOKEN",
+            refresh_token="OLD_REFRESH_TOKEN",
+        )
+        self.bind_allowlist(
+            [{"corp_id": "CORP_FAKE", "dept_ids": [10]}],
+            target=self.source.authentication_flow,
+        )
+        self.client.logout()
+        state = self.start_login()
+
+        with Mocker() as mocker:
+            self.mock_dingtalk_callback(mocker, depts=[10])
+            response = self.callback(state)
+
+        self.assertEqual(response.status_code, 302)
+        existing_user.refresh_from_db()
+        self.assertEqual(existing_user.type, UserTypes.INTERNAL)
+
+    def test_unauthenticated_auth_flow_keeps_denied_external_user_type(self):
+        """Denied DingTalk auth does not change the linked user's type."""
+        existing_user = create_test_user("dingtalk-existing")
+        existing_user.type = UserTypes.EXTERNAL
+        existing_user.save(update_fields=["type"])
+        UserOAuthSourceConnection.objects.create(
+            source=self.source,
+            user=existing_user,
+            identifier="CORP_FAKE:USER_FAKE",
+            access_token="OLD_ACCESS_TOKEN",
+            refresh_token="OLD_REFRESH_TOKEN",
+        )
+        self.bind_allowlist(
+            [{"corp_id": "CORP_FAKE", "dept_ids": [10]}],
+            target=self.source.authentication_flow,
+        )
+        self.client.logout()
+        state = self.start_login()
+
+        with Mocker() as mocker:
+            self.mock_dingtalk_callback(mocker, depts=[30])
+            response = self.callback(state)
+
+        self.assertEqual(response.status_code, 200)
+        existing_user.refresh_from_db()
+        self.assertEqual(existing_user.type, UserTypes.EXTERNAL)
 
     def test_unauthenticated_auth_flow_denies_source_bound_allowlist_before_connection_write(self):
         """Source-bound DingTalk allowlist denies existing-user login before token update."""
