@@ -11835,6 +11835,50 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>DingTalk discovery did not return a start URL.</source>
   <target>钉钉发现未返回启动 URL。</target>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.failed">
+  <source>DingTalk discovery failed.</source>
+  <target>钉钉发现流程失败。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.missing-corp-id">
+  <source>DingTalk discovery did not return a company ID.</source>
+  <target>钉钉发现流程未返回企业 ID。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.popup-blocked">
+  <source>The DingTalk discovery popup was blocked. Allow popups for this site and try again.</source>
+  <target>钉钉发现弹窗被浏览器拦截。请允许此站点弹窗后重试。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.remove.action">
+  <source>Remove allowlist</source>
+  <target>移除白名单</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.remove.header">
+  <source>Remove DingTalk allowlist</source>
+  <target>移除钉钉白名单</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.remove.body">
+  <source>This deletes the managed allowlist policy and all of its flow bindings. DingTalk logins will no longer be restricted by company or department.</source>
+  <target>这将删除托管的白名单策略及其所有流程绑定。钉钉登录将不再按企业或部门进行限制。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.remove.success">
+  <source>DingTalk allowlist policy and bindings removed.</source>
+  <target>已删除钉钉白名单策略及其绑定。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.remove.error">
+  <source>Failed to remove the DingTalk allowlist policy.</source>
+  <target>删除钉钉白名单策略失败。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.validation.company-required">
+  <source>Add at least one DingTalk company.</source>
+  <target>请至少添加一家钉钉企业。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.validation.duplicate-corp-id">
+  <source>Duplicate company corpId: <x id="0" equiv-text="${corpId}"/>.</source>
+  <target>重复的企业 corpId：<x id="0" equiv-text="${corpId}"/>。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.validation.departments-required">
+  <source>Company <x id="0" equiv-text="${corpId}"/> must allow all users or include at least one department.</source>
+  <target>企业 <x id="0" equiv-text="${corpId}"/> 必须允许全部用户，或至少包含一个部门。</target>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.discovery.start">
   <source>Discover company</source>
   <target>发现企业</target>
@@ -12104,8 +12148,28 @@ Bindings to groups/users are checked against the user of the event.</source>
   <target>删除</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.delete.success">
-  <source>Deleted DingTalk directory sync record for <x id="0" equiv-text="${response.corp_id}"/></source>
-  <target>已删除 <x id="0" equiv-text="${response.corp_id}"/> 的钉钉目录同步记录</target>
+  <source>Deleted DingTalk directory sync record for <x id="0" equiv-text="${status.corpId}"/></source>
+  <target>已删除 <x id="0" equiv-text="${status.corpId}"/> 的钉钉目录同步记录</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.error">
+  <source>Failed to delete DingTalk directory data.</source>
+  <target>删除钉钉目录数据失败。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.header">
+  <source>Delete DingTalk directory data</source>
+  <target>删除钉钉目录数据</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.body">
+  <source>This deletes the sync record and all cached departments and users for <x id="0" equiv-text="${status.corpId}"/>. Lookups that rely on the cached directory will return no data until the next sync completes.</source>
+  <target>这将删除 <x id="0" equiv-text="${status.corpId}"/> 的同步记录以及所有已缓存的部门和用户。依赖目录缓存的查询在下次同步完成前将不会返回数据。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.error.load">
+  <source>Failed to load DingTalk directory status.</source>
+  <target>加载钉钉目录状态失败。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.error.retry">
+  <source>Use Refresh to try again.</source>
+  <target>请点击“刷新”重试。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.title">
   <source>DingTalk directory sync</source>

@@ -248,7 +248,7 @@ def render_dingtalk_allowlist_policy(config: dict[str, Any]) -> str:
     config_json = dumps(normalized, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     config_python = repr(normalized)
     config_hash = dingtalk_allowlist_config_hash(normalized)
-    return f'''{DINGTALK_ALLOWLIST_MARKER}
+    return f"""{DINGTALK_ALLOWLIST_MARKER}
 # config: {config_json}
 expected_source_slug = None
 userinfo = request.context.get("oauth_userinfo") or {{}}
@@ -296,7 +296,7 @@ if set(dept_ids).intersection(matched.get("dept_ids") or []):
     return True
 ak_message("钉钉登录失败：当前部门未被允许，请联系管理员。")
 return False
-'''
+"""
 
 
 def get_dingtalk_allowlist_binding(
@@ -397,7 +397,7 @@ def _fetch_dingtalk_user_profile(
         profile.setdefault("corp_id", corp_id)
         try:
             org_info = fetch_dingtalk_org_auth_info(source, str(corp_id), session=session)
-        except (RequestException, ValueError):
+        except RequestException, ValueError:
             org_info = {}
         if label := org_info.get("label"):
             profile.setdefault("label", label)
@@ -407,7 +407,14 @@ def _fetch_dingtalk_user_profile(
 
 
 def _discovery_response(payload: dict[str, Any]) -> HttpResponse:
-    body = dumps(payload, ensure_ascii=False)
+    # The marker fields let the admin UI reject unrelated same-origin messages;
+    # they are applied last so payload keys can never override them.
+    message = {
+        **payload,
+        "source": "goauthentik.io",
+        "context": "dingtalk-allowlist-discovery",
+    }
+    body = dumps(message, ensure_ascii=False)
     return HttpResponse(
         "<!doctype html><script>"
         f"window.opener && window.opener.postMessage({body}, window.location.origin);"

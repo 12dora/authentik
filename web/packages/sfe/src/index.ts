@@ -182,11 +182,11 @@ const IS_INVALID = "is-invalid";
 
 const FALLBACK_MESSAGES = {
     identifier: {
-        default: "邮箱或用户名",
+        default: "Email / Username",
         zh: "邮箱或用户名",
     },
     password: {
-        default: "密码",
+        default: "Password",
         zh: "密码",
     },
 };

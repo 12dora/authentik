@@ -44,6 +44,24 @@ describe("validateDingTalkAllowlistModel", () => {
         });
     });
 
+    it("sorts department IDs in plain code-point order matching Python's sorted()", () => {
+        // Numeric-aware sorting would produce ["9", "10"] while the backend's
+        // sorted() produces ["10", "9"]; the mismatch would break the
+        // config_version comparison in the generated policy forever.
+        const result = validateDingTalkAllowlistModel({
+            companies: [
+                {
+                    corpId: "corp-a",
+                    label: "Alpha",
+                    allowAll: false,
+                    deptIds: ["9", "10", "500000123", "60000012"],
+                },
+            ],
+        });
+
+        expect(result.companies[0].deptIds).toEqual(["10", "500000123", "60000012", "9"]);
+    });
+
     it("throws when a restricted company has no departments", () => {
         expect(() =>
             validateDingTalkAllowlistModel({
@@ -115,6 +133,26 @@ describe("renderDingTalkAllowlistPolicy", () => {
         expect(policy).toContain('marker.get("config_version")');
         expect(policy).toContain('"corp-a": {"allow_all": False, "dept_ids": {"1", "2"}}');
         expect(policy).toContain('"corp-b": {"allow_all": True, "dept_ids": set()}');
+    });
+
+    it("embeds a config line that matches the backend's config_version serialization", () => {
+        const policy = renderDingTalkAllowlistPolicy(
+            {
+                companies: [
+                    {
+                        corpId: "corp-a",
+                        label: "Alpha",
+                        allowAll: false,
+                        deptIds: ["9", "10"],
+                    },
+                ],
+            },
+            "dingtalk",
+        );
+
+        expect(policy).toContain(
+            '# config: {"companies":[{"allow_all":false,"corp_id":"corp-a","dept_ids":["10","9"],"label":"Alpha"}]}',
+        );
     });
 
     it("renders Chinese denial messages matching the backend allowlist contract", () => {

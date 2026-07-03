@@ -1,5 +1,6 @@
 import "#components/ak-status-label";
 import "#elements/buttons/SpinnerButton/index";
+import "#elements/forms/ConfirmationForm";
 import "#elements/EmptyState";
 
 import { DEFAULT_CONFIG } from "#common/api/config";
@@ -12,7 +13,7 @@ import { showMessage } from "#elements/messages/MessageContainer";
 import { SlottedTemplateResult } from "#elements/types";
 
 import { ExpressionPolicyForm } from "#admin/policies/expression/ExpressionPolicyForm";
-import type { StatusItem, StatusState } from "#admin/sources/oauth/DingTalkAllowlistPanelState";
+import type { StatusItem } from "#admin/sources/oauth/DingTalkAllowlistPanelState";
 import {
     addDingTalkDepartments,
     applyDingTalkDepartmentInputs,
@@ -21,12 +22,10 @@ import {
     dingtalkDepartmentInputsFromModel,
     dingtalkStatusLabelProperties,
     invertLoadedDingTalkDepartmentInput,
-    mergeLoadedDingTalkDepartmentInput,
     removeDingTalkCompany,
     renderDingTalkDepartmentInput,
     saveDingTalkAllowlistConfiguration,
     selectLoadedDingTalkDepartmentInput,
-    singleDingTalkLoginEntryStatusItem,
     splitDingTalkDepartmentIds,
     toggleDingTalkDepartmentTreeInput,
     updateDingTalkCompany,
@@ -40,7 +39,7 @@ import {
 } from "#admin/sources/oauth/DingTalkAllowlistPolicy";
 
 import {
-    BaseAPI,
+    DingTalkAllowlistStatusResponse,
     ExpressionPolicy,
     Flow,
     FlowsApi,
@@ -53,6 +52,7 @@ import {
 import { msg, str } from "@lit/localize";
 import { css, CSSResult, html, nothing, PropertyValues, TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
+import { ifDefined } from "lit/directives/if-defined.js";
 
 import PFButton from "@patternfly/patternfly/components/Button/button.css";
 import PFCard from "@patternfly/patternfly/components/Card/card.css";
@@ -62,9 +62,8 @@ import PFFormControl from "@patternfly/patternfly/components/FormControl/form-co
 import PFTable from "@patternfly/patternfly/components/Table/table.css";
 import PFFlex from "@patternfly/patternfly/layouts/Flex/flex.css";
 
-interface DingTalkDiscoveryStart {
-    url: string;
-}
+const DINGTALK_DISCOVERY_MESSAGE_SOURCE = "goauthentik.io";
+const DINGTALK_DISCOVERY_MESSAGE_CONTEXT = "dingtalk-allowlist-discovery";
 
 interface DingTalkDiscoveryResult {
     corpId: string;
@@ -78,176 +77,36 @@ interface DingTalkDepartment {
     parentId: string | null;
 }
 
-interface DingTalkDepartmentResponse {
-    corpId: string;
-    label?: string;
-    departments: DingTalkDepartment[];
+function normalizeOptionalString(value: unknown): string {
+    if (value === undefined || value === null) {
+        return "";
+    }
+    return String(value).trim();
 }
 
-interface DingTalkStatusResponse {
-    config?: unknown;
-    sourceLinkGuard?: StatusState | boolean;
-    sourceLinkGuardDetail?: string;
-    expressionValid?: boolean | null;
-}
-
-class DingTalkAllowlistDiscoveryApi extends BaseAPI {
-    async status(sourceSlug: string): Promise<DingTalkStatusResponse> {
-        const response = await this.request({
-            path: `/sources/oauth/dingtalk-allowlist/${encodeURIComponent(sourceSlug)}/status/`,
-            method: "GET",
-            headers: {},
-            query: {},
-        });
-        return this.normalizeStatus(await response.json());
+// The departments field of the API response is an untyped JSON field; the entries
+// use the backend's snake_case keys.
+function normalizeDingTalkDepartments(value: unknown): DingTalkDepartment[] {
+    if (!Array.isArray(value)) {
+        return [];
     }
-
-    async discoverStart(sourceSlug: string): Promise<DingTalkDiscoveryStart> {
-        const response = await this.request({
-            path: `/sources/oauth/dingtalk-allowlist/${encodeURIComponent(
-                sourceSlug,
-            )}/discover/start/`,
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            query: {},
-            body: {},
-        });
-        return this.normalizeDiscoveryStart(await response.json());
-    }
-
-    async departments(sourceSlug: string, corpId: string): Promise<DingTalkDepartmentResponse> {
-        const response = await this.request({
-            path: `/sources/oauth/dingtalk-allowlist/${encodeURIComponent(
-                sourceSlug,
-            )}/departments/`,
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            query: {},
-            body: { corp_id: corpId },
-        });
-        return this.normalizeDepartmentResponse(await response.json(), corpId);
-    }
-
-    private normalizeStatus(value: unknown): DingTalkStatusResponse {
-        if (!value || typeof value !== "object") {
-            return {};
+    return value.flatMap((item): DingTalkDepartment[] => {
+        if (!item || typeof item !== "object") {
+            return [];
         }
-        const record = value as Record<string, unknown>;
-        const guard =
-            record.source_link_guard ??
-            record.sourceLinkGuard ??
-            (record.status && typeof record.status === "object"
-                ? (record.status as Record<string, unknown>).source_link_guard
-                : undefined);
-        const expressionValid = record.expression_valid ?? record.expressionValid;
-
-        return {
-            config: record.config,
-            sourceLinkGuard: this.normalizeStatusValue(guard),
-            sourceLinkGuardDetail: this.normalizeOptionalString(
-                record.source_link_guard_detail ?? record.sourceLinkGuardDetail,
-            ),
-            expressionValid:
-                typeof expressionValid === "boolean" || expressionValid === null
-                    ? expressionValid
-                    : undefined,
-        };
-    }
-
-    private normalizeStatusValue(value: unknown): StatusState | boolean | undefined {
-        if (value && typeof value === "object") {
-            const record = value as Record<string, unknown>;
-            return this.normalizeStatusValue(record.enabled ?? record.state ?? record.status);
-        }
-        if (typeof value === "boolean") {
-            return value;
-        }
-        if (typeof value === "string") {
-            const normalized = value.toLowerCase();
-            if (["good", "warning", "danger", "unknown"].includes(normalized)) {
-                return normalized as StatusState;
-            }
-            if (["installed", "disabled", "ok", "true"].includes(normalized)) {
-                return true;
-            }
-            if (["missing", "failed", "false"].includes(normalized)) {
-                return false;
-            }
-        }
-        return undefined;
-    }
-
-    private normalizeDiscoveryStart(value: unknown): DingTalkDiscoveryStart {
-        if (!value || typeof value !== "object") {
-            throw new Error(
-                msg("DingTalk discovery did not return a start URL.", {
-                    id: "sources.oauth.dingtalk-allowlist.discovery.missing-start-url",
-                }),
-            );
-        }
-        const record = value as Record<string, unknown>;
-        const url = this.normalizeOptionalString(
-            record.url ?? record.authorization_url ?? record.redirect_url,
-        );
-        if (!url) {
-            throw new Error(
-                msg("DingTalk discovery did not return a start URL.", {
-                    id: "sources.oauth.dingtalk-allowlist.discovery.missing-start-url",
-                }),
-            );
-        }
-        return { url };
-    }
-
-    private normalizeDepartmentResponse(
-        value: unknown,
-        requestedCorpId: string,
-    ): DingTalkDepartmentResponse {
-        if (!value || typeof value !== "object") {
-            return { corpId: requestedCorpId, departments: [] };
-        }
-
-        const record = value as Record<string, unknown>;
-        const departments = Array.isArray(record.departments) ? record.departments : [];
-        return {
-            corpId:
-                this.normalizeOptionalString(record.corp_id ?? record.corpId) || requestedCorpId,
-            label: this.normalizeOptionalString(
-                record.label ??
-                    record.company ??
-                    record.company_name ??
-                    record.companyName ??
-                    record.corp_name ??
-                    record.corpName,
-            ),
-            departments: departments
-                .map((department) => this.normalizeDepartment(department))
-                .filter((department): department is DingTalkDepartment => department !== null),
-        };
-    }
-
-    private normalizeDepartment(value: unknown): DingTalkDepartment | null {
-        if (!value || typeof value !== "object") {
-            return null;
-        }
-        const record = value as Record<string, unknown>;
-        const deptId = this.normalizeOptionalString(record.dept_id ?? record.deptId);
+        const record = item as Record<string, unknown>;
+        const deptId = normalizeOptionalString(record.dept_id ?? record.deptId);
         if (!deptId) {
-            return null;
+            return [];
         }
-        return {
-            deptId,
-            name: this.normalizeOptionalString(record.name) || deptId,
-            parentId: this.normalizeOptionalString(record.parent_id ?? record.parentId) || null,
-        };
-    }
-
-    private normalizeOptionalString(value: unknown): string {
-        if (value === undefined || value === null) {
-            return "";
-        }
-        return String(value).trim();
-    }
+        return [
+            {
+                deptId,
+                name: normalizeOptionalString(record.name) || deptId,
+                parentId: normalizeOptionalString(record.parent_id ?? record.parentId) || null,
+            },
+        ];
+    });
 }
 
 @customElement("ak-source-oauth-dingtalk-allowlist")
@@ -312,10 +171,18 @@ export class DingTalkAllowlistPanel extends AKElement {
     @state()
     private partialFailures: string[] = [];
 
+    // Set once the admin edits the local allowlist; while set, status refreshes keep
+    // the local model and inputs instead of overwriting them with server state.
+    private dirty = false;
+
+    // Incremented per refresh; stale refreshes must not overwrite newer state.
+    private refreshGeneration = 0;
+
+    private discoveryPopup: Window | null = null;
+
     private policiesApi = new PoliciesApi(DEFAULT_CONFIG);
     private flowsApi = new FlowsApi(DEFAULT_CONFIG);
     private sourcesApi = new SourcesApi(DEFAULT_CONFIG);
-    private discoveryApi = new DingTalkAllowlistDiscoveryApi(DEFAULT_CONFIG);
 
     static styles: CSSResult[] = [
         PFButton,
@@ -407,7 +274,13 @@ export class DingTalkAllowlistPanel extends AKElement {
 
     protected willUpdate(changedProperties: PropertyValues<this>): void {
         if (changedProperties.has("source") && this.source?.slug) {
-            this.refreshStatus();
+            // Only a different source warrants an automatic refresh; the same source
+            // object is re-assigned after saves and global refresh events, and
+            // refreshing again would race the explicit refresh already in flight.
+            const previous = changedProperties.get("source") as OAuthSource | undefined;
+            if (previous?.slug !== this.source.slug) {
+                this.refreshStatus().catch(console.error);
+            }
         }
     }
 
@@ -415,12 +288,47 @@ export class DingTalkAllowlistPanel extends AKElement {
         return `dingtalk-allowlist-${this.source?.slug || ""}`;
     }
 
+    private markDirty(): void {
+        this.dirty = true;
+    }
+
     private handleDiscoveryMessage = (event: MessageEvent<unknown>): void => {
-        if (event.origin && event.origin !== window.location.origin) {
+        if (event.origin !== window.location.origin) {
             return;
         }
-        const result = this.extractDiscoveryResult(event.data);
+        if (!this.discoveryPopup || event.source !== this.discoveryPopup) {
+            return;
+        }
+        if (!event.data || typeof event.data !== "object") {
+            return;
+        }
+        const record = event.data as Record<string, unknown>;
+        if (
+            record.source !== DINGTALK_DISCOVERY_MESSAGE_SOURCE ||
+            record.context !== DINGTALK_DISCOVERY_MESSAGE_CONTEXT
+        ) {
+            return;
+        }
+        this.discoveryPopup = null;
+        if (record.ok === false) {
+            showMessage({
+                level: MessageLevel.error,
+                message:
+                    normalizeOptionalString(record.error) ||
+                    msg("DingTalk discovery failed.", {
+                        id: "sources.oauth.dingtalk-allowlist.discovery.failed",
+                    }),
+            });
+            return;
+        }
+        const result = this.extractDiscoveryResult(record);
         if (!result) {
+            showMessage({
+                level: MessageLevel.error,
+                message: msg("DingTalk discovery did not return a company ID.", {
+                    id: "sources.oauth.dingtalk-allowlist.discovery.missing-corp-id",
+                }),
+            });
             return;
         }
         this.lastDiscovery = result;
@@ -433,32 +341,20 @@ export class DingTalkAllowlistPanel extends AKElement {
         });
     };
 
-    private extractDiscoveryResult(value: unknown): DingTalkDiscoveryResult | null {
-        if (!value || typeof value !== "object") {
-            return null;
-        }
-        const record = value as Record<string, unknown>;
-        if (record.source && record.source !== "goauthentik.io" && record.source !== "authentik") {
-            return null;
-        }
-        if (
-            record.context &&
-            record.context !== "dingtalk-allowlist-discovery" &&
-            record.context !== "sources.oauth.dingtalk-allowlist.discovery"
-        ) {
-            return null;
-        }
+    private extractDiscoveryResult(
+        record: Record<string, unknown>,
+    ): DingTalkDiscoveryResult | null {
         const payload =
-            record.result && typeof record.result === "object"
-                ? (record.result as Record<string, unknown>)
+            record.profile && typeof record.profile === "object"
+                ? (record.profile as Record<string, unknown>)
                 : record;
-        const corpId = this.normalizeString(payload.corpId ?? payload.corp_id);
+        const corpId = normalizeOptionalString(payload.corpId ?? payload.corp_id);
         if (!corpId) {
             return null;
         }
         return {
             corpId,
-            label: this.normalizeString(
+            label: normalizeOptionalString(
                 payload.label ??
                     payload.company ??
                     payload.company_name ??
@@ -466,110 +362,132 @@ export class DingTalkAllowlistPanel extends AKElement {
                     payload.corp_name ??
                     payload.corpName,
             ),
-            userId: this.normalizeString(payload.userId ?? payload.userid ?? payload.user_id),
+            userId: normalizeOptionalString(payload.userId ?? payload.userid ?? payload.user_id),
         };
-    }
-
-    private normalizeString(value: unknown): string {
-        if (value === undefined || value === null) {
-            return "";
-        }
-        return String(value).trim();
     }
 
     private async refreshStatus(): Promise<void> {
         if (!this.source?.slug) {
             return;
         }
-
-        this.partialFailures = [];
-        await this.refreshManagedPolicy();
-        await this.refreshFlowsAndBindings();
+        const generation = ++this.refreshGeneration;
+        const failures: string[] = [];
+        let modelFromPolicy = false;
 
         try {
-            const status = await this.discoveryApi.status(this.source.slug);
-            this.applyBackendStatus(status);
+            modelFromPolicy = await this.refreshManagedPolicy(generation);
         } catch (error) {
-            this.sourceLinkGuard = {
-                label: this.sourceLinkGuard.label,
-                state: "unknown",
-                detail: msg("Discovery status endpoint unavailable", {
-                    id: "sources.oauth.dingtalk-allowlist.status.endpoint-unavailable",
-                }),
-            };
-            this.partialFailures = [...this.partialFailures, this.errorMessage(error)];
+            failures.push(await this.apiErrorMessage(error));
+        }
+
+        try {
+            await this.refreshFlowsAndBindings(generation);
+        } catch (error) {
+            failures.push(await this.apiErrorMessage(error));
+        }
+
+        try {
+            const status = await this.sourcesApi.sourcesOauthDingtalkAllowlistStatusRetrieve({
+                sourceSlug: this.source.slug,
+            });
+            if (generation === this.refreshGeneration) {
+                this.applyBackendStatus(status, modelFromPolicy);
+            }
+        } catch (error) {
+            if (generation === this.refreshGeneration) {
+                this.sourceLinkGuard = {
+                    label: this.sourceLinkGuard.label,
+                    state: "unknown",
+                    detail: msg("Discovery status endpoint unavailable", {
+                        id: "sources.oauth.dingtalk-allowlist.status.endpoint-unavailable",
+                    }),
+                };
+            }
+            failures.push(await this.apiErrorMessage(error));
+        }
+
+        if (generation === this.refreshGeneration) {
+            this.partialFailures = failures;
         }
     }
 
-    private async refreshManagedPolicy(): Promise<void> {
+    private async refreshManagedPolicy(generation: number): Promise<boolean> {
         const response = await this.policiesApi.policiesExpressionList({
             name: this.policyName,
             pageSize: 1,
         });
+        if (generation !== this.refreshGeneration) {
+            return false;
+        }
         this.policy = response.results.find((policy) => policy.name === this.policyName);
         if (!this.policy) {
             this.expressionValid = undefined;
-            return;
+            return false;
         }
         const parsed = parseDingTalkAllowlistPolicy(this.policy.expression);
-        if (parsed) {
+        if (!parsed) {
+            this.expressionValid = false;
+            return false;
+        }
+        this.expressionValid = true;
+        if (!this.dirty) {
             this.model = parsed;
             this.departmentInputs = dingtalkDepartmentInputsFromModel(parsed);
-            this.expressionValid = true;
-        } else {
-            this.expressionValid = false;
         }
+        return true;
     }
 
-    private async refreshFlowsAndBindings(): Promise<void> {
-        this.authFlow = await this.resolveFlow(this.source?.authenticationFlow);
-        this.enrollmentFlow = await this.resolveFlow(this.source?.enrollmentFlow);
+    private async refreshFlowsAndBindings(generation: number): Promise<void> {
+        const authFlow = await this.resolveFlow(this.source?.authenticationFlow);
+        const enrollmentFlow = await this.resolveFlow(this.source?.enrollmentFlow);
 
         const [authBinding, enrollmentBinding] = await Promise.all([
-            this.findPolicyBinding(this.authFlow?.policybindingmodelPtrId, this.policy?.pk),
-            this.findPolicyBinding(this.enrollmentFlow?.policybindingmodelPtrId, this.policy?.pk),
+            this.findPolicyBinding(authFlow?.policybindingmodelPtrId, this.policy?.pk),
+            this.findPolicyBinding(enrollmentFlow?.policybindingmodelPtrId, this.policy?.pk),
         ]);
 
+        if (generation !== this.refreshGeneration) {
+            return;
+        }
+        this.authFlow = authFlow;
+        this.enrollmentFlow = enrollmentFlow;
         this.authBinding = authBinding;
         this.enrollmentBinding = enrollmentBinding;
     }
 
-    private applyBackendStatus(status: DingTalkStatusResponse): void {
-        const config = status.config as { companies?: unknown } | undefined;
-        if (config && Array.isArray(config.companies) && config.companies.length > 0) {
-            try {
-                const model = dingTalkAllowlistModelFromStoredConfig(config);
-                if (model) {
-                    this.model = model;
-                    this.departmentInputs = dingtalkDepartmentInputsFromModel(model);
-                }
-            } catch (error) {
-                this.partialFailures = [...this.partialFailures, this.errorMessage(error)];
+    private applyBackendStatus(
+        status: DingTalkAllowlistStatusResponse,
+        modelFromPolicy: boolean,
+    ): void {
+        // The status config is discovered by walking every binding on the shared
+        // flows and can belong to another DingTalk source; it is only a fallback
+        // when this source's own managed policy did not provide a model.
+        const config = status.config as { companies?: unknown } | null;
+        if (
+            !modelFromPolicy &&
+            !this.dirty &&
+            config &&
+            Array.isArray(config.companies) &&
+            config.companies.length > 0
+        ) {
+            const model = dingTalkAllowlistModelFromStoredConfig(config);
+            if (model) {
+                this.model = model;
+                this.departmentInputs = dingtalkDepartmentInputsFromModel(model);
             }
         }
 
-        if (status.expressionValid !== undefined) {
-            this.expressionValid = status.expressionValid;
-        }
-
-        const guard = status.sourceLinkGuard;
-        if (guard === undefined) {
-            return;
-        }
-
-        const state = typeof guard === "boolean" ? (guard ? "good" : "danger") : guard;
+        const enabled = status.sourceLinkGuard?.enabled ?? false;
         this.sourceLinkGuard = {
             label: this.sourceLinkGuard.label,
-            state,
-            detail:
-                status.sourceLinkGuardDetail ||
-                (state === "good"
-                    ? msg("Installed or disabled", {
-                          id: "sources.oauth.dingtalk-allowlist.status.source-link.good",
-                      })
-                    : msg("Needs review", {
-                          id: "sources.oauth.dingtalk-allowlist.status.source-link.review",
-                      })),
+            state: enabled ? "good" : "danger",
+            detail: enabled
+                ? msg("Installed or disabled", {
+                      id: "sources.oauth.dingtalk-allowlist.status.source-link.good",
+                  })
+                : msg("Needs review", {
+                      id: "sources.oauth.dingtalk-allowlist.status.source-link.review",
+                  }),
         };
     }
 
@@ -602,15 +520,19 @@ export class DingTalkAllowlistPanel extends AKElement {
         allowAll: boolean,
         deptIds: string[],
     ): void {
+        const existing = this.model.companies.some((company) => company.corpId === corpId);
         this.model = upsertDingTalkCompany(this.model, corpId, label, allowAll, deptIds);
-        this.departmentInputs = {
-            ...this.departmentInputs,
-            [corpId]: allowAll ? "" : renderDingTalkDepartmentInput(deptIds),
-        };
+        if (!existing) {
+            this.departmentInputs = {
+                ...this.departmentInputs,
+                [corpId]: allowAll ? "" : renderDingTalkDepartmentInput(deptIds),
+            };
+        }
+        this.markDirty();
     }
 
     private addManualCompany(): void {
-        const corpId = this.normalizeString(this.manualCorpId);
+        const corpId = normalizeOptionalString(this.manualCorpId);
         if (!corpId) {
             showMessage({
                 level: MessageLevel.error,
@@ -620,17 +542,19 @@ export class DingTalkAllowlistPanel extends AKElement {
             });
             return;
         }
-        this.upsertCompany(corpId, this.normalizeString(this.manualLabel) || corpId, true, []);
+        this.upsertCompany(corpId, normalizeOptionalString(this.manualLabel) || corpId, true, []);
         this.manualCorpId = "";
         this.manualLabel = "";
     }
 
     private updateCompany(corpId: string, patch: Partial<DingTalkAllowlistModel["companies"][0]>) {
         this.model = updateDingTalkCompany(this.model, corpId, patch);
+        this.markDirty();
     }
 
     private removeCompany(corpId: string): void {
         this.model = removeDingTalkCompany(this.model, corpId);
+        this.markDirty();
     }
 
     private addDepartments(corpId: string): void {
@@ -651,6 +575,7 @@ export class DingTalkAllowlistPanel extends AKElement {
         }
         this.model = result.model;
         this.departmentInputs = result.departmentInputs;
+        this.markDirty();
     }
 
     private currentDepartmentInput(
@@ -678,6 +603,7 @@ export class DingTalkAllowlistPanel extends AKElement {
         }
         this.model = result.model;
         this.departmentInputs = result.departmentInputs;
+        this.markDirty();
     }
 
     private toggleLoadedDepartment(corpId: string, deptId: string, selected: boolean): void {
@@ -728,50 +654,58 @@ export class DingTalkAllowlistPanel extends AKElement {
         if (!this.source?.slug) {
             return;
         }
-        const start = await this.discoveryApi.discoverStart(this.source.slug);
-        window.open(start.url, "authentik-dingtalk-discovery", "popup,width=640,height=760");
+        // Open the popup synchronously within the user gesture; strict popup
+        // blockers reject window.open calls made after an await.
+        const popup = window.open(
+            "about:blank",
+            "authentik-dingtalk-discovery",
+            "popup,width=640,height=760",
+        );
+        if (!popup) {
+            showMessage({
+                level: MessageLevel.error,
+                message: msg(
+                    "The DingTalk discovery popup was blocked. Allow popups for this site and try again.",
+                    {
+                        id: "sources.oauth.dingtalk-allowlist.discovery.popup-blocked",
+                    },
+                ),
+            });
+            return;
+        }
+        this.discoveryPopup = popup;
+        try {
+            const start = await this.sourcesApi.sourcesOauthDingtalkAllowlistDiscoverStartCreate({
+                sourceSlug: this.source.slug,
+            });
+            popup.location.assign(start.url);
+        } catch (error) {
+            popup.close();
+            this.discoveryPopup = null;
+            throw error;
+        }
     }
 
+    // Loading departments only populates the selection tree; it never changes the
+    // configured allowlist. Selection state stays entirely with the admin's input.
     private async loadDepartments(corpId: string): Promise<void> {
         if (!this.source?.slug) {
             return;
         }
         try {
-            const response = await this.discoveryApi.departments(this.source.slug, corpId);
-            const previousLoadedDeptIds = (this.fetchedDepartments[corpId] || []).map(
-                (department) => department.deptId,
-            );
-            const loadedDeptIds = response.departments.map((department) => department.deptId);
-            const departmentInput = mergeLoadedDingTalkDepartmentInput(
-                this.departmentInputs[corpId] ||
-                    renderDingTalkDepartmentInput(
-                        this.model.companies
-                            .find((company) => company.corpId === corpId)
-                            ?.deptIds.map(String) || [],
-                    ),
-                previousLoadedDeptIds,
-                loadedDeptIds,
-            );
+            const response = await this.sourcesApi.sourcesOauthDingtalkAllowlistDepartmentsCreate({
+                sourceSlug: this.source.slug,
+                dingTalkAllowlistDepartmentsRequestRequest: { corpId },
+            });
+            const departments = normalizeDingTalkDepartments(response.departments);
             this.fetchedDepartments = {
                 ...this.fetchedDepartments,
-                [corpId]: response.departments,
+                [corpId]: departments,
             };
-            this.departmentInputs = {
-                ...this.departmentInputs,
-                [corpId]: departmentInput,
-            };
-            this.updateCompany(corpId, {
-                label:
-                    response.label ||
-                    this.model.companies.find((company) => company.corpId === corpId)?.label ||
-                    corpId,
-                allowAll: false,
-                deptIds: departmentInput ? departmentInput.split(/\s+/u) : [],
-            });
             this.lastDepartmentFetch = {
                 label: this.lastDepartmentFetch.label,
                 state: "good",
-                detail: msg(str`${response.departments.length} departments loaded for ${corpId}`, {
+                detail: msg(str`${departments.length} departments loaded for ${corpId}`, {
                     id: "sources.oauth.dingtalk-allowlist.departments.loaded",
                 }),
             };
@@ -838,6 +772,8 @@ export class DingTalkAllowlistPanel extends AKElement {
             onPolicySaved: (policy) => {
                 this.policy = policy;
                 this.expressionValid = true;
+                // The configured allowlist is persisted; refreshes may take over again.
+                this.dirty = false;
             },
             onSourceRefreshed: (source) => {
                 this.source = source;
@@ -910,37 +846,70 @@ export class DingTalkAllowlistPanel extends AKElement {
             );
         }
 
-        const existing = await this.policiesApi.policiesBindingsList({
-            target: flow.policybindingmodelPtrId,
-            policy: policy.pk,
-            pageSize: 20,
-        });
-        const current = existing.results.find((binding) => binding.policy === policy.pk);
-        if (current) {
-            await this.policiesApi.policiesBindingsPartialUpdate({
-                policyBindingUuid: current.pk,
-                patchedPolicyBindingRequest: {
+        try {
+            // List every binding on the flow (not just this policy's) so a newly
+            // created binding gets an order after the existing ones.
+            const existing = await this.policiesApi.policiesBindingsList({
+                target: flow.policybindingmodelPtrId,
+                pageSize: 100,
+            });
+            const current = existing.results.find((binding) => binding.policy === policy.pk);
+            if (current) {
+                // Only re-enable a disabled binding; timeout, order, and failure
+                // handling stay whatever the admin configured.
+                if (!current.enabled) {
+                    await this.policiesApi.policiesBindingsPartialUpdate({
+                        policyBindingUuid: current.pk,
+                        patchedPolicyBindingRequest: {
+                            enabled: true,
+                        },
+                    });
+                }
+                return;
+            }
+
+            const nextOrder =
+                existing.results.reduce((order, binding) => Math.max(order, binding.order), 0) + 10;
+            await this.policiesApi.policiesBindingsCreate({
+                policyBindingRequest: {
+                    target: flow.policybindingmodelPtrId,
+                    policy: policy.pk,
                     enabled: true,
-                    timeout: current.timeout ?? 30,
+                    order: nextOrder,
+                    timeout: 30,
                     failureResult: false,
-                    order: current.order,
                 },
             });
+        } catch (error) {
+            throw new Error(await this.apiErrorMessage(error));
+        }
+    }
+
+    private async removeManagedConfiguration(): Promise<void> {
+        const policy = this.policy;
+        if (!policy) {
             return;
         }
-
-        const nextOrder =
-            existing.results.reduce((order, binding) => Math.max(order, binding.order), 0) + 10;
-        await this.policiesApi.policiesBindingsCreate({
-            policyBindingRequest: {
-                target: flow.policybindingmodelPtrId,
-                policy: policy.pk,
-                enabled: true,
-                order: nextOrder,
-                timeout: 30,
-                failureResult: false,
-            },
+        const bindings = await this.policiesApi.policiesBindingsList({
+            policy: policy.pk,
+            pageSize: 100,
         });
+        for (const binding of bindings.results) {
+            await this.policiesApi.policiesBindingsDestroy({
+                policyBindingUuid: binding.pk,
+            });
+        }
+        await this.policiesApi.policiesExpressionDestroy({
+            policyUuid: policy.pk,
+        });
+        this.policy = undefined;
+        this.authBinding = undefined;
+        this.enrollmentBinding = undefined;
+        this.model = { companies: [] };
+        this.departmentInputs = {};
+        this.expressionValid = undefined;
+        this.dirty = false;
+        await this.refreshStatus();
     }
 
     private errorMessage(error: unknown): string {
@@ -984,11 +953,6 @@ export class DingTalkAllowlistPanel extends AKElement {
                 }),
                 state: this.source?.enabled ? "good" : "danger",
             },
-            singleDingTalkLoginEntryStatusItem(
-                msg("One visible DingTalk login entry is expected", {
-                    id: "sources.oauth.dingtalk-allowlist.status.single-visible-entry",
-                }),
-            ),
             {
                 label: msg("Managed policy exists", {
                     id: "sources.oauth.dingtalk-allowlist.status.policy-exists",
@@ -1049,7 +1013,17 @@ export class DingTalkAllowlistPanel extends AKElement {
     private renderStatus(item: StatusItem): TemplateResult {
         const { good, type } = dingtalkStatusLabelProperties(item.state);
         return html`<li>
-            <ak-status-label type=${type} ?good=${good}></ak-status-label>
+            <ak-status-label
+                type=${type}
+                ?good=${good}
+                bad-label=${ifDefined(
+                    item.state === "unknown"
+                        ? msg("Unknown", {
+                              id: "sources.oauth.dingtalk-allowlist.status.unknown",
+                          })
+                        : undefined,
+                )}
+            ></ak-status-label>
             <span>${item.label}</span>
             ${item.detail ? html`<span class="ak-dingtalk-muted">${item.detail}</span>` : nothing}
         </li>`;
@@ -1068,7 +1042,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                     </label>
                     <input
                         class="pf-c-form-control"
-                        value=${this.manualCorpId}
+                        .value=${this.manualCorpId}
                         @input=${(event: InputEvent) => {
                             this.manualCorpId = (event.target as HTMLInputElement).value;
                         }}
@@ -1084,7 +1058,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                     </label>
                     <input
                         class="pf-c-form-control"
-                        value=${this.manualLabel}
+                        .value=${this.manualLabel}
                         @input=${(event: InputEvent) => {
                             this.manualLabel = (event.target as HTMLInputElement).value;
                         }}
@@ -1167,7 +1141,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                 <label>
                     <input
                         type="checkbox"
-                        ?checked=${company.allowAll}
+                        .checked=${company.allowAll}
                         @change=${(event: InputEvent) => {
                             this.updateCompany(company.corpId, {
                                 allowAll: (event.target as HTMLInputElement).checked,
@@ -1195,7 +1169,8 @@ export class DingTalkAllowlistPanel extends AKElement {
                     <input
                         class="pf-c-form-control ak-dingtalk-department-input"
                         ?disabled=${company.allowAll}
-                        .value=${this.departmentInputs[company.corpId] ?? company.deptIds.join(" ")}
+                        .value=${this.departmentInputs[company.corpId] ??
+                        renderDingTalkDepartmentInput(company.deptIds.map(String))}
                         placeholder=${msg("IDs separated by commas or spaces", {
                             id: "sources.oauth.dingtalk-allowlist.departments.placeholder",
                         })}
@@ -1204,6 +1179,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                                 ...this.departmentInputs,
                                 [company.corpId]: (event.target as HTMLInputElement).value,
                             };
+                            this.markDirty();
                         }}
                     />
                     <button
@@ -1316,7 +1292,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                                 <input
                                     type="checkbox"
                                     ?disabled=${company.allowAll}
-                                    ?checked=${row.selection === "checked"}
+                                    .checked=${row.selection === "checked"}
                                     .indeterminate=${row.selection === "indeterminate"}
                                     @change=${(event: InputEvent) => {
                                         this.toggleLoadedDepartment(
@@ -1391,6 +1367,44 @@ export class DingTalkAllowlistPanel extends AKElement {
         </div>`;
     }
 
+    private renderRemoveConfiguration(): TemplateResult {
+        if (!this.policy) {
+            return html``;
+        }
+        return html`<ak-forms-confirm
+            successMessage=${msg("DingTalk allowlist policy and bindings removed.", {
+                id: "sources.oauth.dingtalk-allowlist.remove.success",
+            })}
+            errorMessage=${msg("Failed to remove the DingTalk allowlist policy.", {
+                id: "sources.oauth.dingtalk-allowlist.remove.error",
+            })}
+            action=${msg("Remove allowlist", {
+                id: "sources.oauth.dingtalk-allowlist.remove.action",
+            })}
+            .onConfirm=${() => this.removeManagedConfiguration()}
+        >
+            <span slot="header"
+                >${msg("Remove DingTalk allowlist", {
+                    id: "sources.oauth.dingtalk-allowlist.remove.header",
+                })}</span
+            >
+            <p slot="body">
+                ${msg(
+                    "This deletes the managed allowlist policy and all of its flow bindings. DingTalk logins will no longer be restricted by company or department.",
+                    {
+                        id: "sources.oauth.dingtalk-allowlist.remove.body",
+                    },
+                )}
+            </p>
+            <button slot="trigger" class="pf-c-button pf-m-danger pf-m-secondary" type="button">
+                ${msg("Remove allowlist", {
+                    id: "sources.oauth.dingtalk-allowlist.remove.action",
+                })}
+            </button>
+            <div slot="modal"></div>
+        </ak-forms-confirm>`;
+    }
+
     render(): SlottedTemplateResult {
         if (!this.source) {
             return nothing;
@@ -1428,6 +1442,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                                 id: "sources.oauth.dingtalk-allowlist.status.refresh",
                             })}
                         </ak-spinner-button>
+                        ${this.renderRemoveConfiguration()}
                     </div>
                     ${this.renderDiscoveryDetails()}
                     <ul class="ak-dingtalk-status ak-dingtalk-section">

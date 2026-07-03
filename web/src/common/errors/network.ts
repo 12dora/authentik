@@ -180,7 +180,10 @@ export const ErrorFieldFallbackKeys = [
     "string", // OpenAPI
 ] as const;
 
-export type FallbackError = Record<(typeof ErrorFieldFallbackKeys)[number], string | undefined>;
+export type FallbackError = Record<
+    (typeof ErrorFieldFallbackKeys)[number],
+    string | string[] | undefined
+>;
 
 /**
  * Attempts to pluck a human readable error message from a {@linkcode ValidationError}.
@@ -221,6 +224,17 @@ export function pluckErrorDetail(errorLike: unknown, fallback?: string): string 
 
         if (typeof value === "string" && value) {
             return value;
+        }
+
+        // DRF serializes non-field errors as arrays, e.g. `{"detail": ["..."]}`.
+        if (Array.isArray(value)) {
+            const messages = value.filter(
+                (item): item is string => typeof item === "string" && item.length > 0,
+            );
+
+            if (messages.length > 0) {
+                return messages.join(", ");
+            }
         }
     }
 

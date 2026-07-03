@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 from django.shortcuts import get_object_or_404
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import generics, serializers
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import BasePermission
@@ -185,12 +185,26 @@ class DingTalkDirectorySyncView(APIView):
         return Response({"queued": True, "corp_id": str(corp_id)})
 
     @extend_schema(
-        request=DingTalkDirectorySyncRequestSerializer,
+        parameters=[
+            OpenApiParameter(
+                name="corp_id",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=True,
+            )
+        ],
+        request=None,
         responses={200: DingTalkDirectorySyncDeletedSerializer},
     )
     def delete(self, request: Request, source_slug: str) -> Response:
         source = self.dingtalk_source
-        corp_id = request.data.get("corp_id") or request.data.get("corpId")
+        # Prefer the query parameter: request bodies on DELETE are stripped by
+        # some proxies. The body keys remain supported for compatibility.
+        corp_id = (
+            request.query_params.get("corp_id")
+            or request.data.get("corp_id")
+            or request.data.get("corpId")
+        )
         if not corp_id:
             raise ValidationError({"corp_id": "This field is required."})
         corp_id = str(corp_id)

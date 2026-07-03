@@ -4,11 +4,9 @@ import {
     dingtalkDepartmentFetchFailureStatus,
     dingtalkStatusLabelProperties,
     invertLoadedDingTalkDepartmentInput,
-    mergeLoadedDingTalkDepartmentInput,
     removeDingTalkCompany,
     saveDingTalkAllowlistConfiguration,
     selectLoadedDingTalkDepartmentInput,
-    singleDingTalkLoginEntryStatusItem,
     splitDingTalkDepartmentIds,
     toggleDingTalkDepartmentInput,
     toggleDingTalkDepartmentTreeInput,
@@ -20,15 +18,6 @@ import type { DingTalkAllowlistModel } from "#admin/sources/oauth/DingTalkAllowl
 import { describe, expect, it } from "vitest";
 
 describe("DingTalkAllowlistPanelState", () => {
-    it("includes the required single visible DingTalk login entry status item", () => {
-        expect(
-            singleDingTalkLoginEntryStatusItem("One visible DingTalk login entry is expected"),
-        ).toEqual({
-            label: "One visible DingTalk login entry is expected",
-            state: "good",
-        });
-    });
-
     it("uses ak-status-label type for warning states instead of an unknown warning attribute", () => {
         expect(dingtalkStatusLabelProperties("good")).toEqual({
             good: true,
@@ -44,7 +33,7 @@ describe("DingTalkAllowlistPanelState", () => {
         });
         expect(dingtalkStatusLabelProperties("unknown")).toEqual({
             good: false,
-            type: "warning",
+            type: "info",
         });
     });
 
@@ -80,6 +69,30 @@ describe("DingTalkAllowlistPanelState", () => {
                 },
             ],
         });
+    });
+
+    it("keeps the configured mode and departments when an existing company is re-discovered", () => {
+        let model: DingTalkAllowlistModel = {
+            companies: [
+                {
+                    corpId: "corp-a",
+                    label: "Alpha",
+                    allowAll: false,
+                    deptIds: ["10", "20"],
+                },
+            ],
+        };
+
+        model = upsertDingTalkCompany(model, "corp-a", "Alpha renamed", true, []);
+
+        expect(model.companies).toEqual([
+            {
+                corpId: "corp-a",
+                label: "Alpha renamed",
+                allowAll: false,
+                deptIds: ["10", "20"],
+            },
+        ]);
     });
 
     it("keeps manual department IDs usable after department discovery failure", () => {
@@ -200,19 +213,9 @@ describe("DingTalkAllowlistPanelState", () => {
         expect(result.departmentInputs).toEqual({ "corp-a": "" });
     });
 
-    it("merges loaded department IDs into the input while preserving manual IDs", () => {
-        expect(
-            mergeLoadedDingTalkDepartmentInput("manual-1 10 20", ["10", "20"], ["20", "30"]),
-        ).toEqual("manual-1 20 30");
-    });
-
     it("toggles loaded department IDs in the editable department input", () => {
-        expect(toggleDingTalkDepartmentInput("manual-1 20", "10", true)).toEqual(
-            "10 20 manual-1",
-        );
-        expect(toggleDingTalkDepartmentInput("manual-1 10 20", "10", false)).toEqual(
-            "20 manual-1",
-        );
+        expect(toggleDingTalkDepartmentInput("manual-1 20", "10", true)).toEqual("10 20 manual-1");
+        expect(toggleDingTalkDepartmentInput("manual-1 10 20", "10", false)).toEqual("20 manual-1");
     });
 
     it("builds hierarchical department rows with partial parent selection", () => {
@@ -397,5 +400,44 @@ describe("DingTalkAllowlistPanelState", () => {
         expect(calls).toContain("binding:auth-flow-pk");
         expect(calls).toContain("binding:enrollment-flow-pk");
         expect(calls.at(-1)).toBe("refresh");
+    });
+
+    it("ensures the shared flow binding only once when both flows are the same flow", async () => {
+        const bindingCalls: string[] = [];
+
+        const result = await saveDingTalkAllowlistConfiguration({
+            model: {
+                companies: [
+                    {
+                        corpId: "corp-a",
+                        label: "Alpha",
+                        allowAll: true,
+                        deptIds: [],
+                    },
+                ],
+            },
+            sourceSlug: "dingtalk",
+            createOrUpdatePolicy: async () => ({ pk: "policy-pk" }),
+            retrieveSource: async () => ({
+                authenticationFlow: "shared-flow-pk",
+                enrollmentFlow: "shared-flow-pk",
+            }),
+            getAuthenticationFlowPk: (source) => source.authenticationFlow,
+            getEnrollmentFlowPk: (source) => source.enrollmentFlow,
+            resolveFlow: async (flowPk) => ({ flowPk }),
+            ensureBinding: async (flow) => {
+                bindingCalls.push(`binding:${flow?.flowPk}`);
+            },
+            refreshStatus: async () => {},
+            bindingFailureLabel: (kind) =>
+                kind === "authentication"
+                    ? "Authentication flow binding"
+                    : "Enrollment flow binding",
+            errorMessage: (error) => (error instanceof Error ? error.message : String(error)),
+        });
+
+        expect(bindingCalls).toEqual(["binding:shared-flow-pk"]);
+        expect(result?.failures).toEqual([]);
+        expect(result?.authFlow).toBe(result?.enrollmentFlow);
     });
 });

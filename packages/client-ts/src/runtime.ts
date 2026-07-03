@@ -144,7 +144,7 @@ export class BaseAPI {
         if (response && response.status >= 200 && response.status < 300) {
             return response;
         }
-        throw new ResponseError(response, await responseErrorMessage(response));
+        throw new ResponseError(response, "Response returned an error code");
     }
 
     private async createFetchParams(
@@ -292,58 +292,6 @@ export class ResponseError extends Error {
             Object.setPrototypeOf(this, actualProto);
         }
     }
-}
-
-const responseErrorFallback = "Response returned an error code";
-
-async function responseErrorMessage(response: Response): Promise<string> {
-    if (!response.headers.get("content-type")?.includes("application/json")) {
-        return responseErrorFallback;
-    }
-    try {
-        return responseErrorBodyMessage(await response.clone().json()) || responseErrorFallback;
-    } catch {
-        return responseErrorFallback;
-    }
-}
-
-function responseErrorBodyMessage(body: unknown): string | undefined {
-    if (typeof body === "string" && body) {
-        return body;
-    }
-    if (!body || typeof body !== "object") {
-        return undefined;
-    }
-
-    for (const fieldName of ["detail", "non_field_errors", "message", "string"]) {
-        const value = (body as Record<string, unknown>)[fieldName];
-        const message = responseErrorValueMessage(value);
-        if (message) {
-            return message;
-        }
-    }
-
-    for (const [fieldName, value] of Object.entries(body)) {
-        const message = responseErrorValueMessage(value);
-        if (message) {
-            return `${fieldName}: ${message}`;
-        }
-    }
-
-    return undefined;
-}
-
-function responseErrorValueMessage(value: unknown): string | undefined {
-    if (typeof value === "string" && value) {
-        return value;
-    }
-    if (Array.isArray(value)) {
-        const messages = value.filter((item): item is string => typeof item === "string" && !!item);
-        if (messages.length > 0) {
-            return messages.join(", ");
-        }
-    }
-    return undefined;
 }
 
 export class FetchError extends Error {

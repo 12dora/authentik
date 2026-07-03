@@ -75,24 +75,29 @@ export async function saveDingTalkAllowlistConfiguration<TPolicy, TSource, TFlow
     const source = await options.retrieveSource(options.sourceSlug);
     options.onSourceRefreshed?.(source);
 
-    const [authFlow, enrollmentFlow] = await Promise.all([
-        options.resolveFlow(options.getAuthenticationFlowPk(source)),
-        options.resolveFlow(options.getEnrollmentFlowPk(source)),
-    ]);
+    const authFlowPk = options.getAuthenticationFlowPk(source);
+    const enrollmentFlowPk = options.getEnrollmentFlowPk(source);
+    const sameFlow = Boolean(authFlowPk) && authFlowPk === enrollmentFlowPk;
+
+    const authFlow = await options.resolveFlow(authFlowPk);
+    const enrollmentFlow = sameFlow ? authFlow : await options.resolveFlow(enrollmentFlowPk);
     options.onFlowsResolved?.(authFlow, enrollmentFlow);
 
-    await Promise.all([
-        options.ensureBinding(authFlow, policy).catch((error: unknown) => {
-            failures.push(
-                `${options.bindingFailureLabel("authentication")}: ${options.errorMessage(error)}`,
-            );
-        }),
-        options.ensureBinding(enrollmentFlow, policy).catch((error: unknown) => {
+    // Bindings are ensured sequentially: concurrent list-then-create calls against the
+    // same flow race each other into duplicate PolicyBinding creates. When both flows
+    // are the same flow, a single binding covers both.
+    await options.ensureBinding(authFlow, policy).catch((error: unknown) => {
+        failures.push(
+            `${options.bindingFailureLabel("authentication")}: ${options.errorMessage(error)}`,
+        );
+    });
+    if (!sameFlow) {
+        await options.ensureBinding(enrollmentFlow, policy).catch((error: unknown) => {
             failures.push(
                 `${options.bindingFailureLabel("enrollment")}: ${options.errorMessage(error)}`,
             );
-        }),
-    ]);
+        });
+    }
 
     await options.refreshStatus();
 
@@ -106,20 +111,14 @@ export async function saveDingTalkAllowlistConfiguration<TPolicy, TSource, TFlow
     };
 }
 
-export function singleDingTalkLoginEntryStatusItem(label: string): StatusItem {
-    return {
-        label,
-        state: "good",
-    };
-}
-
 export function dingtalkStatusLabelProperties(state: StatusState): {
     good: boolean;
-    type: "error" | "warning";
+    type: "error" | "warning" | "info";
 } {
     return {
         good: state === "good",
-        type: state === "warning" || state === "unknown" ? "warning" : "error",
+        // "unknown" is a neutral not-yet-checked state, not a failure.
+        type: state === "warning" ? "warning" : state === "unknown" ? "info" : "error",
     };
 }
 
@@ -170,21 +169,15 @@ export function upsertDingTalkCompany(
     deptIds: string[],
 ): DingTalkAllowlistModel {
     const existing = model.companies.find((company) => company.corpId === corpId);
+    // Re-discovering or re-adding a known company must never widen its access:
+    // an existing entry keeps its configured allowAll/deptIds and only picks up
+    // a fresher label.
     const companies = existing
         ? model.companies.map((company) =>
               company.corpId === corpId
                   ? {
                         ...company,
                         label: label || company.label,
-                        allowAll,
-                        deptIds: allowAll
-                            ? []
-                            : Array.from(
-                                  new Set([
-                                      ...company.deptIds.map((deptId) => String(deptId)),
-                                      ...deptIds,
-                                  ]),
-                              ),
                     }
                   : company,
           )
@@ -200,10 +193,7 @@ export function upsertDingTalkCompany(
 
     return {
         companies: companies.sort((left, right) =>
-            left.corpId.localeCompare(right.corpId, undefined, {
-                numeric: true,
-                sensitivity: "base",
-            }),
+            left.corpId < right.corpId ? -1 : left.corpId > right.corpId ? 1 : 0,
         ),
     };
 }
@@ -303,24 +293,6 @@ export function applyDingTalkDepartmentInputs(
         nextInputs = result.departmentInputs;
     }
     return { model: nextModel, departmentInputs: nextInputs };
-}
-
-export function mergeLoadedDingTalkDepartmentInput(
-    currentInput: string,
-    previousLoadedDeptIds: string[],
-    nextLoadedDeptIds: string[],
-): string {
-    const previousLoaded = new Set(previousLoadedDeptIds.map(String));
-    const manualDeptIds = splitDingTalkDepartmentIds(currentInput).filter(
-        (deptId) => !previousLoaded.has(deptId),
-    );
-    const manual = new Set(manualDeptIds);
-    return [
-        ...manualDeptIds,
-        ...sortDingTalkDepartmentIds(nextLoadedDeptIds.map(String)).filter(
-            (deptId) => !manual.has(deptId),
-        ),
-    ].join(" ");
 }
 
 export function toggleDingTalkDepartmentInput(
@@ -448,7 +420,10 @@ export function selectLoadedDingTalkDepartmentInput(
 ): string {
     return renderDingTalkDepartmentInput(
         Array.from(
-            new Set([...splitDingTalkDepartmentIds(currentInput), ...loadedDingTalkDepartmentIds(departments)]),
+            new Set([
+                ...splitDingTalkDepartmentIds(currentInput),
+                ...loadedDingTalkDepartmentIds(departments),
+            ]),
         ),
     );
 }

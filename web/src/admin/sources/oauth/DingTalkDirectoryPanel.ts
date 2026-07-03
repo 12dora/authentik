@@ -1,16 +1,18 @@
 import "#components/ak-status-label";
 import "#elements/EmptyState";
 import "#elements/buttons/SpinnerButton/index";
+import "#elements/forms/ConfirmationForm";
 import "#elements/tasks/ScheduleList";
 
 import { DEFAULT_CONFIG } from "#common/api/config";
+import { parseAPIResponseError, pluckErrorDetail } from "#common/errors/network";
 import { MessageLevel } from "#common/messages";
 
 import { AKElement } from "#elements/Base";
 import { showMessage } from "#elements/messages/MessageContainer";
 import { SlottedTemplateResult } from "#elements/types";
 
-import { BaseAPI, OAuthSource } from "@goauthentik/api";
+import { DingTalkDirectorySyncStatus, OAuthSource, SourcesApi } from "@goauthentik/api";
 
 import { msg, str } from "@lit/localize";
 import { css, CSSResult, html, PropertyValues, TemplateResult } from "lit";
@@ -24,29 +26,7 @@ import PFFormControl from "@patternfly/patternfly/components/FormControl/form-co
 import PFTable from "@patternfly/patternfly/components/Table/table.css";
 import PFFlex from "@patternfly/patternfly/layouts/Flex/flex.css";
 
-export interface DingTalkDirectorySyncStatus {
-    corp_id: string;
-    status: string;
-    started_at: string | null;
-    finished_at: string | null;
-    error: string | null;
-    counters: Record<string, unknown> | null;
-}
-
-interface DingTalkDirectoryStatusResponse {
-    source_slug: string;
-    sync: DingTalkDirectorySyncStatus[];
-}
-
-interface DingTalkDirectorySyncResponse {
-    queued: boolean;
-    corp_id: string;
-}
-
-interface DingTalkDirectoryDeleteResponse {
-    deleted: boolean;
-    corp_id: string;
-}
+export type { DingTalkDirectorySyncStatus };
 
 export interface DingTalkDirectoryStatusSummary {
     total: number;
@@ -142,114 +122,20 @@ export function dingtalkDirectorySummaryMetrics(
     return metrics;
 }
 
-class DingTalkDirectoryApi extends BaseAPI {
-    async status(sourceSlug: string): Promise<DingTalkDirectoryStatusResponse> {
-        const response = await this.request({
-            path: `/sources/oauth/dingtalk-directory/${encodeURIComponent(sourceSlug)}/status/`,
-            method: "GET",
-            headers: {},
-            query: {},
-        });
-        return this.normalizeStatus(await response.json(), sourceSlug);
-    }
-
-    async sync(sourceSlug: string, corpId: string): Promise<DingTalkDirectorySyncResponse> {
-        const response = await this.request({
-            path: `/sources/oauth/dingtalk-directory/${encodeURIComponent(sourceSlug)}/sync/`,
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            query: {},
-            body: { corp_id: corpId },
-        });
-        return this.normalizeSyncResponse(await response.json(), corpId);
-    }
-
-    async deleteSyncStatus(
+class DingTalkDirectoryApi extends SourcesApi {
+    // The vendored client does not expose a destroy method for this endpoint, so
+    // this is the one hand-written call. corp_id travels as a query parameter:
+    // request bodies on DELETE are stripped by some proxies.
+    async sourcesOauthDingtalkDirectorySyncDestroy(
         sourceSlug: string,
         corpId: string,
-    ): Promise<DingTalkDirectoryDeleteResponse> {
-        const response = await this.request({
+    ): Promise<void> {
+        await this.request({
             path: `/sources/oauth/dingtalk-directory/${encodeURIComponent(sourceSlug)}/sync/`,
             method: "DELETE",
-            headers: { "Content-Type": "application/json" },
-            query: {},
-            body: { corp_id: corpId },
+            headers: {},
+            query: { corp_id: corpId },
         });
-        return this.normalizeDeleteResponse(await response.json(), corpId);
-    }
-
-    private normalizeStatus(value: unknown, sourceSlug: string): DingTalkDirectoryStatusResponse {
-        if (!value || typeof value !== "object") {
-            return { source_slug: sourceSlug, sync: [] };
-        }
-        const record = value as Record<string, unknown>;
-        const sync = Array.isArray(record.sync) ? record.sync : [];
-        return {
-            source_slug:
-                this.normalizeString(record.source_slug ?? record.sourceSlug) || sourceSlug,
-            sync: sync
-                .map((status) => this.normalizeSyncStatus(status))
-                .filter((status): status is DingTalkDirectorySyncStatus => status !== null),
-        };
-    }
-
-    private normalizeSyncStatus(value: unknown): DingTalkDirectorySyncStatus | null {
-        if (!value || typeof value !== "object") {
-            return null;
-        }
-        const record = value as Record<string, unknown>;
-        const corpId = this.normalizeString(record.corp_id ?? record.corpId);
-        if (!corpId) {
-            return null;
-        }
-        return {
-            corp_id: corpId,
-            status: this.normalizeString(record.status) || "unknown",
-            started_at: this.normalizeNullableString(record.started_at ?? record.startedAt),
-            finished_at: this.normalizeNullableString(record.finished_at ?? record.finishedAt),
-            error: this.normalizeNullableString(record.error),
-            counters:
-                record.counters && typeof record.counters === "object"
-                    ? (record.counters as Record<string, unknown>)
-                    : {},
-        };
-    }
-
-    private normalizeSyncResponse(value: unknown, corpId: string): DingTalkDirectorySyncResponse {
-        if (!value || typeof value !== "object") {
-            return { queued: false, corp_id: corpId };
-        }
-        const record = value as Record<string, unknown>;
-        return {
-            queued: record.queued === true,
-            corp_id: this.normalizeString(record.corp_id ?? record.corpId) || corpId,
-        };
-    }
-
-    private normalizeDeleteResponse(
-        value: unknown,
-        corpId: string,
-    ): DingTalkDirectoryDeleteResponse {
-        if (!value || typeof value !== "object") {
-            return { deleted: false, corp_id: corpId };
-        }
-        const record = value as Record<string, unknown>;
-        return {
-            deleted: record.deleted === true,
-            corp_id: this.normalizeString(record.corp_id ?? record.corpId) || corpId,
-        };
-    }
-
-    private normalizeNullableString(value: unknown): string | null {
-        const normalized = this.normalizeString(value);
-        return normalized || null;
-    }
-
-    private normalizeString(value: unknown): string {
-        if (value === undefined || value === null) {
-            return "";
-        }
-        return String(value).trim();
     }
 }
 
@@ -266,6 +152,9 @@ export class DingTalkDirectoryPanel extends AKElement {
 
     @state()
     private loaded = false;
+
+    @state()
+    private loadError?: string;
 
     private api = new DingTalkDirectoryApi(DEFAULT_CONFIG);
 
@@ -342,7 +231,7 @@ export class DingTalkDirectoryPanel extends AKElement {
 
     protected willUpdate(changedProperties: PropertyValues<this>): void {
         if (changedProperties.has("source") && this.source?.slug) {
-            this.refreshStatus();
+            this.refreshStatus().catch(console.error);
         }
     }
 
@@ -350,9 +239,17 @@ export class DingTalkDirectoryPanel extends AKElement {
         if (!this.source?.slug) {
             return;
         }
-        const response = await this.api.status(this.source.slug);
-        this.statuses = response.sync;
-        this.loaded = true;
+        try {
+            const response = await this.api.sourcesOauthDingtalkDirectoryStatusRetrieve({
+                sourceSlug: this.source.slug,
+            });
+            this.statuses = response.sync;
+            this.loadError = undefined;
+        } catch (error) {
+            this.loadError = pluckErrorDetail(await parseAPIResponseError(error));
+        } finally {
+            this.loaded = true;
+        }
     }
 
     private async triggerManualSync(): Promise<void> {
@@ -367,11 +264,14 @@ export class DingTalkDirectoryPanel extends AKElement {
                 }),
             );
         }
-        const response = await this.api.sync(this.source.slug, corpId);
+        const response = await this.api.sourcesOauthDingtalkDirectorySyncCreate({
+            sourceSlug: this.source.slug,
+            dingTalkDirectorySyncRequestRequest: { corpId },
+        });
         if (response.queued) {
             showMessage({
                 level: MessageLevel.success,
-                message: msg(str`Queued DingTalk directory sync for ${response.corp_id}`, {
+                message: msg(str`Queued DingTalk directory sync for ${response.corpId}`, {
                     id: "sources.oauth.dingtalk-directory.sync.queued",
                 }),
             });
@@ -384,19 +284,11 @@ export class DingTalkDirectoryPanel extends AKElement {
         if (!this.source?.slug) {
             return;
         }
-        const response = await this.api.deleteSyncStatus(this.source.slug, corpId);
-        if (response.deleted) {
-            showMessage({
-                level: MessageLevel.success,
-                message: msg(str`Deleted DingTalk directory sync record for ${response.corp_id}`, {
-                    id: "sources.oauth.dingtalk-directory.delete.success",
-                }),
-            });
-        }
+        await this.api.sourcesOauthDingtalkDirectorySyncDestroy(this.source.slug, corpId);
         await this.refreshStatus();
     }
 
-    private renderStatusLabel(status: string): TemplateResult {
+    private renderStatusLabel(status: string | undefined): TemplateResult {
         switch (status) {
             case "success":
                 return html`<ak-status-label
@@ -430,15 +322,11 @@ export class DingTalkDirectoryPanel extends AKElement {
         }
     }
 
-    private renderTimestamp(value: string | null): string {
-        if (!value) {
+    private renderTimestamp(value: Date | null | undefined): string {
+        if (!value || Number.isNaN(value.valueOf())) {
             return msg("-", { id: "sources.oauth.dingtalk-directory.timestamp.empty" });
         }
-        const parsed = new Date(value);
-        if (Number.isNaN(parsed.valueOf())) {
-            return value;
-        }
-        return parsed.toLocaleString();
+        return value.toLocaleString();
     }
 
     private renderCounters(counters: Record<string, unknown> | null): TemplateResult | string {
@@ -500,9 +388,61 @@ export class DingTalkDirectoryPanel extends AKElement {
         </div>`;
     }
 
+    private renderDeleteAction(status: DingTalkDirectorySyncStatus): TemplateResult {
+        return html`<ak-forms-confirm
+            successMessage=${msg(str`Deleted DingTalk directory sync record for ${status.corpId}`, {
+                id: "sources.oauth.dingtalk-directory.delete.success",
+            })}
+            errorMessage=${msg("Failed to delete DingTalk directory data.", {
+                id: "sources.oauth.dingtalk-directory.delete.error",
+            })}
+            action=${msg("Delete", {
+                id: "sources.oauth.dingtalk-directory.delete",
+            })}
+            .onConfirm=${() => this.deleteSyncStatus(status.corpId)}
+        >
+            <span slot="header"
+                >${msg("Delete DingTalk directory data", {
+                    id: "sources.oauth.dingtalk-directory.delete.header",
+                })}</span
+            >
+            <p slot="body">
+                ${msg(
+                    str`This deletes the sync record and all cached departments and users for ${status.corpId}. Lookups that rely on the cached directory will return no data until the next sync completes.`,
+                    {
+                        id: "sources.oauth.dingtalk-directory.delete.body",
+                    },
+                )}
+            </p>
+            <button slot="trigger" class="pf-c-button pf-m-danger pf-m-secondary" type="button">
+                ${msg("Delete", {
+                    id: "sources.oauth.dingtalk-directory.delete",
+                })}
+            </button>
+            <div slot="modal"></div>
+        </ak-forms-confirm>`;
+    }
+
     private renderTable(): TemplateResult {
         if (!this.loaded) {
             return html`<ak-empty-state loading></ak-empty-state>`;
+        }
+        if (this.loadError) {
+            return html`<ak-empty-state icon="fa-exclamation-triangle">
+                <span
+                    >${msg("Failed to load DingTalk directory status.", {
+                        id: "sources.oauth.dingtalk-directory.error.load",
+                    })}</span
+                >
+                <div slot="body">
+                    <span class="ak-dingtalk-directory-error">${this.loadError}</span>
+                    <p>
+                        ${msg("Use Refresh to try again.", {
+                            id: "sources.oauth.dingtalk-directory.error.retry",
+                        })}
+                    </p>
+                </div>
+            </ak-empty-state>`;
         }
         if (this.statuses.length < 1) {
             return html`<ak-empty-state icon="pf-icon-sync">
@@ -557,7 +497,7 @@ export class DingTalkDirectoryPanel extends AKElement {
                                     id: "sources.oauth.dingtalk-directory.table.corp-id",
                                 })}
                             >
-                                ${status.corp_id}
+                                ${status.corpId}
                             </td>
                             <td
                                 data-label=${msg("Status", {
@@ -571,21 +511,23 @@ export class DingTalkDirectoryPanel extends AKElement {
                                     id: "sources.oauth.dingtalk-directory.table.started",
                                 })}
                             >
-                                ${this.renderTimestamp(status.started_at)}
+                                ${this.renderTimestamp(status.startedAt)}
                             </td>
                             <td
                                 data-label=${msg("Finished", {
                                     id: "sources.oauth.dingtalk-directory.table.finished",
                                 })}
                             >
-                                ${this.renderTimestamp(status.finished_at)}
+                                ${this.renderTimestamp(status.finishedAt)}
                             </td>
                             <td
                                 data-label=${msg("Counters", {
                                     id: "sources.oauth.dingtalk-directory.table.counters",
                                 })}
                             >
-                                ${this.renderCounters(status.counters)}
+                                ${this.renderCounters(
+                                    (status.counters ?? null) as Record<string, unknown> | null,
+                                )}
                             </td>
                             <td
                                 data-label=${msg("Error", {
@@ -607,14 +549,7 @@ export class DingTalkDirectoryPanel extends AKElement {
                                     id: "sources.oauth.dingtalk-directory.table.actions",
                                 })}
                             >
-                                <ak-spinner-button
-                                    class="pf-m-danger pf-m-secondary"
-                                    .callAction=${() => this.deleteSyncStatus(status.corp_id)}
-                                >
-                                    ${msg("Delete", {
-                                        id: "sources.oauth.dingtalk-directory.delete",
-                                    })}
-                                </ak-spinner-button>
+                                ${this.renderDeleteAction(status)}
                             </td>
                         </tr>`,
                 )}

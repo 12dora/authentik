@@ -8,6 +8,7 @@ import type {
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("#elements/tasks/ScheduleList", () => ({}));
+vi.mock("#elements/forms/ConfirmationForm", () => ({}));
 
 let dingtalkDirectoryStatusSummary: (
     statuses: DingTalkDirectorySyncStatus[],
@@ -78,26 +79,26 @@ describe("DingTalkDirectoryPanel", () => {
     it("counts successful and failed sync statuses", () => {
         const statuses: DingTalkDirectorySyncStatus[] = [
             {
-                corp_id: "corp-a",
+                corpId: "corp-a",
                 status: "success",
-                started_at: "2026-06-11T01:00:00Z",
-                finished_at: "2026-06-11T01:02:00Z",
+                startedAt: new Date("2026-06-11T01:00:00Z"),
+                finishedAt: new Date("2026-06-11T01:02:00Z"),
                 error: "",
                 counters: { users: 10 },
             },
             {
-                corp_id: "corp-b",
+                corpId: "corp-b",
                 status: "error",
-                started_at: "2026-06-11T02:00:00Z",
-                finished_at: "2026-06-11T02:01:00Z",
+                startedAt: new Date("2026-06-11T02:00:00Z"),
+                finishedAt: new Date("2026-06-11T02:01:00Z"),
                 error: "missing permission",
                 counters: {},
             },
             {
-                corp_id: "corp-c",
+                corpId: "corp-c",
                 status: "running",
-                started_at: "2026-06-11T03:00:00Z",
-                finished_at: null,
+                startedAt: new Date("2026-06-11T03:00:00Z"),
+                finishedAt: null,
                 error: "",
                 counters: {},
             },
@@ -116,18 +117,18 @@ describe("DingTalkDirectoryPanel", () => {
         expect(
             dingtalkDirectoryStatusSummary([
                 {
-                    corp_id: "corp-a",
+                    corpId: "corp-a",
                     status: "queued",
-                    started_at: null,
-                    finished_at: null,
+                    startedAt: null,
+                    finishedAt: null,
                     error: "",
                     counters: {},
                 },
                 {
-                    corp_id: "corp-b",
+                    corpId: "corp-b",
                     status: "",
-                    started_at: null,
-                    finished_at: null,
+                    startedAt: null,
+                    finishedAt: null,
                     error: "",
                     counters: {},
                 },
@@ -144,18 +145,18 @@ describe("DingTalkDirectoryPanel", () => {
     it("returns stable summary metrics with separate values and labels", () => {
         const metrics = dingtalkDirectorySummaryMetrics([
             {
-                corp_id: "corp-a",
+                corpId: "corp-a",
                 status: "success",
-                started_at: null,
-                finished_at: null,
+                startedAt: null,
+                finishedAt: null,
                 error: "",
                 counters: {},
             },
             {
-                corp_id: "corp-b",
+                corpId: "corp-b",
                 status: "error",
-                started_at: null,
-                finished_at: null,
+                startedAt: null,
+                finishedAt: null,
                 error: "",
                 counters: {},
             },
@@ -174,10 +175,10 @@ describe("DingTalkDirectoryPanel", () => {
         Object.assign(panel, {
             statuses: [
                 {
-                    corp_id: "corp-a",
+                    corpId: "corp-a",
                     status: "success",
-                    started_at: null,
-                    finished_at: null,
+                    startedAt: null,
+                    finishedAt: null,
                     error: "",
                     counters: {},
                 },
@@ -200,6 +201,24 @@ describe("DingTalkDirectoryPanel", () => {
     it("renders a delete action for existing corp sync records", () => {
         expect(directoryPanelSource).toContain("deleteSyncStatus(");
         expect(directoryPanelSource).toContain("sources.oauth.dingtalk-directory.delete");
+    });
+
+    it("requires confirmation before deleting cached directory data", () => {
+        expect(directoryPanelSource).toContain("<ak-forms-confirm");
+        expect(directoryPanelSource).toContain("sources.oauth.dingtalk-directory.delete.header");
+        expect(directoryPanelSource).toContain("sources.oauth.dingtalk-directory.delete.body");
+    });
+
+    it("sends the delete corp ID as a query parameter instead of a DELETE body", () => {
+        expect(directoryPanelSource).toContain("query: { corp_id: corpId }");
+        expect(directoryPanelSource).not.toContain(
+            'method: "DELETE",\n            headers: { "Content-Type": "application/json" }',
+        );
+    });
+
+    it("renders an error state instead of loading forever when the status request fails", () => {
+        expect(directoryPanelSource).toContain("loadError");
+        expect(directoryPanelSource).toContain("sources.oauth.dingtalk-directory.error.load");
     });
 
     it("renders the DingTalk directory sync schedule so its interval can be edited", () => {
@@ -256,6 +275,11 @@ describe("DingTalkDirectoryPanel", () => {
             "sources.oauth.dingtalk-directory.docs",
             "sources.oauth.dingtalk-directory.delete",
             "sources.oauth.dingtalk-directory.delete.success",
+            "sources.oauth.dingtalk-directory.delete.error",
+            "sources.oauth.dingtalk-directory.delete.header",
+            "sources.oauth.dingtalk-directory.delete.body",
+            "sources.oauth.dingtalk-directory.error.load",
+            "sources.oauth.dingtalk-directory.error.retry",
             "sources.oauth.dingtalk-directory.schedules.title",
         ];
 

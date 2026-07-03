@@ -59,4 +59,37 @@ describe("DingTalkAllowlistPanel localization and controls", () => {
             "this.upsertCompany(result.corpId, result.label || result.corpId, true, []);",
         );
     });
+
+    it("binds checkboxes through the checked property so programmatic state stays visible", () => {
+        expect(allowlistPanel).toContain(".checked=${company.allowAll}");
+        expect(allowlistPanel).toContain('.checked=${row.selection === "checked"}');
+        expect(allowlistPanel).not.toContain("?checked=");
+    });
+
+    it("binds the manual company inputs through the value property so they clear after adding", () => {
+        expect(allowlistPanel).toContain(".value=${this.manualCorpId}");
+        expect(allowlistPanel).toContain(".value=${this.manualLabel}");
+    });
+
+    it("keeps loading departments read-only instead of merging them into the allowlist", () => {
+        expect(allowlistPanel).not.toContain("mergeLoadedDingTalkDepartmentInput");
+        expect(allowlistPanel).toContain("normalizeDingTalkDepartments(response.departments)");
+    });
+
+    it("only accepts discovery messages from its own popup with the backend marker fields", () => {
+        expect(allowlistPanel).toContain("event.source !== this.discoveryPopup");
+        expect(allowlistPanel).toContain("DINGTALK_DISCOVERY_MESSAGE_SOURCE");
+        expect(allowlistPanel).toContain("DINGTALK_DISCOVERY_MESSAGE_CONTEXT");
+        expect(allowlistPanel).toContain("record.ok === false");
+    });
+
+    it("opens the discovery popup synchronously before awaiting the start endpoint", () => {
+        const popupIndex = allowlistPanel.indexOf("window.open(");
+        const startIndex = allowlistPanel.indexOf(
+            "sourcesOauthDingtalkAllowlistDiscoverStartCreate",
+        );
+        expect(allowlistPanel).toContain('"about:blank"');
+        expect(popupIndex).toBeGreaterThan(-1);
+        expect(startIndex).toBeGreaterThan(popupIndex);
+    });
 });

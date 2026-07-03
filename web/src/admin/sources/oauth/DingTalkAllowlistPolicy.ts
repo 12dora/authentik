@@ -1,3 +1,5 @@
+import { msg, str } from "@lit/localize";
+
 export const DINGTALK_ALLOWLIST_MARKER = "authentik-managed-dingtalk-allowlist";
 
 export interface DingTalkAllowlistCompany {
@@ -31,10 +33,11 @@ function normalizeString(value: string | number | undefined | null): string {
     return String(value).trim();
 }
 
+// The serialized config doubles as the backend's `config_version` session-marker
+// comparison value; ordering must match Python's `sorted()` (plain code-point order),
+// not any locale- or numeric-aware collation.
 function sortStrings(values: string[]): string[] {
-    return [...values].sort((left, right) =>
-        left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }),
-    );
+    return [...values].sort();
 }
 
 function toStoredModel(model: DingTalkAllowlistModel): StoredDingTalkAllowlistModel {
@@ -63,7 +66,11 @@ export function validateDingTalkAllowlistModel(
     model: DingTalkAllowlistModel,
 ): DingTalkAllowlistModel {
     if (!Array.isArray(model.companies) || model.companies.length < 1) {
-        throw new Error("Add at least one DingTalk company.");
+        throw new Error(
+            msg("Add at least one DingTalk company.", {
+                id: "sources.oauth.dingtalk-allowlist.validation.company-required",
+            }),
+        );
     }
 
     const corpIds = new Set<string>();
@@ -71,10 +78,18 @@ export function validateDingTalkAllowlistModel(
     const companies = model.companies.map((company) => {
         const corpId = normalizeString(company.corpId);
         if (!corpId) {
-            throw new Error("Company corpId is required.");
+            throw new Error(
+                msg("Company corpId is required.", {
+                    id: "sources.oauth.dingtalk-allowlist.validation.corp-id-required",
+                }),
+            );
         }
         if (corpIds.has(corpId)) {
-            throw new Error(`Duplicate company corpId: ${corpId}.`);
+            throw new Error(
+                msg(str`Duplicate company corpId: ${corpId}.`, {
+                    id: "sources.oauth.dingtalk-allowlist.validation.duplicate-corp-id",
+                }),
+            );
         }
         corpIds.add(corpId);
 
@@ -91,7 +106,12 @@ export function validateDingTalkAllowlistModel(
 
         if (!allowAll && deptIds.length < 1) {
             throw new Error(
-                `Company ${corpId} must allow all users or include at least one department.`,
+                msg(
+                    str`Company ${corpId} must allow all users or include at least one department.`,
+                    {
+                        id: "sources.oauth.dingtalk-allowlist.validation.departments-required",
+                    },
+                ),
             );
         }
 
@@ -104,11 +124,10 @@ export function validateDingTalkAllowlistModel(
     });
 
     return {
+        // Plain code-point order keeps the serialized config (and therefore the
+        // backend's config_version comparison) deterministic across environments.
         companies: companies.sort((left, right) =>
-            left.corpId.localeCompare(right.corpId, undefined, {
-                numeric: true,
-                sensitivity: "base",
-            }),
+            left.corpId < right.corpId ? -1 : left.corpId > right.corpId ? 1 : 0,
         ),
     };
 }
@@ -241,6 +260,10 @@ return False
 `;
 }
 
+export function hasDingTalkAllowlistPolicyMarker(expression: string): boolean {
+    return expression.split("\n").some((line) => line.trim() === `# ${DINGTALK_ALLOWLIST_MARKER}`);
+}
+
 export function parseDingTalkAllowlistPolicy(expression: string): DingTalkAllowlistModel | null {
     if (!hasDingTalkAllowlistPolicyMarker(expression)) {
         return null;
@@ -259,8 +282,4 @@ export function parseDingTalkAllowlistPolicy(expression: string): DingTalkAllowl
     } catch {
         return null;
     }
-}
-
-export function hasDingTalkAllowlistPolicyMarker(expression: string): boolean {
-    return expression.split("\n").some((line) => line.trim() === `# ${DINGTALK_ALLOWLIST_MARKER}`);
 }

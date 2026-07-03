@@ -142,7 +142,7 @@ export class ApplicationListPage extends WithBrandConfig(TablePage<Application>)
                 ? html`<a href="#/core/providers/${item.providerObj?.pk}">
                       ${item.providerObj?.name}
                   </a>`
-                : html`${msg("-")}`,
+                : html`<span aria-label=${msg("None")}>${msg("-")}</span>`,
             html`${item.providerObj?.verboseName || msg("-")}`,
             html`<div class="ak-c-table__actions">
                 ${IconEditButton(ApplicationForm, item.slug)}
