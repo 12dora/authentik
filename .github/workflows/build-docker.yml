@@ -22,7 +22,7 @@ on:
         default: ""
 
 permissions:
-  contents: read
+  contents: write # required to create GitHub Releases
   packages: write
 
 env:
@@ -141,3 +141,34 @@ jobs:
         run: |
           docker buildx imagetools inspect \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+
+      - name: Prepare release metadata
+        id: rel
+        run: |
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y.%m.%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ steps.rel.outputs.date }}-${{ steps.rel.outputs.short_sha }}
+          name: authentik ${{ steps.rel.outputs.date }} (${{ steps.rel.outputs.short_sha }})
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          generate_release_notes: false
+          body: |
+            多架构 Docker 镜像已发布到 GHCR（**linux/amd64** + **linux/arm64**，Docker 会按你的架构自动选择）。
+
+            ### 镜像
+            ```
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:sha-${{ steps.rel.outputs.short_sha }}
+            ```
+
+            ### 拉取
+            ```bash
+            docker pull ghcr.io/${{ github.repository }}:latest
+            ```
+            > 若拉取需要登录，说明 GHCR 包仍为 Private：在 Packages → 该包 → Package settings → Change visibility → Public。
+
+            提交：`${{ github.sha }}`
