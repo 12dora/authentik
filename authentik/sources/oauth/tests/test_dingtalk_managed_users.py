@@ -51,6 +51,7 @@ class TestDingTalkManagedUsers(TestCase):
             source=self.source,
             corp_id="CORP",
             user_id=user_id,
+            union_id=f"UNION_{user_id}",
             name=user_id,
             manager_user_id=manager_user_id,
             active=active,
@@ -61,10 +62,11 @@ class TestDingTalkManagedUsers(TestCase):
 
     def _bind(self, source_user_id: str, *, is_active: bool = True):
         user = create_test_user(source_user_id.lower(), is_active=is_active)
+        # Connections are keyed by the stable unionId identity (see get_user_id).
         UserOAuthSourceConnection.objects.create(
             user=user,
             source=self.source,
-            identifier=f"CORP:{source_user_id}",
+            identifier=f"UNION_{source_user_id}",
         )
         return user
 
@@ -86,7 +88,11 @@ class TestDingTalkManagedUsers(TestCase):
         self.assertEqual(result["last_synced_at"], self.seen.isoformat())
         self.assertEqual(
             result["diagnostics"],
-            {"recursion_cycle_detected": False, "max_depth_exceeded": False},
+            {
+                "recursion_cycle_detected": False,
+                "max_depth_exceeded": False,
+                "max_depth_omitted": 0,
+            },
         )
         self.assertEqual(
             [item["source_user_id"] for item in result["users"]],
@@ -116,7 +122,11 @@ class TestDingTalkManagedUsers(TestCase):
         self.assertEqual(result["users"], [])
         self.assertEqual(
             result["diagnostics"],
-            {"recursion_cycle_detected": False, "max_depth_exceeded": False},
+            {
+                "recursion_cycle_detected": False,
+                "max_depth_exceeded": False,
+                "max_depth_omitted": 0,
+            },
         )
 
     def test_cycle_sets_diagnostics_without_looping_forever(self):
@@ -179,7 +189,7 @@ class TestDingTalkManagedUsers(TestCase):
         UserOAuthSourceConnection.objects.create(
             user=other,
             source=self.source,
-            identifier="CORP:EMP1",
+            identifier="UNION_EMP1",
         )
 
         with self.assertRaises(DingTalkBindingConflict):

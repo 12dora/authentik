@@ -299,16 +299,19 @@ class TestTypeDingTalk(TestCase):
         self.assertNotIn("CLIENT_SECRET", log_output)
 
     def test_user_id(self):
-        """Test DingTalk user ID extraction"""
+        """Test DingTalk user ID extraction uses the stable unionId"""
         callback = DingTalkOAuth2Callback()
 
         self.assertEqual(
-            callback.get_user_id({"corpId": "CORP_ID", "userid": "USER_ID"}),
-            "CORP_ID:USER_ID",
+            callback.get_user_id(
+                {"corpId": "CORP_ID", "userid": "USER_ID", "unionId": "UNION_ID"}
+            ),
+            "UNION_ID",
         )
-        self.assertEqual(callback.get_user_id({"userid": "USER_ID"}), "USER_ID")
         self.assertEqual(callback.get_user_id({"unionId": "UNION_ID"}), "UNION_ID")
         self.assertEqual(callback.get_user_id({"openId": "OPEN_ID"}), "OPEN_ID")
+        # userid alone is only unique within a corp, so it is no longer used as the identity.
+        self.assertIsNone(callback.get_user_id({"userid": "USER_ID", "corpId": "CORP_ID"}))
         self.assertIsNone(callback.get_user_id({}))
 
     def test_base_user_properties(self):
@@ -318,7 +321,8 @@ class TestTypeDingTalk(TestCase):
             source=self.source, info=profile, client=None, token={}
         )
 
-        self.assertEqual(context["username"], "Ada Lovelace")
+        # username is the short DingTalk userid; name carries the display name.
+        self.assertEqual(context["username"], "USER_ID")
         self.assertEqual(context["email"], "ada@company.example")
         self.assertEqual(context["name"], "Ada Lovelace")
         self.assertEqual(context["type"], UserTypes.INTERNAL)
@@ -334,13 +338,15 @@ class TestTypeDingTalk(TestCase):
         )
         self.assertEqual(context["attributes"]["dingtalk"]["raw_profile"], profile)
 
-    def test_base_user_properties_username_falls_back_to_nick(self):
-        """Test DingTalk username uses nick when enhanced profile has no name."""
+    def test_base_user_properties_without_userid_has_no_username(self):
+        """Without the directory enhancement there is no userid, so username is left unset."""
         context = DingTalkType().get_base_user_properties(
             source=self.source, info=DINGTALK_ME_PROFILE, client=None, token={}
         )
 
-        self.assertEqual(context["username"], "Ada")
+        # username must be the userid; when it is unavailable enrollment fails closed later,
+        # rather than provisioning an account with a derived/unstable username.
+        self.assertIsNone(context["username"])
         self.assertEqual(context["name"], "Ada")
 
     def test_registry(self):
@@ -427,7 +433,7 @@ class TestTypeDingTalk(TestCase):
         dingtalk = prompt_data["attributes"]["dingtalk"]
         connection = plan.context[PLAN_CONTEXT_SOURCES_CONNECTION]
 
-        self.assertEqual(prompt_data["username"], "Ada Lovelace")
+        self.assertEqual(prompt_data["username"], "USER_ID")
         self.assertEqual(prompt_data["email"], "ada@company.example")
         self.assertEqual(prompt_data["name"], "Ada Lovelace")
         self.assertEqual(dingtalk["name"], "Ada Lovelace")
@@ -438,6 +444,6 @@ class TestTypeDingTalk(TestCase):
         self.assertEqual(dingtalk["raw_profile"], DINGTALK_ME_PROFILE)
         self.assertNotIn("title", dingtalk["raw_profile"])
         self.assertNotIn("userid", dingtalk["raw_profile"])
-        self.assertEqual(connection.identifier, "CORP_ID:USER_ID")
+        self.assertEqual(connection.identifier, "UNION_ID")
         self.assertEqual(connection.access_token, "USER_ACCESS_TOKEN")
         self.assertEqual(connection.refresh_token, "REFRESH_TOKEN")

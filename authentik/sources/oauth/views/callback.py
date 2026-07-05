@@ -11,11 +11,18 @@ from django.shortcuts import redirect
 from django.utils.timezone import now
 from django.utils.translation import gettext as _
 from django.views.generic import View
+from guardian.shortcuts import get_anonymous_user
 from structlog.stdlib import get_logger
 
 from authentik.core.models import UserTypes
 from authentik.core.sources.flow_manager import SourceFlowManager
 from authentik.events.models import Event, EventAction
+from authentik.flows.exceptions import FlowNonApplicableException
+from authentik.flows.planner import PLAN_CONTEXT_SOURCE
+from authentik.policies.engine import PolicyEngine
+from authentik.policies.exceptions import PolicyEngineException
+from authentik.policies.types import PolicyResult
+from authentik.policies.utils import delete_none_values
 from authentik.sources.oauth.clients.base import BaseOAuthClient
 from authentik.sources.oauth.models import (
     GroupOAuthSourceConnection,
@@ -23,6 +30,7 @@ from authentik.sources.oauth.models import (
     UserOAuthSourceConnection,
 )
 from authentik.sources.oauth.views.base import OAuthClientMixin
+from authentik.stages.prompt.stage import PLAN_CONTEXT_PROMPT
 
 LOGGER = get_logger()
 
@@ -115,13 +123,10 @@ class OAuthCallback(OAuthClientMixin, View):
         LOGGER.warning("Authentication Failure", reason=reason)
         messages.error(
             self.request,
-            _(
-                "Authentication failed: {reason}".format_map(
-                    {
-                        "reason": reason,
-                    }
-                )
-            ),
+            # Translate the template first, then interpolate: wrapping the already-formatted
+            # string in _() would look up a per-reason msgid that is never in the catalog, so
+            # the message would always fall back to English.
+            _("Authentication failed: {reason}").format(reason=reason),
         )
         return redirect(self.get_error_redirect(self.source, reason))
 
@@ -132,6 +137,34 @@ class OAuthSourceFlowManager(SourceFlowManager):
     user_connection_type = UserOAuthSourceConnection
     group_connection_type = GroupOAuthSourceConnection
 
+    def source_policy_result(self) -> PolicyResult:
+        """Evaluate policies bound directly to the source before deciding the source action."""
+        user = self.request.user if self.request.user.is_authenticated else get_anonymous_user()
+        engine = PolicyEngine(self.source, user, self.request)
+        engine.use_cache = False
+        engine.request.context.update(self.policy_context)
+        engine.request.context.update(
+            {
+                PLAN_CONTEXT_SOURCE: self.source,
+                PLAN_CONTEXT_PROMPT: delete_none_values(self.user_properties),
+                "prompt_data": delete_none_values(self.user_properties),
+            }
+        )
+        return engine.build().result
+
+    def get_flow(self, **kwargs) -> HttpResponse:
+        # D3: evaluate source-bound policies before deciding the action, but only in this OAuth
+        # subclass — the core SourceFlowManager.get_flow is left unmodified (smaller merge
+        # surface) and non-OAuth source types (SAML/Plex/...) keep upstream behavior.
+        try:
+            source_policy_result = self.source_policy_result()
+        except PolicyEngineException as exc:
+            self._logger.warning("failed to evaluate source policy", exc=exc)
+            source_policy_result = PolicyResult(False, str(exc))
+        if not source_policy_result.passing:
+            return self.error_handler(FlowNonApplicableException(source_policy_result))
+        return super().get_flow(**kwargs)
+
     def _dingtalk_source_link_allowed(self) -> bool:
         """Check DingTalk allowlist before accepting a DingTalk source result."""
         if getattr(self.source, "provider_type", "") != "dingtalk":
@@ -139,11 +172,25 @@ class OAuthSourceFlowManager(SourceFlowManager):
         from authentik.sources.oauth.types.dingtalk import (
             DINGTALK_ALLOWLIST_PLAN_CONTEXT,
             build_dingtalk_allowlist_session_marker,
+            dingtalk_allowlist_has_unparseable_binding,
             get_dingtalk_allowlist_binding,
         )
 
         _, _, config = get_dingtalk_allowlist_binding(self.source)
         if config is None:
+            # B5: a managed allowlist that exists but cannot be parsed must fail closed and
+            # alert an admin, rather than silently allowing every DingTalk user. Only a genuine
+            # absence of allowlist configuration is treated as fail-open.
+            if dingtalk_allowlist_has_unparseable_binding(self.source):
+                Event.new(
+                    EventAction.CONFIGURATION_ERROR,
+                    message=(
+                        "DingTalk allowlist policy exists but its config is unparseable; "
+                        "denying DingTalk source login until it is repaired."
+                    ),
+                    source=self.source,
+                ).from_http(self.request)
+                return False
             return True
         userinfo = self.policy_context.get("oauth_userinfo") or {}
         marker = build_dingtalk_allowlist_session_marker(
@@ -179,6 +226,16 @@ class OAuthSourceFlowManager(SourceFlowManager):
             return
         user.type = UserTypes.INTERNAL
         user.save(update_fields=["type"])
+        # B13: the type change is a login-triggered, persistent permission change that
+        # otherwise bypasses audit; record it explicitly.
+        Event.new(
+            EventAction.MODEL_UPDATED,
+            message=(
+                f"Promoted DingTalk user '{user.username}' from external to internal "
+                "so they can use the user interface."
+            ),
+            source=self.source,
+        ).from_http(self.request)
 
     def handle_existing_link(self, connection: UserOAuthSourceConnection) -> HttpResponse:
         if denied_response := self._dingtalk_allowlist_denied_response():
@@ -192,9 +249,27 @@ class OAuthSourceFlowManager(SourceFlowManager):
         self._dingtalk_promote_user_to_internal(connection)
         return super().handle_auth(connection)
 
+    def _dingtalk_require_userid_for_enroll(self) -> HttpResponse | None:
+        """Fail closed when enrolling a DingTalk user whose userid is unavailable.
+
+        The username must be the DingTalk userid; if the best-effort directory enhancement did
+        not return one we cannot provision a stable account, so deny enrollment with a clear
+        message rather than creating an account with a missing/derived username (see B2).
+        """
+        if getattr(self.source, "provider_type", "") != "dingtalk":
+            return None
+        userinfo = self.policy_context.get("oauth_userinfo") or {}
+        if userinfo.get("userid") or userinfo.get("userId"):
+            return None
+        return self.error_handler(
+            Exception(_("钉钉登录失败：暂时无法获取您的钉钉用户信息，请稍后重试或联系管理员。"))
+        )
+
     def handle_enroll(self, connection: UserOAuthSourceConnection) -> HttpResponse:
         if denied_response := self._dingtalk_allowlist_denied_response():
             return denied_response
+        if userid_guard := self._dingtalk_require_userid_for_enroll():
+            return userid_guard
         return super().handle_enroll(connection)
 
     def update_user_connection(

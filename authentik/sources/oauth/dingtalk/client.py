@@ -8,16 +8,18 @@ from requests import Session
 from authentik.lib.utils.http import get_http_session
 from authentik.sources.oauth.models import OAuthSource
 from authentik.sources.oauth.types.dingtalk import (
-    DINGTALK_APP_ACCESS_TOKEN_URL,
     DINGTALK_DEPARTMENT_LIST_URL,
     DINGTALK_USER_DETAIL_URL,
     _legacy_error,
+    fetch_dingtalk_app_token_cached,
 )
 
 DINGTALK_DEPARTMENT_USER_LIST_URL = "https://oapi.dingtalk.com/topapi/v2/user/list"
 DINGTALK_MAX_DEPARTMENT_DEPTH = 50
 DINGTALK_MAX_DEPARTMENTS = 10000
 DINGTALK_PAGE_SIZE = 100
+# Hard cap on department-user pages to bound a broken/looping cursor (each page is 100 users).
+DINGTALK_MAX_USER_PAGES = 10000
 
 
 class DingTalkDirectoryClient:
@@ -32,18 +34,10 @@ class DingTalkDirectoryClient:
     def app_token(self) -> str:
         if self._app_token:
             return self._app_token
-        response = self.session.get(
-            DINGTALK_APP_ACCESS_TOKEN_URL,
-            params={"appkey": self.source.consumer_key, "appsecret": self.source.consumer_secret},
-        )
-        response.raise_for_status()
-        data = response.json()
-        error = _legacy_error(data)
-        token = data.get("access_token") or data.get("accessToken")
-        if error or not token:
-            raise ValueError(error or "DingTalk app token response did not include a token.")
-        self._app_token = token
-        return token
+        # Reuse the shared, cross-request cached app token (C3): DingTalk rate-limits gettoken
+        # and returns the same token during its validity, so per-corp syncs must not re-fetch.
+        self._app_token = fetch_dingtalk_app_token_cached(self.source, self.session)
+        return self._app_token
 
     def iter_departments(self) -> Iterator[dict[str, Any]]:
         seen: set[str] = set()
@@ -92,6 +86,7 @@ class DingTalkDirectoryClient:
 
     def iter_department_users(self, dept_id: str) -> Iterator[dict[str, Any]]:
         cursor = 0
+        pages = 0
         while True:
             response = self.session.post(
                 DINGTALK_DEPARTMENT_USER_LIST_URL,
@@ -109,7 +104,22 @@ class DingTalkDirectoryClient:
                     yield user
             if not result.get("has_more"):
                 break
-            cursor = result.get("next_cursor") or result.get("nextCursor") or 0
+            pages += 1
+            raw_next = result.get("next_cursor")
+            if raw_next is None:
+                raw_next = result.get("nextCursor")
+            try:
+                next_cursor = int(raw_next) if raw_next is not None else None
+            except (TypeError, ValueError):
+                next_cursor = None
+            # C5: DingTalk must return a strictly-advancing cursor while has_more is set;
+            # a missing/non-advancing cursor (or too many pages) would otherwise re-fetch page 1
+            # forever, so abort loudly instead of looping.
+            if next_cursor is None or next_cursor <= cursor or pages >= DINGTALK_MAX_USER_PAGES:
+                raise ValueError(
+                    "DingTalk department user pagination did not advance; aborting to avoid a loop."
+                )
+            cursor = next_cursor
 
     def get_user_detail(self, user_id: str) -> dict[str, Any]:
         response = self.session.post(

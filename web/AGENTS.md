@@ -31,7 +31,7 @@ npm run build-locales  # Compile i18n translations
 ```
 
 When frontend changes need to be visible through the local reverse-proxied authentik runtime
-(`https://auth.jiefakj.com`), follow the root `AGENTS.md` local apply flow after the build:
+(`https://<your-authentik-host>`), follow the root `AGENTS.md` local apply flow after the build:
 rebuild `authentik-dingtalk:local`, recreate the server/worker containers, wait for health,
 verify the reverse proxy serves the new chunk, and hard-refresh the browser if the page was
 already open.

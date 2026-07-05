@@ -25,7 +25,7 @@ import {
     UserFieldsEnum,
 } from "@goauthentik/api";
 
-import { kebabCase } from "change-case";
+import { capitalCase, kebabCase } from "change-case";
 import { match } from "ts-pattern";
 
 import { msg, str } from "@lit/localize";
@@ -56,6 +56,24 @@ export const OR_LIST_FORMATTERS: Intl.ListFormat = new Intl.ListFormat("default"
     type: "disjunction",
 });
 
+/**
+ * INTENTIONAL UPSTREAM DEVIATION — keep on merges from `upstream/main`.
+ *
+ * Upstream authentik builds identification-field labels from a `UI_FIELDS`
+ * constant and always renders them through `OR_LIST_FORMATTERS`. This fork
+ * instead collapses the common `[Email, Username]` pair into a single, naturally
+ * phrased translation unit ("Email or username") so it reads well in every
+ * locale (notably zh) instead of being machine-joined. This behavior is
+ * deliberate and is covered by `IdentificationStage.browser.test.ts` — do not
+ * "restore" upstream list-formatting for that pair.
+ *
+ * The `flow.identification.email-or-username` message id is likewise kept stable
+ * on purpose: it is the shared lookup key for this string across every catalog in
+ * `src/locales/` and `xliff/`. Renaming it (e.g. to add the `.label` role suffix
+ * from `AGENTS.md`) would be a bulk catalog migration that orphans the existing
+ * translations — see `AGENTS.md` ("do not do bulk renames"). Any future rename
+ * must go through `extract-locales` + re-translation, not an id edit alone.
+ */
 const identificationFieldLabel = (fields: UserFieldsEnum[]): string => {
     if (
         fields.length === 2 &&
@@ -73,7 +91,9 @@ const identificationFieldLabel = (fields: UserFieldsEnum[]): string => {
         [UserFieldsEnum.Upn]: msg("UPN"),
     };
 
-    return OR_LIST_FORMATTERS.format(fields.map((field) => labels[field] ?? field));
+    // For fields we have no explicit label for, humanize the raw enum value
+    // (e.g. "phone-number" -> "Phone Number") instead of leaking the enum token.
+    return OR_LIST_FORMATTERS.format(fields.map((field) => labels[field] ?? capitalCase(field)));
 };
 
 const sortLoginSources = (a: LoginSource, b: LoginSource) =>

@@ -2,7 +2,9 @@
 
 from types import SimpleNamespace
 
+from django.http import Http404
 from django.shortcuts import get_object_or_404
+from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import generics, serializers
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -32,7 +34,12 @@ class CanViewDingTalkDirectory(BasePermission):
     def has_permission(self, request: Request, view) -> bool:
         if not request.user or not request.user.is_authenticated:
             return False
-        source = get_dingtalk_source(view.kwargs["source_slug"])
+        try:
+            source = get_dingtalk_source(view.kwargs["source_slug"])
+        except Http404:
+            # B10: do not reveal whether a DingTalk source slug exists to callers who lack
+            # access; return 403 uniformly for both missing and existing-but-forbidden slugs.
+            return False
         view.dingtalk_source = source
         return bool(
             request.user.has_perm("authentik_sources_oauth.view_oauthsource")
@@ -180,7 +187,7 @@ class DingTalkDirectorySyncView(APIView):
         source = self.dingtalk_source
         corp_id = request.data.get("corp_id") or request.data.get("corpId")
         if not corp_id:
-            raise ValidationError({"corp_id": "This field is required."})
+            raise ValidationError({"corp_id": _("This field is required.")})
         dingtalk_directory_sync.send(str(source.pk), str(corp_id))
         return Response({"queued": True, "corp_id": str(corp_id)})
 
@@ -206,7 +213,7 @@ class DingTalkDirectorySyncView(APIView):
             or request.data.get("corpId")
         )
         if not corp_id:
-            raise ValidationError({"corp_id": "This field is required."})
+            raise ValidationError({"corp_id": _("This field is required.")})
         corp_id = str(corp_id)
         DingTalkDirectorySyncStatus.objects.filter(source=source, corp_id=corp_id).delete()
         DingTalkDirectoryDepartment.objects.filter(source=source, corp_id=corp_id).delete()
@@ -255,7 +262,9 @@ class DingTalkDirectoryUserOrgView(APIView):
         is_own_context = str(own_corp_id) == str(corp_id) and str(own_user_id) == str(user_id)
         can_view_users = request.user.has_perm("authentik_sources_oauth.view_dingtalkdirectoryuser")
         if not is_own_context and not can_view_users:
-            raise PermissionDenied("Reading other DingTalk users requires directory user access.")
+            raise PermissionDenied(
+                _("Reading other DingTalk users requires directory user access.")
+            )
         context_user = (
             request.user
             if is_own_context

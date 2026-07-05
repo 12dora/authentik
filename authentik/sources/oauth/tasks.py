@@ -90,15 +90,26 @@ def dingtalk_directory_sync(source_pk: str, corp_id: str):
 
 @actor(description=_("Sync all DingTalk directory caches."))
 def dingtalk_directory_sync_all():
+    from authentik.sources.oauth.types.dingtalk import get_dingtalk_allowlist_binding
+
     for source in OAuthSource.objects.filter(enabled=True, provider_type="dingtalk"):
-        corp_ids = (
+        corp_ids: set[str] = set()
+        # Corps derived from users who have already logged in via this source.
+        for corp_id in (
             UserOAuthSourceConnection.objects.filter(
                 source=source,
                 user__attributes__has_key="dingtalk",
             )
             .values_list("user__attributes__dingtalk__corp_id", flat=True)
             .distinct()
-        )
-        for corp_id in corp_ids:
+        ):
             if corp_id:
-                dingtalk_directory_sync.send(str(source.pk), str(corp_id))
+                corp_ids.add(str(corp_id))
+        # C8: also seed corps configured in the allowlist so an allowed company with no logins
+        # yet is pre-synced, instead of returning empty/stale until someone logs in.
+        _, _, config = get_dingtalk_allowlist_binding(source, enabled_only=False)
+        for company in (config or {}).get("companies", []):
+            if company.get("corp_id"):
+                corp_ids.add(str(company["corp_id"]))
+        for corp_id in corp_ids:
+            dingtalk_directory_sync.send(str(source.pk), corp_id)

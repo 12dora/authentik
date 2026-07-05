@@ -1,26 +1,11 @@
-# Re-render managed DingTalk allowlist policies so deployed policy bodies pick up
-# renderer changes (superuser bypass for application bindings).
+# D7: This migration previously imported and called live application code
+# (``authentik.sources.oauth.types.dingtalk.render_dingtalk_allowlist_policy``) inside a
+# ``RunPython`` to re-render deployed managed DingTalk allowlist policies. Coupling an immutable
+# migration to mutable render logic makes replays non-deterministic across versions and drags
+# runtime models into ``migrate``. It is now a no-op: managed allowlist policies are re-rendered
+# by the admin panel on the next save, so there is no need to run live rendering at migrate time.
 
 from django.db import migrations
-
-
-def rerender_dingtalk_allowlist_policies(apps, schema_editor):
-    from authentik.sources.oauth.types.dingtalk import (
-        DINGTALK_ALLOWLIST_MARKER,
-        parse_dingtalk_allowlist_policy,
-        render_dingtalk_allowlist_policy,
-    )
-
-    ExpressionPolicy = apps.get_model("authentik_policies_expression", "ExpressionPolicy")
-    db_alias = schema_editor.connection.alias
-    for policy in ExpressionPolicy.objects.using(db_alias).filter(
-        expression__contains=DINGTALK_ALLOWLIST_MARKER
-    ):
-        config = parse_dingtalk_allowlist_policy(policy.expression)
-        if not config or not config.get("companies"):
-            continue
-        policy.expression = render_dingtalk_allowlist_policy(config)
-        policy.save(update_fields=["expression"])
 
 
 class Migration(migrations.Migration):
@@ -30,5 +15,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunPython(rerender_dingtalk_allowlist_policies, migrations.RunPython.noop),
+        migrations.RunPython(migrations.RunPython.noop, migrations.RunPython.noop),
     ]

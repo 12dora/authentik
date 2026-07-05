@@ -216,14 +216,21 @@ dept_ids = (
 )
 
 if not corp_id:
+    if source is not None and info:
+        # Our own DingTalk source login attempt (other sources returned True above, and info
+        # is present so this is a login rather than button rendering) reached policy evaluation
+        # without a company id: fail closed instead of silently allowing it.
+        ak_message("钉钉登录失败：无法确定您的企业信息，请重新通过钉钉登录。")
+        return False
     if request.obj.__class__.__name__ != "Application":
         return True
     if request.user and request.user.is_superuser:
         return True
     marker = context.get("authentik/sources/oauth/dingtalk/allowlist") or {}
     if not marker:
-        ak_message("钉钉登录失败：请通过允许的钉钉组织登录后访问此应用。")
-        return False
+        # Only DingTalk-originated sessions carry a marker; users who authenticated by other
+        # means are not blocked by this allowlist on application access.
+        return True
     if marker.get("config_version") != ${pythonString(configVersion)}:
         ak_message("钉钉登录失败：当前白名单状态已更新，请重新通过钉钉登录。")
         return False

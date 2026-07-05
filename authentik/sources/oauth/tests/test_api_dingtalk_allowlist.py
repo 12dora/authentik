@@ -63,7 +63,6 @@ class TestDingTalkAllowlistPolicyHelpers(TestCase):
             '"dept_ids":["10","20"],"label":"Fake Company"}]}',
             body,
         )
-        self.assertIn("expected_source_slug = None", body)
         parsed = parse_dingtalk_allowlist_policy(body)
         self.assertEqual(
             parsed,
@@ -104,6 +103,34 @@ class TestDingTalkAllowlistPolicyHelpers(TestCase):
 
         self.assertFalse(denied_dept.passing)
         self.assertEqual(denied_dept.messages, ("钉钉登录失败：当前部门未被允许，请联系管理员。",))
+
+    def test_rendered_expression_fails_closed_for_dingtalk_login_without_corp(self):
+        """B4: a DingTalk source login (userinfo present) missing the corp id is denied."""
+        body = render_dingtalk_allowlist_policy(
+            {"companies": [{"corp_id": "CORP_FAKE", "allow_all": True}]}
+        )
+        policy = ExpressionPolicy.objects.create(name="dingtalk-b4", expression=body)
+        source = OAuthSource(name="dt", slug="dt", provider_type="dingtalk")
+        request = PolicyRequest(create_test_admin_user())
+        request.obj = source
+        request.context["source"] = source
+        request.context["oauth_userinfo"] = {"unionId": "UNION_FAKE", "nick": "Ada"}
+
+        self.assertFalse(policy.passes(request).passing)
+
+    def test_rendered_expression_allows_other_source_sharing_flow(self):
+        """B4: a non-DingTalk source passing through a shared flow is not blocked by the allowlist."""
+        body = render_dingtalk_allowlist_policy(
+            {"companies": [{"corp_id": "CORP_FAKE", "allow_all": True}]}
+        )
+        policy = ExpressionPolicy.objects.create(name="dingtalk-b4-other", expression=body)
+        source = OAuthSource(name="ga", slug="ga", provider_type="google")
+        request = PolicyRequest(create_test_admin_user())
+        request.obj = source
+        request.context["source"] = source
+        request.context["oauth_userinfo"] = {"sub": "abc"}
+
+        self.assertTrue(policy.passes(request).passing)
 
     def test_evaluator_allow_all_and_fail_closed_cases(self):
         """Evaluator enforces corp and department restrictions fail-closed."""

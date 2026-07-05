@@ -396,6 +396,47 @@ export function buildDingTalkDepartmentTreeRows<TDepartment extends DingTalkDepa
     return rows;
 }
 
+// Filters already-built tree rows by a case-insensitive substring match against the
+// department id, name, or parent id. Rows keep their computed level/selection so the
+// tri-state parent selection stays consistent even when the visible set is narrowed.
+export function filterDingTalkDepartmentTreeRows<TDepartment extends DingTalkDepartmentNode>(
+    rows: DingTalkDepartmentTreeRow<TDepartment>[],
+    query: string,
+): DingTalkDepartmentTreeRow<TDepartment>[] {
+    const needle = query.trim().toLocaleLowerCase();
+    if (!needle) {
+        return rows;
+    }
+    return rows.filter(({ department }) =>
+        [department.deptId, department.name, department.parentId ?? ""].some((field) =>
+            field.toLocaleLowerCase().includes(needle),
+        ),
+    );
+}
+
+export interface DingTalkDepartmentPageWindow {
+    page: number;
+    totalPages: number;
+    start: number;
+    end: number;
+    total: number;
+}
+
+// Clamps a requested page against the current total so client-side pagination never
+// lands on an out-of-range window (e.g. after a filter shrinks the result set).
+export function dingtalkDepartmentPageWindow(
+    total: number,
+    page: number,
+    pageSize: number,
+): DingTalkDepartmentPageWindow {
+    const size = Math.max(1, pageSize);
+    const totalPages = Math.max(1, Math.ceil(total / size));
+    const clampedPage = Math.min(Math.max(1, Math.floor(page) || 1), totalPages);
+    const start = (clampedPage - 1) * size;
+    const end = Math.min(start + size, total);
+    return { page: clampedPage, totalPages, start, end, total };
+}
+
 export function toggleDingTalkDepartmentTreeInput(
     currentInput: string,
     departments: DingTalkDepartmentNode[],

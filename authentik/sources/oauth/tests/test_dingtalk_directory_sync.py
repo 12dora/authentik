@@ -119,6 +119,34 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertEqual(status.status, "error")
         self.assertEqual(status.error, "missing permission")
 
+    @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
+    def test_incomplete_sync_does_not_soft_delete_previously_cached_users(self, client_cls):
+        """C2: an empty-but-"successful" sync must not wipe a populated cache."""
+        seen = now()
+        DingTalkDirectorySyncStatus.objects.create(
+            source=self.source, corp_id="CORP", status="success", finished_at=seen
+        )
+        DingTalkDirectoryUser.objects.create(
+            source=self.source,
+            corp_id="CORP",
+            user_id="USER",
+            union_id="UNION",
+            name="Ada",
+            dept_id_list=["1"],
+            last_seen_at=seen,
+        )
+        client = client_cls.return_value
+        client.iter_departments.return_value = []
+        client.iter_department_users.return_value = []
+
+        result = sync_dingtalk_directory(self.source, corp_id="CORP")
+
+        cached = DingTalkDirectoryUser.objects.get(source=self.source, corp_id="CORP", user_id="USER")
+        self.assertFalse(cached.is_deleted)
+        self.assertTrue(
+            any("Skipped user deletion" in warning for warning in result.get("warnings", []))
+        )
+
 
 class TestDingTalkOrgContext(TestCase):
     def setUp(self):

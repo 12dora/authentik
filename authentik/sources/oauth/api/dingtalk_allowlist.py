@@ -4,6 +4,7 @@ from urllib.parse import quote, urlencode
 
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404
+from django.utils.translation import gettext_lazy as _
 from django.views import View
 from drf_spectacular.utils import extend_schema
 from requests.exceptions import RequestException
@@ -12,7 +13,18 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
+
+
+class DingTalkDepartmentDiscoveryThrottle(UserRateThrottle):
+    """Rate-limit server-credentialed DingTalk department discovery to curb enumeration."""
+
+    scope = "dingtalk-department-discovery"
+
+    def get_rate(self) -> str:
+        return "60/min"
+
 
 from authentik.sources.oauth.models import OAuthSource
 from authentik.sources.oauth.types.dingtalk import (
@@ -37,7 +49,7 @@ __all__ = [
     "render_dingtalk_allowlist_policy",
 ]
 
-DINGTALK_ALLOWLIST_EXTERNAL_ERROR = "Could not fetch DingTalk departments."
+DINGTALK_ALLOWLIST_EXTERNAL_ERROR = _("Could not fetch DingTalk departments.")
 
 
 class DingTalkAllowlistManagedPolicySerializer(serializers.Serializer):
@@ -192,6 +204,10 @@ class DingTalkAllowlistDepartmentsView(APIView):
     """Fetch DingTalk departments with server-side source credentials."""
 
     permission_classes = [CanViewDingTalkSource]
+    # B11: throttle this server-credentialed endpoint. Note the queryable corp is already bounded
+    # by DingTalk itself — fetch_dingtalk_departments raises DingTalkDepartmentCorpUnavailable for
+    # any corp this app is not authorized for — so throttling only curbs abusive enumeration.
+    throttle_classes = [DingTalkDepartmentDiscoveryThrottle]
 
     @extend_schema(
         request=DingTalkAllowlistDepartmentsRequestSerializer,
@@ -201,7 +217,7 @@ class DingTalkAllowlistDepartmentsView(APIView):
         source = get_dingtalk_view_source(self, source_slug)
         corp_id = request.data.get("corp_id") or request.data.get("corpId")
         if not corp_id:
-            raise ValidationError({"corp_id": "This field is required."})
+            raise ValidationError({"corp_id": _("This field is required.")})
         try:
             return Response(fetch_dingtalk_departments(source, str(corp_id)))
         except DingTalkDepartmentCorpUnavailable as exc:

@@ -2,7 +2,9 @@ import {
     addDingTalkDepartments,
     buildDingTalkDepartmentTreeRows,
     dingtalkDepartmentFetchFailureStatus,
+    dingtalkDepartmentPageWindow,
     dingtalkStatusLabelProperties,
+    filterDingTalkDepartmentTreeRows,
     invertLoadedDingTalkDepartmentInput,
     removeDingTalkCompany,
     saveDingTalkAllowlistConfiguration,
@@ -256,6 +258,72 @@ describe("DingTalkAllowlistPanelState", () => {
         expect(
             toggleDingTalkDepartmentTreeInput("manual-1 10 20 30", departments, "10", false),
         ).toEqual("30 manual-1");
+    });
+
+    it("filters department tree rows by id, name, or parent id case-insensitively", () => {
+        const rows = buildDingTalkDepartmentTreeRows(
+            [
+                { deptId: "10", name: "Engineering", parentId: null },
+                { deptId: "20", name: "Sales", parentId: "10" },
+                { deptId: "30", name: "工程组", parentId: "10" },
+            ],
+            new Set(),
+        );
+
+        expect(
+            filterDingTalkDepartmentTreeRows(rows, "eng").map((row) => row.department.deptId),
+        ).toEqual(["10"]);
+        expect(
+            filterDingTalkDepartmentTreeRows(rows, "工程").map((row) => row.department.deptId),
+        ).toEqual(["30"]);
+        // Filtering by a parent id keeps the matching children.
+        expect(
+            filterDingTalkDepartmentTreeRows(rows, "10").map((row) => row.department.deptId),
+        ).toEqual(["10", "20", "30"]);
+    });
+
+    it("returns the untouched rows when the filter query is blank", () => {
+        const rows = buildDingTalkDepartmentTreeRows(
+            [{ deptId: "10", name: "Root", parentId: null }],
+            new Set(),
+        );
+
+        expect(filterDingTalkDepartmentTreeRows(rows, "   ")).toBe(rows);
+    });
+
+    it("clamps the department page window to the available pages", () => {
+        expect(dingtalkDepartmentPageWindow(120, 1, 50)).toEqual({
+            page: 1,
+            totalPages: 3,
+            start: 0,
+            end: 50,
+            total: 120,
+        });
+        expect(dingtalkDepartmentPageWindow(120, 3, 50)).toEqual({
+            page: 3,
+            totalPages: 3,
+            start: 100,
+            end: 120,
+            total: 120,
+        });
+        // An out-of-range page snaps back to the last page.
+        expect(dingtalkDepartmentPageWindow(120, 9, 50)).toEqual({
+            page: 3,
+            totalPages: 3,
+            start: 100,
+            end: 120,
+            total: 120,
+        });
+    });
+
+    it("keeps a single page window when there are no departments", () => {
+        expect(dingtalkDepartmentPageWindow(0, 1, 50)).toEqual({
+            page: 1,
+            totalPages: 1,
+            start: 0,
+            end: 0,
+            total: 0,
+        });
     });
 
     it("selects and inverts only loaded department IDs while preserving manual IDs", () => {

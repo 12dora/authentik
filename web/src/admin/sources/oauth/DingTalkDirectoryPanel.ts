@@ -122,22 +122,40 @@ export function dingtalkDirectorySummaryMetrics(
     return metrics;
 }
 
+// The vendored @goauthentik/api client generates create/status/departments/users
+// methods for this endpoint, but no destroy method for the
+// `DELETE /sources/oauth/dingtalk-directory/{source_slug}/sync/`
+// operation (OpenAPI operationId: sources_oauth_dingtalk_directory_sync_destroy).
+// Until the client is regenerated with that operation, the path lives here as a
+// single source of truth and the call still goes through the SourcesApi runtime
+// (`this.request`, the package's own transport with CSRF/auth middleware) rather
+// than a bare fetch/axios.
+const DINGTALK_DIRECTORY_SYNC_PATH = "/sources/oauth/dingtalk-directory/{source_slug}/sync/";
+
 class DingTalkDirectoryApi extends SourcesApi {
-    // The vendored client does not expose a destroy method for this endpoint, so
-    // this is the one hand-written call. corp_id travels as a query parameter:
-    // request bodies on DELETE are stripped by some proxies.
     async sourcesOauthDingtalkDirectorySyncDestroy(
         sourceSlug: string,
         corpId: string,
     ): Promise<void> {
+        // corp_id travels as a query parameter: request bodies on DELETE are
+        // stripped by some proxies.
         await this.request({
-            path: `/sources/oauth/dingtalk-directory/${encodeURIComponent(sourceSlug)}/sync/`,
+            path: DINGTALK_DIRECTORY_SYNC_PATH.replace(
+                "{source_slug}",
+                encodeURIComponent(sourceSlug),
+            ),
             method: "DELETE",
             headers: {},
             query: { corp_id: corpId },
         });
     }
 }
+
+// A directory sync runs as a backend task, so a freshly queued corp shows up as
+// `running`. Poll on a bounded cadence while any row is running so the table
+// reflects completion without the admin repeatedly clicking Refresh.
+const DINGTALK_DIRECTORY_SYNC_POLL_INTERVAL_MS = 5_000;
+const DINGTALK_DIRECTORY_SYNC_POLL_MAX_ATTEMPTS = 60;
 
 @customElement("ak-source-oauth-dingtalk-directory")
 export class DingTalkDirectoryPanel extends AKElement {
@@ -157,6 +175,13 @@ export class DingTalkDirectoryPanel extends AKElement {
     private loadError?: string;
 
     private api = new DingTalkDirectoryApi(DEFAULT_CONFIG);
+
+    // Incremented per refresh; a stale refresh that resolves after a newer one must
+    // not overwrite the fresher status.
+    private refreshGeneration = 0;
+
+    private syncPollTimer?: ReturnType<typeof setTimeout>;
+    private syncPollAttempts = 0;
 
     static styles: CSSResult[] = [
         PFButton,
@@ -229,9 +254,21 @@ export class DingTalkDirectoryPanel extends AKElement {
         `,
     ];
 
+    disconnectedCallback(): void {
+        // Stop the poll so the timer does not keep firing after the panel is gone.
+        this.stopSyncPoll();
+        super.disconnectedCallback();
+    }
+
     protected willUpdate(changedProperties: PropertyValues<this>): void {
         if (changedProperties.has("source") && this.source?.slug) {
-            this.refreshStatus().catch(console.error);
+            // Only a different source warrants an automatic refresh; the same source
+            // object is re-assigned after saves and on global EVENT_REFRESH, and
+            // refreshing again would race the explicit refresh already in flight.
+            const previous = changedProperties.get("source") as OAuthSource | undefined;
+            if (previous?.slug !== this.source.slug) {
+                this.refreshStatus().catch(console.error);
+            }
         }
     }
 
@@ -239,17 +276,58 @@ export class DingTalkDirectoryPanel extends AKElement {
         if (!this.source?.slug) {
             return;
         }
+        const generation = ++this.refreshGeneration;
+        let statuses: DingTalkDirectorySyncStatus[] | undefined;
+        let loadError: string | undefined;
         try {
             const response = await this.api.sourcesOauthDingtalkDirectoryStatusRetrieve({
                 sourceSlug: this.source.slug,
             });
-            this.statuses = response.sync;
-            this.loadError = undefined;
+            statuses = response.sync;
         } catch (error) {
-            this.loadError = pluckErrorDetail(await parseAPIResponseError(error));
-        } finally {
-            this.loaded = true;
+            loadError = pluckErrorDetail(await parseAPIResponseError(error));
         }
+        // A newer refresh started while this one awaited; discard the stale result so
+        // the later-returning response cannot overwrite fresher state.
+        if (generation !== this.refreshGeneration) {
+            return;
+        }
+        if (statuses) {
+            this.statuses = statuses;
+            this.loadError = undefined;
+        } else {
+            this.loadError = loadError;
+        }
+        this.loaded = true;
+        this.scheduleSyncPoll();
+    }
+
+    private scheduleSyncPoll(): void {
+        const running = this.statuses.some((status) => status.status === "running");
+        if (!running) {
+            this.stopSyncPoll();
+            return;
+        }
+        // A poll is already pending, or the bound was reached; do not stack timers.
+        if (this.syncPollTimer !== undefined) {
+            return;
+        }
+        if (this.syncPollAttempts >= DINGTALK_DIRECTORY_SYNC_POLL_MAX_ATTEMPTS) {
+            return;
+        }
+        this.syncPollTimer = setTimeout(() => {
+            this.syncPollTimer = undefined;
+            this.syncPollAttempts += 1;
+            this.refreshStatus().catch(console.error);
+        }, DINGTALK_DIRECTORY_SYNC_POLL_INTERVAL_MS);
+    }
+
+    private stopSyncPoll(): void {
+        if (this.syncPollTimer !== undefined) {
+            clearTimeout(this.syncPollTimer);
+            this.syncPollTimer = undefined;
+        }
+        this.syncPollAttempts = 0;
     }
 
     private async triggerManualSync(): Promise<void> {
@@ -273,6 +351,15 @@ export class DingTalkDirectoryPanel extends AKElement {
                 level: MessageLevel.success,
                 message: msg(str`Queued DingTalk directory sync for ${response.corpId}`, {
                     id: "sources.oauth.dingtalk-directory.sync.queued",
+                }),
+            });
+        } else {
+            // The backend declined to queue (already syncing or throttled); tell the
+            // admin instead of silently clearing the input.
+            showMessage({
+                level: MessageLevel.info,
+                message: msg("This corp's directory sync is already running or was not queued.", {
+                    id: "sources.oauth.dingtalk-directory.sync.not-queued",
                 }),
             });
         }
@@ -564,20 +651,7 @@ export class DingTalkDirectoryPanel extends AKElement {
                     id: "sources.oauth.dingtalk-directory.title",
                 })}
             </div>
-            <div class="pf-c-card__body pf-c-content">
-                ${this.renderSummary()}
-                <p>
-                    <a
-                        href="https://docs.goauthentik.io/docs/sources/dingtalk/"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                    >
-                        ${msg("Open DingTalk source documentation", {
-                            id: "sources.oauth.dingtalk-directory.docs",
-                        })}
-                    </a>
-                </p>
-            </div>
+            <div class="pf-c-card__body pf-c-content">${this.renderSummary()}</div>
             <div class="pf-c-card__body pf-c-form">${this.renderActions()}</div>
             <div class="pf-c-card__body">${this.renderTable()}</div>
             <div class="pf-c-card__title">

@@ -2,6 +2,7 @@ import "#components/ak-status-label";
 import "#elements/buttons/SpinnerButton/index";
 import "#elements/forms/ConfirmationForm";
 import "#elements/EmptyState";
+import "#elements/Alert";
 
 import { DEFAULT_CONFIG } from "#common/api/config";
 import { parseAPIResponseError, pluckErrorDetail } from "#common/errors/network";
@@ -20,7 +21,9 @@ import {
     buildDingTalkDepartmentTreeRows,
     dingtalkDepartmentFetchFailureStatus,
     dingtalkDepartmentInputsFromModel,
+    dingtalkDepartmentPageWindow,
     dingtalkStatusLabelProperties,
+    filterDingTalkDepartmentTreeRows,
     invertLoadedDingTalkDepartmentInput,
     removeDingTalkCompany,
     renderDingTalkDepartmentInput,
@@ -64,6 +67,14 @@ import PFFlex from "@patternfly/patternfly/layouts/Flex/flex.css";
 
 const DINGTALK_DISCOVERY_MESSAGE_SOURCE = "goauthentik.io";
 const DINGTALK_DISCOVERY_MESSAGE_CONTEXT = "dingtalk-allowlist-discovery";
+
+// Client-side page size for the loaded department tree; large directories would
+// otherwise render thousands of rows into the DOM at once.
+const DINGTALK_DEPARTMENT_PAGE_SIZE = 50;
+
+// How often the discovery popup is polled for a manual close so the pending action
+// resolves instead of leaving the discovery button spinning forever.
+const DINGTALK_DISCOVERY_POLL_INTERVAL = 500;
 
 interface DingTalkDiscoveryResult {
     corpId: string;
@@ -144,6 +155,20 @@ export class DingTalkAllowlistPanel extends AKElement {
     @state()
     private fetchedDepartments: Record<string, DingTalkDepartment[]> = {};
 
+    // Per-company filter query for the loaded department tree.
+    @state()
+    private departmentFilters: Record<string, string> = {};
+
+    // Per-company 1-based page for the loaded department tree.
+    @state()
+    private departmentPages: Record<string, number> = {};
+
+    // Companies detected on a shared flow that belong to a sibling DingTalk source.
+    // Kept read-only until the admin explicitly adopts them, so this source never
+    // silently shows or saves another source's allowlist.
+    @state()
+    private detectedSharedConfig?: DingTalkAllowlistModel;
+
     @state()
     private lastDiscovery?: DingTalkDiscoveryResult;
 
@@ -171,14 +196,30 @@ export class DingTalkAllowlistPanel extends AKElement {
     @state()
     private partialFailures: string[] = [];
 
+    // Cleared to true once the first status refresh settles; until then the panel
+    // renders a loading state instead of half-populated "misconfigured" statuses.
+    @state()
+    private loaded = false;
+
     // Set once the admin edits the local allowlist; while set, status refreshes keep
     // the local model and inputs instead of overwriting them with server state.
+    // Reactive so an unsaved-changes banner can surface it.
+    @state()
     private dirty = false;
 
     // Incremented per refresh; stale refreshes must not overwrite newer state.
     private refreshGeneration = 0;
 
     private discoveryPopup: Window | null = null;
+
+    // Interval id polling the discovery popup for a manual close, plus the resolver
+    // that keeps the discovery action pending until a result arrives or it closes.
+    private discoveryPoll?: ReturnType<typeof setInterval>;
+    private discoveryDone?: () => void;
+
+    // True while a text input has an active IME composition; suppresses the state
+    // rewrite (and thus the `.value` write-back) that would break Chinese input.
+    private composing = false;
 
     private policiesApi = new PoliciesApi(DEFAULT_CONFIG);
     private flowsApi = new FlowsApi(DEFAULT_CONFIG);
@@ -252,12 +293,25 @@ export class DingTalkAllowlistPanel extends AKElement {
                 display: flex;
                 gap: var(--pf-global--spacer--sm);
                 margin-block: var(--pf-global--spacer--sm);
+                flex-wrap: wrap;
+                align-items: center;
             }
 
             .ak-dingtalk-department-tree-cell {
                 display: flex;
                 align-items: center;
                 gap: var(--pf-global--spacer--sm);
+            }
+
+            .ak-dingtalk-department-filter {
+                min-width: 12rem;
+            }
+
+            .ak-dingtalk-department-pager {
+                display: flex;
+                gap: var(--pf-global--spacer--sm);
+                align-items: center;
+                margin-block-start: var(--pf-global--spacer--sm);
             }
         `,
     ];
@@ -269,6 +323,7 @@ export class DingTalkAllowlistPanel extends AKElement {
 
     disconnectedCallback(): void {
         window.removeEventListener("message", this.handleDiscoveryMessage);
+        this.finishDiscovery();
         super.disconnectedCallback();
     }
 
@@ -292,6 +347,25 @@ export class DingTalkAllowlistPanel extends AKElement {
         this.dirty = true;
     }
 
+    // IME-safe input plumbing: while a composition is active we must not push the
+    // intermediate value back into component state, because re-rendering rewrites the
+    // input's `.value` and cancels the in-progress Chinese composition.
+    private startComposition = (): void => {
+        this.composing = true;
+    };
+
+    private handleComposedInput(event: Event, commit: (value: string) => void): void {
+        if (this.composing) {
+            return;
+        }
+        commit((event.target as HTMLInputElement).value);
+    }
+
+    private handleCompositionEnd(event: CompositionEvent, commit: (value: string) => void): void {
+        this.composing = false;
+        commit((event.target as HTMLInputElement).value);
+    }
+
     private handleDiscoveryMessage = (event: MessageEvent<unknown>): void => {
         if (event.origin !== window.location.origin) {
             return;
@@ -309,7 +383,7 @@ export class DingTalkAllowlistPanel extends AKElement {
         ) {
             return;
         }
-        this.discoveryPopup = null;
+        this.finishDiscovery();
         if (record.ok === false) {
             showMessage({
                 level: MessageLevel.error,
@@ -332,14 +406,33 @@ export class DingTalkAllowlistPanel extends AKElement {
             return;
         }
         this.lastDiscovery = result;
-        this.upsertCompany(result.corpId, result.label || result.corpId, true, []);
+        // A freshly discovered company defaults to restricted (no departments) so an
+        // inattentive save cannot grant org-wide access; the admin explicitly opts
+        // into full-company access or picks the allowed departments.
+        this.upsertCompany(result.corpId, result.label || result.corpId, false, []);
         showMessage({
-            level: MessageLevel.success,
-            message: msg(str`Discovered DingTalk company ${result.corpId}`, {
-                id: "sources.oauth.dingtalk-allowlist.discovery.success",
-            }),
+            level: MessageLevel.info,
+            message: msg(
+                str`Discovered DingTalk company ${result.corpId}. Select the departments allowed to sign in, or enable full-company access.`,
+                {
+                    id: "sources.oauth.dingtalk-allowlist.discovery.success",
+                },
+            ),
         });
     };
+
+    // Clears the discovery popup reference and its close-poll, and resolves the
+    // pending discovery action (if any). Idempotent; safe to call more than once.
+    private finishDiscovery(): void {
+        this.discoveryPopup = null;
+        if (this.discoveryPoll !== undefined) {
+            clearInterval(this.discoveryPoll);
+            this.discoveryPoll = undefined;
+        }
+        const done = this.discoveryDone;
+        this.discoveryDone = undefined;
+        done?.();
+    }
 
     private extractDiscoveryResult(
         record: Record<string, unknown>,
@@ -409,6 +502,22 @@ export class DingTalkAllowlistPanel extends AKElement {
         if (generation === this.refreshGeneration) {
             this.partialFailures = failures;
         }
+        // The first refresh has settled; render real status instead of the loader.
+        this.loaded = true;
+    }
+
+    // Refresh action bound to the "Refresh status" button. Unlike refreshStatus it
+    // rejects when any sub-call failed so the spinner button shows a failure state
+    // instead of a success animation that hides the errors.
+    private async refreshStatusAction(): Promise<void> {
+        await this.refreshStatus();
+        if (this.partialFailures.length > 0) {
+            throw new Error(
+                msg("Some DingTalk status checks failed. See the details below.", {
+                    id: "sources.oauth.dingtalk-allowlist.status.refresh-failed",
+                }),
+            );
+        }
     }
 
     private async refreshManagedPolicy(generation: number): Promise<boolean> {
@@ -460,8 +569,11 @@ export class DingTalkAllowlistPanel extends AKElement {
         modelFromPolicy: boolean,
     ): void {
         // The status config is discovered by walking every binding on the shared
-        // flows and can belong to another DingTalk source; it is only a fallback
-        // when this source's own managed policy did not provide a model.
+        // flows and can belong to another DingTalk source. It must NOT prefill this
+        // source's editable model: doing so would silently show (and, on save, adopt)
+        // a sibling's allowlist. Instead we surface it read-only as "detected on a
+        // shared flow" and require the admin to explicitly adopt it before it becomes
+        // editable and saveable here.
         const config = status.config as { companies?: unknown } | null;
         if (
             !modelFromPolicy &&
@@ -470,11 +582,9 @@ export class DingTalkAllowlistPanel extends AKElement {
             Array.isArray(config.companies) &&
             config.companies.length > 0
         ) {
-            const model = dingTalkAllowlistModelFromStoredConfig(config);
-            if (model) {
-                this.model = model;
-                this.departmentInputs = dingtalkDepartmentInputsFromModel(model);
-            }
+            this.detectedSharedConfig = dingTalkAllowlistModelFromStoredConfig(config) ?? undefined;
+        } else {
+            this.detectedSharedConfig = undefined;
         }
 
         const enabled = status.sourceLinkGuard?.enabled ?? false;
@@ -489,6 +599,19 @@ export class DingTalkAllowlistPanel extends AKElement {
                       id: "sources.oauth.dingtalk-allowlist.status.source-link.review",
                   }),
         };
+    }
+
+    // Explicit opt-in for the companies detected on a shared flow: copy them into the
+    // editable model, mark the panel dirty, and drop the read-only banner.
+    private adoptDetectedSharedConfig(): void {
+        const detected = this.detectedSharedConfig;
+        if (!detected) {
+            return;
+        }
+        this.model = detected;
+        this.departmentInputs = dingtalkDepartmentInputsFromModel(detected);
+        this.detectedSharedConfig = undefined;
+        this.markDirty();
     }
 
     private async resolveFlow(flowPk?: string | null): Promise<Flow | undefined> {
@@ -512,6 +635,30 @@ export class DingTalkAllowlistPanel extends AKElement {
             pageSize: 20,
         });
         return response.results.find((binding) => binding.policy === policyPk);
+    }
+
+    // Pages through every policy binding matching the filter. A flow can carry more
+    // than one page of bindings, so callers that create or delete must see the full
+    // set rather than only the first page.
+    private async listAllPolicyBindings(params: {
+        target?: string;
+        policy?: string;
+    }): Promise<PolicyBinding[]> {
+        const results: PolicyBinding[] = [];
+        let page = 1;
+        for (;;) {
+            const response = await this.policiesApi.policiesBindingsList({
+                ...params,
+                page,
+                pageSize: 100,
+            });
+            results.push(...response.results);
+            if (page >= response.pagination.totalPages) {
+                break;
+            }
+            page += 1;
+        }
+        return results;
     }
 
     private upsertCompany(
@@ -586,6 +733,33 @@ export class DingTalkAllowlistPanel extends AKElement {
             this.departmentInputs[corpId] ??
             renderDingTalkDepartmentInput(company.deptIds.map(String))
         );
+    }
+
+    private setDepartmentInput(corpId: string, value: string): void {
+        this.departmentInputs = {
+            ...this.departmentInputs,
+            [corpId]: value,
+        };
+        this.markDirty();
+    }
+
+    private setDepartmentFilter(corpId: string, value: string): void {
+        this.departmentFilters = {
+            ...this.departmentFilters,
+            [corpId]: value,
+        };
+        // Reset to the first page so the filtered result set starts from the top.
+        this.departmentPages = {
+            ...this.departmentPages,
+            [corpId]: 1,
+        };
+    }
+
+    private setDepartmentPage(corpId: string, page: number): void {
+        this.departmentPages = {
+            ...this.departmentPages,
+            [corpId]: page,
+        };
     }
 
     private applyDepartmentInput(corpId: string, departmentInput: string): void {
@@ -681,9 +855,20 @@ export class DingTalkAllowlistPanel extends AKElement {
             popup.location.assign(start.url);
         } catch (error) {
             popup.close();
-            this.discoveryPopup = null;
+            this.finishDiscovery();
             throw error;
         }
+        // Keep the discovery action pending until the popup posts a result or the admin
+        // closes it manually; polling `closed` clears the lingering popup reference and
+        // stops the button from reporting success while discovery is still open.
+        await new Promise<void>((resolve) => {
+            this.discoveryDone = resolve;
+            this.discoveryPoll = setInterval(() => {
+                if (!this.discoveryPopup || this.discoveryPopup.closed) {
+                    this.finishDiscovery();
+                }
+            }, DINGTALK_DISCOVERY_POLL_INTERVAL);
+        });
     }
 
     // Loading departments only populates the selection tree; it never changes the
@@ -847,13 +1032,13 @@ export class DingTalkAllowlistPanel extends AKElement {
         }
 
         try {
-            // List every binding on the flow (not just this policy's) so a newly
-            // created binding gets an order after the existing ones.
-            const existing = await this.policiesApi.policiesBindingsList({
+            // List every binding on the flow (not just this policy's, and across all
+            // pages) so an existing managed binding beyond page 1 is reused instead of
+            // duplicated, and a newly created binding gets an order after all others.
+            const existing = await this.listAllPolicyBindings({
                 target: flow.policybindingmodelPtrId,
-                pageSize: 100,
             });
-            const current = existing.results.find((binding) => binding.policy === policy.pk);
+            const current = existing.find((binding) => binding.policy === policy.pk);
             if (current) {
                 // Only re-enable a disabled binding; timeout, order, and failure
                 // handling stay whatever the admin configured.
@@ -869,7 +1054,7 @@ export class DingTalkAllowlistPanel extends AKElement {
             }
 
             const nextOrder =
-                existing.results.reduce((order, binding) => Math.max(order, binding.order), 0) + 10;
+                existing.reduce((order, binding) => Math.max(order, binding.order), 0) + 10;
             await this.policiesApi.policiesBindingsCreate({
                 policyBindingRequest: {
                     target: flow.policybindingmodelPtrId,
@@ -890,11 +1075,10 @@ export class DingTalkAllowlistPanel extends AKElement {
         if (!policy) {
             return;
         }
-        const bindings = await this.policiesApi.policiesBindingsList({
-            policy: policy.pk,
-            pageSize: 100,
-        });
-        for (const binding of bindings.results) {
+        // Delete every binding referencing this policy across all pages; a residual
+        // binding on a later page would FK-block the policy delete below.
+        const bindings = await this.listAllPolicyBindings({ policy: policy.pk });
+        for (const binding of bindings) {
             await this.policiesApi.policiesBindingsDestroy({
                 policyBindingUuid: binding.pk,
             });
@@ -1033,7 +1217,7 @@ export class DingTalkAllowlistPanel extends AKElement {
         return html`<div class="pf-c-form ak-dingtalk-section">
             <div class="pf-l-flex ak-dingtalk-inline-form">
                 <div class="pf-c-form__group">
-                    <label class="pf-c-form__label">
+                    <label class="pf-c-form__label" for="dingtalk-manual-corp-id">
                         <span class="pf-c-form__label-text"
                             >${msg("Company corpId", {
                                 id: "sources.oauth.dingtalk-allowlist.company.corp-id",
@@ -1041,15 +1225,22 @@ export class DingTalkAllowlistPanel extends AKElement {
                         >
                     </label>
                     <input
+                        id="dingtalk-manual-corp-id"
                         class="pf-c-form-control"
                         .value=${this.manualCorpId}
-                        @input=${(event: InputEvent) => {
-                            this.manualCorpId = (event.target as HTMLInputElement).value;
-                        }}
+                        @compositionstart=${this.startComposition}
+                        @compositionend=${(event: CompositionEvent) =>
+                            this.handleCompositionEnd(event, (value) => {
+                                this.manualCorpId = value;
+                            })}
+                        @input=${(event: InputEvent) =>
+                            this.handleComposedInput(event, (value) => {
+                                this.manualCorpId = value;
+                            })}
                     />
                 </div>
                 <div class="pf-c-form__group">
-                    <label class="pf-c-form__label">
+                    <label class="pf-c-form__label" for="dingtalk-manual-label">
                         <span class="pf-c-form__label-text"
                             >${msg("Label", {
                                 id: "sources.oauth.dingtalk-allowlist.company.label",
@@ -1057,11 +1248,18 @@ export class DingTalkAllowlistPanel extends AKElement {
                         >
                     </label>
                     <input
+                        id="dingtalk-manual-label"
                         class="pf-c-form-control"
                         .value=${this.manualLabel}
-                        @input=${(event: InputEvent) => {
-                            this.manualLabel = (event.target as HTMLInputElement).value;
-                        }}
+                        @compositionstart=${this.startComposition}
+                        @compositionend=${(event: CompositionEvent) =>
+                            this.handleCompositionEnd(event, (value) => {
+                                this.manualLabel = value;
+                            })}
+                        @input=${(event: InputEvent) =>
+                            this.handleComposedInput(event, (value) => {
+                                this.manualLabel = value;
+                            })}
                     />
                 </div>
                 <button
@@ -1129,11 +1327,15 @@ export class DingTalkAllowlistPanel extends AKElement {
                     aria-label=${msg("Company label", {
                         id: "sources.oauth.dingtalk-allowlist.company.label.aria-label",
                     })}
-                    @input=${(event: InputEvent) => {
-                        this.updateCompany(company.corpId, {
-                            label: (event.target as HTMLInputElement).value,
-                        });
-                    }}
+                    @compositionstart=${this.startComposition}
+                    @compositionend=${(event: CompositionEvent) =>
+                        this.handleCompositionEnd(event, (value) => {
+                            this.updateCompany(company.corpId, { label: value });
+                        })}
+                    @input=${(event: InputEvent) =>
+                        this.handleComposedInput(event, (value) => {
+                            this.updateCompany(company.corpId, { label: value });
+                        })}
                 />
                 <div class="ak-dingtalk-muted">${company.corpId}</div>
             </td>
@@ -1152,6 +1354,16 @@ export class DingTalkAllowlistPanel extends AKElement {
                         id: "sources.oauth.dingtalk-allowlist.company.allow-all",
                     })}
                 </label>
+                ${company.allowAll
+                    ? html`<ak-alert inline plain level="warning" icon="fa-exclamation-triangle">
+                          ${msg(
+                              "Grants sign-in access to everyone in this company. Restrict to departments unless org-wide access is intended.",
+                              {
+                                  id: "sources.oauth.dingtalk-allowlist.company.allow-all.warning",
+                              },
+                          )}
+                      </ak-alert>`
+                    : nothing}
             </td>
             <td
                 data-label=${msg("Department IDs", {
@@ -1169,18 +1381,26 @@ export class DingTalkAllowlistPanel extends AKElement {
                     <input
                         class="pf-c-form-control ak-dingtalk-department-input"
                         ?disabled=${company.allowAll}
+                        aria-label=${msg(
+                            str`Allowed department IDs for ${company.label || company.corpId}`,
+                            {
+                                id: "sources.oauth.dingtalk-allowlist.departments.input.aria-label",
+                            },
+                        )}
                         .value=${this.departmentInputs[company.corpId] ??
                         renderDingTalkDepartmentInput(company.deptIds.map(String))}
                         placeholder=${msg("IDs separated by commas or spaces", {
                             id: "sources.oauth.dingtalk-allowlist.departments.placeholder",
                         })}
-                        @input=${(event: InputEvent) => {
-                            this.departmentInputs = {
-                                ...this.departmentInputs,
-                                [company.corpId]: (event.target as HTMLInputElement).value,
-                            };
-                            this.markDirty();
-                        }}
+                        @compositionstart=${this.startComposition}
+                        @compositionend=${(event: CompositionEvent) =>
+                            this.handleCompositionEnd(event, (value) =>
+                                this.setDepartmentInput(company.corpId, value),
+                            )}
+                        @input=${(event: InputEvent) =>
+                            this.handleComposedInput(event, (value) =>
+                                this.setDepartmentInput(company.corpId, value),
+                            )}
                     />
                     <button
                         type="button"
@@ -1232,107 +1452,189 @@ export class DingTalkAllowlistPanel extends AKElement {
                     renderDingTalkDepartmentInput(company.deptIds.map(String)),
             ),
         );
-        const rows = buildDingTalkDepartmentTreeRows(departments, selected);
+        const allRows = buildDingTalkDepartmentTreeRows(departments, selected);
+        const filter = this.departmentFilters[company.corpId] ?? "";
+        const filteredRows = filterDingTalkDepartmentTreeRows(allRows, filter);
+        const pageWindow = dingtalkDepartmentPageWindow(
+            filteredRows.length,
+            this.departmentPages[company.corpId] ?? 1,
+            DINGTALK_DEPARTMENT_PAGE_SIZE,
+        );
+        const pageRows = filteredRows.slice(pageWindow.start, pageWindow.end);
         return html`<table class="pf-c-table pf-m-compact pf-m-grid-md" role="grid">
-            <caption>
-                <div class="ak-dingtalk-department-actions">
-                    <button
-                        type="button"
-                        class="pf-c-button pf-m-secondary pf-m-small"
-                        ?disabled=${company.allowAll}
-                        @click=${() => this.selectAllLoadedDepartments(company.corpId)}
-                    >
-                        ${msg("Select all", {
-                            id: "sources.oauth.dingtalk-allowlist.departments.select-all",
-                        })}
-                    </button>
-                    <button
-                        type="button"
-                        class="pf-c-button pf-m-secondary pf-m-small"
-                        ?disabled=${company.allowAll}
-                        @click=${() => this.invertLoadedDepartments(company.corpId)}
-                    >
-                        ${msg("Invert selection", {
-                            id: "sources.oauth.dingtalk-allowlist.departments.invert",
-                        })}
-                    </button>
-                </div>
-            </caption>
-            <thead>
-                <tr>
-                    <th>
-                        ${msg("Allowed", {
-                            id: "sources.oauth.dingtalk-allowlist.department.allowed",
-                        })}
-                    </th>
-                    <th>
-                        ${msg("Department ID", {
-                            id: "sources.oauth.dingtalk-allowlist.department.id",
-                        })}
-                    </th>
-                    <th>
-                        ${msg("Name", { id: "sources.oauth.dingtalk-allowlist.department.name" })}
-                    </th>
-                    <th>
-                        ${msg("Parent ID", {
-                            id: "sources.oauth.dingtalk-allowlist.department.parent-id",
-                        })}
-                    </th>
-                </tr>
-            </thead>
-            <tbody>
-                ${rows.map(
-                    (row) =>
-                        html`<tr>
-                            <td
-                                data-label=${msg("Allowed", {
-                                    id: "sources.oauth.dingtalk-allowlist.department.allowed",
-                                })}
-                            >
-                                <input
-                                    type="checkbox"
-                                    ?disabled=${company.allowAll}
-                                    .checked=${row.selection === "checked"}
-                                    .indeterminate=${row.selection === "indeterminate"}
-                                    @change=${(event: InputEvent) => {
-                                        this.toggleLoadedDepartment(
-                                            company.corpId,
-                                            row.department.deptId,
-                                            (event.target as HTMLInputElement).checked,
-                                        );
-                                    }}
-                                />
-                            </td>
-                            <td
-                                data-label=${msg("Department ID", {
-                                    id: "sources.oauth.dingtalk-allowlist.department.id",
-                                })}
-                            >
-                                <span
-                                    class="ak-dingtalk-department-tree-cell"
-                                    style=${`padding-inline-start: ${row.level * 1.5}rem;`}
+                <caption>
+                    <div class="ak-dingtalk-department-actions">
+                        <input
+                            class="pf-c-form-control ak-dingtalk-department-filter"
+                            type="search"
+                            .value=${filter}
+                            aria-label=${msg("Filter departments by ID or name", {
+                                id: "sources.oauth.dingtalk-allowlist.departments.filter.aria-label",
+                            })}
+                            placeholder=${msg("Filter departments", {
+                                id: "sources.oauth.dingtalk-allowlist.departments.filter.placeholder",
+                            })}
+                            @compositionstart=${this.startComposition}
+                            @compositionend=${(event: CompositionEvent) =>
+                                this.handleCompositionEnd(event, (value) =>
+                                    this.setDepartmentFilter(company.corpId, value),
+                                )}
+                            @input=${(event: InputEvent) =>
+                                this.handleComposedInput(event, (value) =>
+                                    this.setDepartmentFilter(company.corpId, value),
+                                )}
+                        />
+                        <button
+                            type="button"
+                            class="pf-c-button pf-m-secondary pf-m-small"
+                            ?disabled=${company.allowAll}
+                            @click=${() => this.selectAllLoadedDepartments(company.corpId)}
+                        >
+                            ${msg("Select all", {
+                                id: "sources.oauth.dingtalk-allowlist.departments.select-all",
+                            })}
+                        </button>
+                        <button
+                            type="button"
+                            class="pf-c-button pf-m-secondary pf-m-small"
+                            ?disabled=${company.allowAll}
+                            @click=${() => this.invertLoadedDepartments(company.corpId)}
+                        >
+                            ${msg("Invert selection", {
+                                id: "sources.oauth.dingtalk-allowlist.departments.invert",
+                            })}
+                        </button>
+                    </div>
+                </caption>
+                <thead>
+                    <tr>
+                        <th>
+                            ${msg("Allowed", {
+                                id: "sources.oauth.dingtalk-allowlist.department.allowed",
+                            })}
+                        </th>
+                        <th>
+                            ${msg("Department ID", {
+                                id: "sources.oauth.dingtalk-allowlist.department.id",
+                            })}
+                        </th>
+                        <th>
+                            ${msg("Name", {
+                                id: "sources.oauth.dingtalk-allowlist.department.name",
+                            })}
+                        </th>
+                        <th>
+                            ${msg("Parent ID", {
+                                id: "sources.oauth.dingtalk-allowlist.department.parent-id",
+                            })}
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${pageRows.length < 1
+                        ? html`<tr>
+                              <td colspan="4" class="ak-dingtalk-muted">
+                                  ${msg("No departments match the filter.", {
+                                      id: "sources.oauth.dingtalk-allowlist.departments.filter.empty",
+                                  })}
+                              </td>
+                          </tr>`
+                        : nothing}
+                    ${pageRows.map(
+                        (row) =>
+                            html`<tr>
+                                <td
+                                    data-label=${msg("Allowed", {
+                                        id: "sources.oauth.dingtalk-allowlist.department.allowed",
+                                    })}
                                 >
-                                    ${row.department.deptId}
-                                </span>
-                            </td>
-                            <td
-                                data-label=${msg("Name", {
-                                    id: "sources.oauth.dingtalk-allowlist.department.name",
-                                })}
-                            >
-                                ${row.department.name}
-                            </td>
-                            <td
-                                data-label=${msg("Parent ID", {
-                                    id: "sources.oauth.dingtalk-allowlist.department.parent-id",
-                                })}
-                            >
-                                ${row.department.parentId || "-"}
-                            </td>
-                        </tr>`,
+                                    <input
+                                        type="checkbox"
+                                        ?disabled=${company.allowAll}
+                                        aria-level=${row.level + 1}
+                                        aria-label=${msg(
+                                            str`Allow ${row.department.name} (${row.department.deptId})`,
+                                            {
+                                                id: "sources.oauth.dingtalk-allowlist.department.checkbox.aria-label",
+                                            },
+                                        )}
+                                        .checked=${row.selection === "checked"}
+                                        .indeterminate=${row.selection === "indeterminate"}
+                                        @change=${(event: InputEvent) => {
+                                            this.toggleLoadedDepartment(
+                                                company.corpId,
+                                                row.department.deptId,
+                                                (event.target as HTMLInputElement).checked,
+                                            );
+                                        }}
+                                    />
+                                </td>
+                                <td
+                                    data-label=${msg("Department ID", {
+                                        id: "sources.oauth.dingtalk-allowlist.department.id",
+                                    })}
+                                >
+                                    <span
+                                        class="ak-dingtalk-department-tree-cell"
+                                        style=${`padding-inline-start: ${row.level * 1.5}rem;`}
+                                    >
+                                        ${row.department.deptId}
+                                    </span>
+                                </td>
+                                <td
+                                    data-label=${msg("Name", {
+                                        id: "sources.oauth.dingtalk-allowlist.department.name",
+                                    })}
+                                >
+                                    ${row.department.name}
+                                </td>
+                                <td
+                                    data-label=${msg("Parent ID", {
+                                        id: "sources.oauth.dingtalk-allowlist.department.parent-id",
+                                    })}
+                                >
+                                    ${row.department.parentId || "-"}
+                                </td>
+                            </tr>`,
+                    )}
+                </tbody>
+            </table>
+            ${this.renderDepartmentPager(company.corpId, pageWindow)}`;
+    }
+
+    private renderDepartmentPager(
+        corpId: string,
+        pageWindow: ReturnType<typeof dingtalkDepartmentPageWindow>,
+    ): TemplateResult {
+        if (pageWindow.totalPages < 2) {
+            return html``;
+        }
+        return html`<div class="ak-dingtalk-department-pager">
+            <button
+                type="button"
+                class="pf-c-button pf-m-secondary pf-m-small"
+                ?disabled=${pageWindow.page <= 1}
+                @click=${() => this.setDepartmentPage(corpId, pageWindow.page - 1)}
+            >
+                ${msg("Previous", { id: "sources.oauth.dingtalk-allowlist.departments.page.prev" })}
+            </button>
+            <span class="ak-dingtalk-muted">
+                ${msg(
+                    str`Showing ${pageWindow.start + 1}–${pageWindow.end} of ${pageWindow.total}`,
+                    {
+                        id: "sources.oauth.dingtalk-allowlist.departments.page.range",
+                    },
                 )}
-            </tbody>
-        </table>`;
+            </span>
+            <button
+                type="button"
+                class="pf-c-button pf-m-secondary pf-m-small"
+                ?disabled=${pageWindow.page >= pageWindow.totalPages}
+                @click=${() => this.setDepartmentPage(corpId, pageWindow.page + 1)}
+            >
+                ${msg("Next", { id: "sources.oauth.dingtalk-allowlist.departments.page.next" })}
+            </button>
+        </div>`;
     }
 
     private renderDiscoveryDetails(): TemplateResult {
@@ -1351,20 +1653,79 @@ export class DingTalkAllowlistPanel extends AKElement {
         </p>`;
     }
 
+    private renderUnsavedChanges(): TemplateResult {
+        if (!this.dirty) {
+            return html``;
+        }
+        return html`<ak-alert class="ak-dingtalk-section" level="warning" icon="fa-pencil">
+            ${msg("You have unsaved allowlist changes. Use Save and apply to persist them.", {
+                id: "sources.oauth.dingtalk-allowlist.unsaved.title",
+            })}
+        </ak-alert>`;
+    }
+
+    private renderDetectedSharedConfig(): TemplateResult {
+        const detected = this.detectedSharedConfig;
+        if (!detected || detected.companies.length < 1) {
+            return html``;
+        }
+        return html`<ak-alert
+            class="ak-dingtalk-section"
+            level="warning"
+            icon="fa-exclamation-triangle"
+        >
+            <strong
+                >${msg("Companies detected on a shared flow", {
+                    id: "sources.oauth.dingtalk-allowlist.detected.title",
+                })}</strong
+            >
+            <p>
+                ${msg(
+                    "These companies come from another DingTalk source that shares this flow. They are not part of this source's allowlist and will not be saved unless you adopt them.",
+                    {
+                        id: "sources.oauth.dingtalk-allowlist.detected.body",
+                    },
+                )}
+            </p>
+            <ul>
+                ${detected.companies.map(
+                    (company) =>
+                        html`<li>
+                            ${company.label || company.corpId}
+                            <span class="ak-dingtalk-muted">(${company.corpId})</span>
+                        </li>`,
+                )}
+            </ul>
+            <button
+                type="button"
+                class="pf-c-button pf-m-secondary pf-m-small"
+                @click=${() => this.adoptDetectedSharedConfig()}
+            >
+                ${msg("Adopt detected companies", {
+                    id: "sources.oauth.dingtalk-allowlist.detected.adopt",
+                })}
+            </button>
+        </ak-alert>`;
+    }
+
     private renderPartialFailures(): TemplateResult {
         if (this.partialFailures.length < 1) {
             return html``;
         }
-        return html`<div class="pf-c-content ak-dingtalk-section">
+        return html`<ak-alert
+            class="ak-dingtalk-section"
+            level="danger"
+            icon="fa-exclamation-circle"
+        >
             <strong
-                >${msg("Partial failure details", {
+                >${msg("Some DingTalk status checks failed.", {
                     id: "sources.oauth.dingtalk-allowlist.partial-failures.title",
                 })}</strong
             >
             <ul>
                 ${this.partialFailures.map((failure) => html`<li>${failure}</li>`)}
             </ul>
-        </div>`;
+        </ak-alert>`;
     }
 
     private renderRemoveConfiguration(): TemplateResult {
@@ -1436,7 +1797,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                         </ak-spinner-button>
                         <ak-spinner-button
                             class="pf-m-secondary"
-                            .callAction=${() => this.refreshStatus()}
+                            .callAction=${() => this.refreshStatusAction()}
                         >
                             ${msg("Refresh status", {
                                 id: "sources.oauth.dingtalk-allowlist.status.refresh",
@@ -1444,12 +1805,20 @@ export class DingTalkAllowlistPanel extends AKElement {
                         </ak-spinner-button>
                         ${this.renderRemoveConfiguration()}
                     </div>
-                    ${this.renderDiscoveryDetails()}
-                    <ul class="ak-dingtalk-status ak-dingtalk-section">
-                        ${this.statusItems().map((item) => this.renderStatus(item))}
-                    </ul>
-                    ${this.renderPartialFailures()} ${this.renderManualAdd()}
-                    ${this.renderCompanies()}
+                    ${this.loaded
+                        ? html`${this.renderUnsavedChanges()} ${this.renderDiscoveryDetails()}
+                              <ul class="ak-dingtalk-status ak-dingtalk-section">
+                                  ${this.statusItems().map((item) => this.renderStatus(item))}
+                              </ul>
+                              ${this.renderDetectedSharedConfig()} ${this.renderPartialFailures()}
+                              ${this.renderManualAdd()} ${this.renderCompanies()}`
+                        : html`<ak-empty-state loading
+                              ><span
+                                  >${msg("Loading DingTalk allowlist status…", {
+                                      id: "sources.oauth.dingtalk-allowlist.status.loading",
+                                  })}</span
+                              ></ak-empty-state
+                          >`}
                 </div>
             </div>
         </div>`;

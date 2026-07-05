@@ -1,5 +1,9 @@
 import { readFileSync } from "node:fs";
 
+import { MessageLevel } from "#common/messages";
+
+import { showMessage } from "#elements/messages/MessageContainer";
+
 import type {
     DingTalkDirectoryStatusSummary,
     DingTalkDirectorySyncStatus,
@@ -9,6 +13,44 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("#elements/tasks/ScheduleList", () => ({}));
 vi.mock("#elements/forms/ConfirmationForm", () => ({}));
+// Replace the real message container (which touches the DOM) with a spy so the
+// panel's user-facing feedback can be asserted in the Node environment.
+vi.mock("#elements/messages/MessageContainer", () => ({
+    showMessage: vi.fn(),
+}));
+
+const DINGTALK_DIRECTORY_SYNC_POLL_INTERVAL_MS = 5_000;
+
+function makeSyncStatus(corpId: string, status: string): DingTalkDirectorySyncStatus {
+    return {
+        corpId,
+        status,
+        startedAt: null,
+        finishedAt: null,
+        error: "",
+        counters: {},
+    };
+}
+
+interface DirectoryStatusApiStub {
+    sourcesOauthDingtalkDirectoryStatusRetrieve: (args: {
+        sourceSlug: string;
+    }) => Promise<{ sync: DingTalkDirectorySyncStatus[] }>;
+    sourcesOauthDingtalkDirectorySyncCreate?: (args: {
+        sourceSlug: string;
+        dingTalkDirectorySyncRequestRequest: { corpId: string };
+    }) => Promise<{ queued: boolean; corpId: string }>;
+}
+
+interface DirectoryPanelInternals {
+    source?: { slug: string };
+    statuses: DingTalkDirectorySyncStatus[];
+    manualCorpId: string;
+    api: DirectoryStatusApiStub;
+    refreshStatus(): Promise<void>;
+    triggerManualSync(): Promise<void>;
+    stopSyncPoll(): void;
+}
 
 let dingtalkDirectoryStatusSummary: (
     statuses: DingTalkDirectorySyncStatus[],
@@ -214,6 +256,141 @@ describe("DingTalkDirectoryPanel", () => {
         expect(directoryPanelSource).not.toContain(
             'method: "DELETE",\n            headers: { "Content-Type": "application/json" }',
         );
+    });
+
+    it("centralizes the hand-written directory sync path and cites its operationId", () => {
+        expect(directoryPanelSource).toContain(
+            'const DINGTALK_DIRECTORY_SYNC_PATH = "/sources/oauth/dingtalk-directory/{source_slug}/sync/"',
+        );
+        expect(directoryPanelSource).toContain(
+            "operationId: sources_oauth_dingtalk_directory_sync_destroy",
+        );
+        expect(directoryPanelSource).toContain(
+            'DINGTALK_DIRECTORY_SYNC_PATH.replace(\n                "{source_slug}",',
+        );
+    });
+
+    it("only auto-refreshes when the source slug actually changes", () => {
+        expect(directoryPanelSource).toContain(
+            'const previous = changedProperties.get("source") as OAuthSource | undefined;',
+        );
+        expect(directoryPanelSource).toContain("if (previous?.slug !== this.source.slug)");
+    });
+
+    it("clears the running-sync poll timer when the panel disconnects", () => {
+        expect(directoryPanelSource).toContain("disconnectedCallback(): void {");
+        expect(directoryPanelSource).toMatch(
+            /disconnectedCallback\(\): void \{[\s\S]*?this\.stopSyncPoll\(\);/,
+        );
+    });
+
+    it("removes the fork-only DingTalk documentation link that upstream does not host", () => {
+        expect(directoryPanelSource).not.toContain("docs.goauthentik.io/docs/sources/dingtalk");
+        expect(directoryPanelSource).not.toContain('id: "sources.oauth.dingtalk-directory.docs"');
+    });
+
+    it("does not let a stale status refresh overwrite a newer one", async () => {
+        const panel = new DingTalkDirectoryPanelElement();
+        const internals = panel as unknown as DirectoryPanelInternals;
+        internals.source = { slug: "corp" };
+
+        const resolvers: Array<(value: { sync: DingTalkDirectorySyncStatus[] }) => void> = [];
+        internals.api = {
+            sourcesOauthDingtalkDirectoryStatusRetrieve: () =>
+                new Promise((resolve) => {
+                    resolvers.push(resolve);
+                }),
+        };
+
+        const stale = internals.refreshStatus();
+        const fresh = internals.refreshStatus();
+
+        // Resolve the newer refresh first, then let the older one return late.
+        resolvers[1]?.({ sync: [makeSyncStatus("corp-new", "success")] });
+        resolvers[0]?.({ sync: [makeSyncStatus("corp-old", "success")] });
+
+        await Promise.all([stale, fresh]);
+
+        expect(internals.statuses.map((status) => status.corpId)).toEqual(["corp-new"]);
+    });
+
+    it("shows an informational message when a manual sync is not queued", async () => {
+        vi.mocked(showMessage).mockClear();
+        const panel = new DingTalkDirectoryPanelElement();
+        const internals = panel as unknown as DirectoryPanelInternals;
+        internals.source = { slug: "corp" };
+        internals.manualCorpId = "corp-x";
+        internals.api = {
+            sourcesOauthDingtalkDirectorySyncCreate: async () => ({
+                queued: false,
+                corpId: "corp-x",
+            }),
+            sourcesOauthDingtalkDirectoryStatusRetrieve: async () => ({ sync: [] }),
+        };
+
+        await internals.triggerManualSync();
+
+        expect(showMessage).toHaveBeenCalledTimes(1);
+        const message = vi.mocked(showMessage).mock.calls[0]?.[0];
+        expect(message?.level).toBe(MessageLevel.info);
+        expect(internals.manualCorpId).toBe("");
+    });
+
+    it("polls a running sync and stops once it settles", async () => {
+        vi.useFakeTimers();
+        try {
+            const panel = new DingTalkDirectoryPanelElement();
+            const internals = panel as unknown as DirectoryPanelInternals;
+            internals.source = { slug: "corp" };
+
+            let sync: DingTalkDirectorySyncStatus[] = [makeSyncStatus("corp-a", "running")];
+            let calls = 0;
+            internals.api = {
+                sourcesOauthDingtalkDirectoryStatusRetrieve: async () => {
+                    calls += 1;
+                    return { sync };
+                },
+            };
+
+            await internals.refreshStatus();
+            expect(calls).toBe(1);
+            expect(vi.getTimerCount()).toBe(1);
+
+            // Still running: the poll fires again and re-arms the timer.
+            await vi.advanceTimersByTimeAsync(DINGTALK_DIRECTORY_SYNC_POLL_INTERVAL_MS);
+            expect(calls).toBe(2);
+            expect(vi.getTimerCount()).toBe(1);
+
+            // Sync completed: the next poll observes no running row and stops.
+            sync = [makeSyncStatus("corp-a", "success")];
+            await vi.advanceTimersByTimeAsync(DINGTALK_DIRECTORY_SYNC_POLL_INTERVAL_MS);
+            expect(calls).toBe(3);
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("stops the running-sync poll timer to avoid leaks", async () => {
+        vi.useFakeTimers();
+        try {
+            const panel = new DingTalkDirectoryPanelElement();
+            const internals = panel as unknown as DirectoryPanelInternals;
+            internals.source = { slug: "corp" };
+            internals.api = {
+                sourcesOauthDingtalkDirectoryStatusRetrieve: async () => ({
+                    sync: [makeSyncStatus("corp-a", "running")],
+                }),
+            };
+
+            await internals.refreshStatus();
+            expect(vi.getTimerCount()).toBe(1);
+
+            internals.stopSyncPoll();
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("renders an error state instead of loading forever when the status request fails", () => {

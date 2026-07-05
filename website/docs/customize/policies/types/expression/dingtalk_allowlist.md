@@ -148,7 +148,20 @@ return False
 ## Behavior
 
 - `corpId` and `corp_id` are both accepted.
-- Missing company ID fails closed.
+- A DingTalk login (the source callback provides `oauth_userinfo`) that reaches
+  policy evaluation without a company ID **fails closed** — it is denied rather
+  than silently allowed.
+- Another (non-DingTalk) source that passes through a shared flow the policy is
+  bound to is **not** blocked by this allowlist: the guard keys off the source in
+  context, so only DingTalk logins are gated.
+- On the application-access side, a session that carries **no** DingTalk allowlist
+  marker (for example a local admin, or a user who authenticated by another
+  method) is **not** blocked by this policy — it only re-checks sessions that were
+  established through an allowed DingTalk login. The anti-abuse intent (keeping
+  non-company DingTalk accounts out) is enforced at login time by the source-link
+  guard, not by blocking every non-marker user.
+- All company IDs matching the login's corp are scanned, so duplicate rows for the
+  same corp (for example one department-scoped and one `allow_all`) all apply.
 - Unknown company ID fails closed.
 - A company with `allow_all=True` does not require department data.
 - A restricted company must have at least one configured `dept_ids` value.
@@ -156,6 +169,23 @@ return False
   only when the matched company has department restrictions.
 - Department IDs are compared as strings so numeric API values and string
   configuration values match consistently.
+- A managed allowlist policy that exists but whose `# config:` line cannot be
+  parsed **fails closed** at the source-link guard (and raises a
+  `CONFIGURATION_ERROR` event) instead of allowing every DingTalk user. Only a
+  genuine absence of allowlist configuration is treated as fail-open.
+
+## Identity and matching mode
+
+- The DingTalk account identity used to match/link authentik users is the stable,
+  globally-unique **`unionId`** (returned by the base profile). Do **not** rely on
+  the enhancement-dependent `corpId:userid` for identity.
+- The authentik **username** is the DingTalk **`userid`** (short, and what
+  downstream apps expect). `userid` is unique within a corp but may repeat across
+  corps, so a multi-corp deployment can encounter username collisions.
+- Configure DingTalk sources with the default **identifier** matching mode. Do
+  **not** use `USERNAME_LINK`/`EMAIL_LINK`/`EMAIL_DENY`: DingTalk returns no
+  `email_verified` flag and the display name is user-editable, so those modes
+  enable account takeover or linking to the wrong account.
 
 ## Where to bind it
 

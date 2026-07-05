@@ -14,6 +14,7 @@ from authentik.sources.oauth.api.dingtalk_allowlist import render_dingtalk_allow
 from authentik.sources.oauth.models import OAuthSource, UserOAuthSourceConnection
 from authentik.sources.oauth.types.dingtalk import (
     DINGTALK_ACCESS_TOKEN_URL,
+    DINGTALK_ALLOWLIST_MARKER,
     DINGTALK_ALLOWLIST_PLAN_CONTEXT,
     DINGTALK_ALLOWLIST_SESSION_KEY,
     DINGTALK_APP_ACCESS_TOKEN_URL,
@@ -127,7 +128,7 @@ class TestDingTalkSourceLinkGuard(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(
             UserOAuthSourceConnection.objects.filter(
-                source=self.source, user=self.user, identifier="CORP_FAKE:USER_FAKE"
+                source=self.source, user=self.user, identifier="UNION_FAKE"
             ).exists()
         )
 
@@ -235,7 +236,7 @@ class TestDingTalkSourceLinkGuard(TestCase):
         UserOAuthSourceConnection.objects.create(
             source=self.source,
             user=existing_user,
-            identifier="CORP_FAKE:USER_FAKE",
+            identifier="UNION_FAKE",
             access_token="OLD_ACCESS_TOKEN",
             refresh_token="OLD_REFRESH_TOKEN",
         )
@@ -252,7 +253,7 @@ class TestDingTalkSourceLinkGuard(TestCase):
 
         self.assertEqual(response.status_code, 200)
         connection = UserOAuthSourceConnection.objects.get(
-            source=self.source, identifier="CORP_FAKE:USER_FAKE"
+            source=self.source, identifier="UNION_FAKE"
         )
         self.assertEqual(connection.access_token, "OLD_ACCESS_TOKEN")
         self.assertEqual(connection.refresh_token, "OLD_REFRESH_TOKEN")
@@ -263,7 +264,7 @@ class TestDingTalkSourceLinkGuard(TestCase):
         UserOAuthSourceConnection.objects.create(
             source=self.source,
             user=existing_user,
-            identifier="CORP_FAKE:USER_FAKE",
+            identifier="UNION_FAKE",
             access_token="OLD_ACCESS_TOKEN",
             refresh_token="OLD_REFRESH_TOKEN",
         )
@@ -293,7 +294,7 @@ class TestDingTalkSourceLinkGuard(TestCase):
         UserOAuthSourceConnection.objects.create(
             source=self.source,
             user=existing_user,
-            identifier="CORP_FAKE:USER_FAKE",
+            identifier="UNION_FAKE",
             access_token="OLD_ACCESS_TOKEN",
             refresh_token="OLD_REFRESH_TOKEN",
         )
@@ -320,7 +321,7 @@ class TestDingTalkSourceLinkGuard(TestCase):
         UserOAuthSourceConnection.objects.create(
             source=self.source,
             user=existing_user,
-            identifier="CORP_FAKE:USER_FAKE",
+            identifier="UNION_FAKE",
             access_token="OLD_ACCESS_TOKEN",
             refresh_token="OLD_REFRESH_TOKEN",
         )
@@ -345,7 +346,7 @@ class TestDingTalkSourceLinkGuard(TestCase):
         UserOAuthSourceConnection.objects.create(
             source=self.source,
             user=existing_user,
-            identifier="CORP_FAKE:USER_FAKE",
+            identifier="UNION_FAKE",
             access_token="OLD_ACCESS_TOKEN",
             refresh_token="OLD_REFRESH_TOKEN",
         )
@@ -359,7 +360,7 @@ class TestDingTalkSourceLinkGuard(TestCase):
 
         self.assertEqual(response.status_code, 200)
         connection = UserOAuthSourceConnection.objects.get(
-            source=self.source, identifier="CORP_FAKE:USER_FAKE"
+            source=self.source, identifier="UNION_FAKE"
         )
         self.assertEqual(connection.access_token, "OLD_ACCESS_TOKEN")
         self.assertEqual(connection.refresh_token, "OLD_REFRESH_TOKEN")
@@ -382,3 +383,44 @@ class TestDingTalkSourceLinkGuard(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(User.objects.count(), user_count)
         self.assertEqual(UserOAuthSourceConnection.objects.count(), connection_count)
+
+    def test_enrollment_without_userid_fails_closed(self):
+        """B2: enrollment is denied when the DingTalk userid (username source) is unavailable."""
+        self.bind_allowlist([{"corp_id": "CORP_FAKE", "allow_all": True}])
+        self.client.logout()
+        user_count = User.objects.count()
+        state = self.start_login()
+
+        with Mocker() as mocker:
+            mocker.post(
+                DINGTALK_ACCESS_TOKEN_URL,
+                json={"accessToken": "FAKE_USER_TOKEN", "corpId": "CORP_FAKE"},
+            )
+            mocker.get(
+                DINGTALK_PROFILE_URL,
+                json={"unionId": "UNION_FAKE", "corpId": "CORP_FAKE", "nick": "Ada"},
+            )
+            mocker.get(DINGTALK_APP_ACCESS_TOKEN_URL, json={"access_token": "FAKE_APP_TOKEN"})
+            # Enhancement returns no userid, so the username cannot be resolved.
+            mocker.post(DINGTALK_GET_BY_UNION_ID_URL, json={"errcode": 0, "result": {}})
+            response = self.callback(state)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(User.objects.count(), user_count)
+        self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())
+
+    def test_unparseable_managed_allowlist_fails_closed(self):
+        """B5: a managed allowlist whose config cannot be parsed denies login, not fail-open."""
+        policy = ExpressionPolicy.objects.create(
+            name="corrupt-dingtalk",
+            expression=f"{DINGTALK_ALLOWLIST_MARKER}\n# config: {{not-valid-json\nreturn True",
+        )
+        PolicyBinding.objects.create(target=self.source, policy=policy, order=0, enabled=True)
+        state = self.start_login()
+
+        with Mocker() as mocker:
+            self.mock_dingtalk_callback(mocker, depts=[10])
+            response = self.callback(state)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())

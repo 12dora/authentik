@@ -28,6 +28,7 @@ from authentik.stages.user_login.middleware import (
     SESSION_KEY_BINDING_NET,
 )
 from authentik.stages.user_login.models import UserLoginStage
+from authentik.stages.user_login.signals import user_login_session_finalized
 from authentik.tenants.utils import get_unique_identifier
 
 COOKIE_NAME_KNOWN_DEVICE = "authentik_device"
@@ -169,22 +170,14 @@ class UserLoginStageView(ChallengeStageView):
                 user,
                 backend=backend,
             )
-        from authentik.sources.oauth.types.dingtalk import (
-            DINGTALK_ALLOWLIST_PLAN_CONTEXT,
-            DINGTALK_ALLOWLIST_SESSION_KEY,
+        # Let extensions persist per-login session state (e.g. the DingTalk allowlist marker)
+        # without importing app-specific code into this core stage (see user_login.signals).
+        user_login_session_finalized.send(
+            sender=self.__class__,
+            request=self.request,
+            user=user,
+            stage_view=self,
         )
-
-        dingtalk_allowlist_marker = self.executor.plan.context.get(
-            DINGTALK_ALLOWLIST_PLAN_CONTEXT
-        )
-        if isinstance(dingtalk_allowlist_marker, dict):
-            self.request.session[DINGTALK_ALLOWLIST_SESSION_KEY] = {
-                **dingtalk_allowlist_marker,
-                "user_pk": user.pk,
-            }
-        else:
-            self.request.session.pop(DINGTALK_ALLOWLIST_SESSION_KEY, None)
-        self.request.session.modified = True
         self.logger.debug(
             "Logged in",
             backend=backend,

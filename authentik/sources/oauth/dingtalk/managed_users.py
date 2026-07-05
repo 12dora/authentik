@@ -63,6 +63,7 @@ def _descendants(
     diagnostics = {
         "recursion_cycle_detected": False,
         "max_depth_exceeded": False,
+        "max_depth_omitted": 0,
     }
 
     def visit(parent_user_id: str, depth: int) -> None:
@@ -70,6 +71,12 @@ def _descendants(
         if depth >= MAX_MANAGER_CHAIN_DEPTH:
             if children:
                 diagnostics["max_depth_exceeded"] = True
+                # Report how many not-yet-seen direct reports were dropped at the depth
+                # boundary so callers know the result is truncated (their subordinates are
+                # dropped too) rather than silently getting a short list — C7.
+                diagnostics["max_depth_omitted"] += sum(
+                    1 for child in children if child.user_id not in seen
+                )
             return
         for user in children:
             if user.user_id in seen:
@@ -83,20 +90,35 @@ def _descendants(
     return result, diagnostics
 
 
+def _bindings_by_identity(
+    source: OAuthSource, identities: list[str]
+) -> dict[str, list[UserOAuthSourceConnection]]:
+    """Resolve all OAuth connections for the given identities in a single query (avoids N+1)."""
+    bindings: dict[str, list[UserOAuthSourceConnection]] = {}
+    identities = [identity for identity in identities if identity]
+    if not identities:
+        return bindings
+    for connection in (
+        UserOAuthSourceConnection.objects.filter(source=source, identifier__in=identities)
+        .select_related("user")
+        .order_by("pk")
+    ):
+        bindings.setdefault(connection.identifier, []).append(connection)
+    return bindings
+
+
 def _binding_for(
     source: OAuthSource,
     corp_id: str,
     manager_user_id: str,
-    source_identifier: str,
+    directory_user: DingTalkDirectoryUser,
+    bindings_by_identity: dict[str, list[UserOAuthSourceConnection]],
 ) -> dict[str, Any]:
-    connections = list(
-        UserOAuthSourceConnection.objects.filter(
-            source=source,
-            identifier=source_identifier,
-        )
-        .select_related("user")
-        .order_by("pk")[:2]
-    )
+    # UserOAuthSourceConnection.identifier is the DingTalk unionId (see get_user_id), so match
+    # on the directory user's cached unionId rather than the corp:userid display identifier.
+    identity = directory_user.union_id
+    connections = bindings_by_identity.get(identity, []) if identity else []
+    source_identifier = f"{corp_id}:{directory_user.user_id}"
     if len(connections) > 1:
         LOGGER.warning(
             "dingtalk_managed_users_binding_conflict",
@@ -167,7 +189,12 @@ def get_dingtalk_managed_users(
             manager_user_id=manager.user_id,
             recursion_cycle_detected=diagnostics["recursion_cycle_detected"],
             max_depth_exceeded=diagnostics["max_depth_exceeded"],
+            max_depth_omitted=diagnostics["max_depth_omitted"],
         )
+    # C6: resolve every subordinate's OAuth connection in a single query keyed by unionId.
+    bindings_by_identity = _bindings_by_identity(
+        source, [directory_user.union_id for directory_user in descendants]
+    )
     for directory_user in descendants:
         source_identifier = f"{corp_id}:{directory_user.user_id}"
         users.append(
@@ -176,7 +203,9 @@ def get_dingtalk_managed_users(
                 "source_identifier": source_identifier,
                 "directory_active": directory_user.active,
                 "is_deleted": directory_user.is_deleted,
-                **_binding_for(source, corp_id, manager.user_id, source_identifier),
+                **_binding_for(
+                    source, corp_id, manager.user_id, directory_user, bindings_by_identity
+                ),
             }
         )
     stale = _is_stale(status)

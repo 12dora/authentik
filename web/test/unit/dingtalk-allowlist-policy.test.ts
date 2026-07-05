@@ -172,11 +172,16 @@ describe("renderDingTalkAllowlistPolicy", () => {
         );
 
         expect(policy).toContain('ak_message("钉钉登录失败：无法确认企业信息，请联系管理员。")');
+        // B4: a DingTalk login that reached policy evaluation without a company id fails closed.
         expect(policy).toContain(
-            'ak_message("钉钉登录失败：请通过允许的钉钉组织登录后访问此应用。")',
+            'ak_message("钉钉登录失败：无法确定您的企业信息，请重新通过钉钉登录。")',
         );
         expect(policy).toContain(
             'ak_message("钉钉登录失败：当前白名单状态已更新，请重新通过钉钉登录。")',
+        );
+        // B6: application access without a DingTalk marker is no longer blocked outright.
+        expect(policy).not.toContain(
+            'ak_message("钉钉登录失败：请通过允许的钉钉组织登录后访问此应用。")',
         );
         expect(policy).toContain('ak_message("钉钉登录失败：当前企业未被允许，请联系管理员。")');
         expect(policy).toContain('ak_message("钉钉登录失败：无法确认部门信息，请联系管理员。")');

@@ -3,6 +3,7 @@
 from collections import OrderedDict
 
 from django.core.exceptions import ObjectDoesNotExist
+from django.utils.translation import gettext_lazy as _
 from django_filters.filters import BooleanFilter, ModelMultipleChoiceFilter
 from django_filters.filterset import FilterSet
 from rest_framework.exceptions import ValidationError
@@ -92,7 +93,7 @@ class PolicyBindingSerializer(ModelSerializer):
 
         target: PolicyBindingModel = binding_value("target")
         if target is None:
-            raise ValidationError("Target is required.")
+            raise ValidationError(_("Target is required."))
         supported = target.supported_policy_binding_targets()
         supported.sort()
         count = sum([bool(binding_value(x)) for x in supported])
