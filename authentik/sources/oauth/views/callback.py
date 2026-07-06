@@ -165,10 +165,15 @@ class OAuthSourceFlowManager(SourceFlowManager):
             return self.error_handler(FlowNonApplicableException(source_policy_result))
         return super().get_flow(**kwargs)
 
-    def _dingtalk_source_link_allowed(self) -> bool:
-        """Check DingTalk allowlist before accepting a DingTalk source result."""
+    def _dingtalk_source_link_denial(self) -> str | None:
+        """Return a deny message when the DingTalk allowlist rejects this login, else None.
+
+        DingTalk sources are whitelist-gated: only a login matching an enabled, parseable
+        managed allowlist is accepted. A source without a configured allowlist (or with an
+        unparseable or disabled one) fails closed instead of silently allowing every corp.
+        """
         if getattr(self.source, "provider_type", "") != "dingtalk":
-            return True
+            return None
         from authentik.sources.oauth.types.dingtalk import (
             DINGTALK_ALLOWLIST_PLAN_CONTEXT,
             build_dingtalk_allowlist_session_marker,
@@ -176,11 +181,11 @@ class OAuthSourceFlowManager(SourceFlowManager):
             get_dingtalk_allowlist_binding,
         )
 
-        _, _, config = get_dingtalk_allowlist_binding(self.source)
+        # Named placeholders: unpacking into `_` would shadow gettext in this scope.
+        _binding, _policy, config = get_dingtalk_allowlist_binding(self.source)
         if config is None:
             # B5: a managed allowlist that exists but cannot be parsed must fail closed and
-            # alert an admin, rather than silently allowing every DingTalk user. Only a genuine
-            # absence of allowlist configuration is treated as fail-open.
+            # alert an admin, rather than silently allowing every DingTalk user.
             if dingtalk_allowlist_has_unparseable_binding(self.source):
                 Event.new(
                     EventAction.CONFIGURATION_ERROR,
@@ -190,8 +195,17 @@ class OAuthSourceFlowManager(SourceFlowManager):
                     ),
                     source=self.source,
                 ).from_http(self.request)
-                return False
-            return True
+                return _("钉钉登录失败：企业白名单配置异常，请联系管理员。")
+            Event.new(
+                EventAction.CONFIGURATION_ERROR,
+                message=(
+                    "No enabled DingTalk allowlist is configured for this source; "
+                    "denying the DingTalk login. Save an allowlist on the source's "
+                    "DingTalk Allowlist tab to permit sign-ins."
+                ),
+                source=self.source,
+            ).from_http(self.request)
+            return _("钉钉登录失败：管理员尚未配置企业白名单，请联系管理员。")
         userinfo = self.policy_context.get("oauth_userinfo") or {}
         marker = build_dingtalk_allowlist_session_marker(
             config,
@@ -201,17 +215,16 @@ class OAuthSourceFlowManager(SourceFlowManager):
         )
         if not marker:
             self.policy_context.pop(DINGTALK_ALLOWLIST_PLAN_CONTEXT, None)
-            return False
+            return _("钉钉登录失败：当前企业或部门未被允许，请联系管理员。")
         self.policy_context[DINGTALK_ALLOWLIST_PLAN_CONTEXT] = marker
-        return True
+        return None
 
     def _dingtalk_allowlist_denied_response(self) -> HttpResponse | None:
         """Return a deny response when a source-bound DingTalk allowlist rejects this login."""
-        if self._dingtalk_source_link_allowed():
+        denial = self._dingtalk_source_link_denial()
+        if denial is None:
             return None
-        return self.error_handler(
-            Exception(_("钉钉登录失败：当前企业或部门未被允许，请联系管理员。"))
-        )
+        return self.error_handler(Exception(denial))
 
     def _dingtalk_promote_user_to_internal(self, connection: UserOAuthSourceConnection) -> None:
         """Promote DingTalk-linked users to internal so they can use the user interface.

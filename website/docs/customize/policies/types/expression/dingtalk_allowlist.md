@@ -171,8 +171,13 @@ return False
   configuration values match consistently.
 - A managed allowlist policy that exists but whose `# config:` line cannot be
   parsed **fails closed** at the source-link guard (and raises a
-  `CONFIGURATION_ERROR` event) instead of allowing every DingTalk user. Only a
-  genuine absence of allowlist configuration is treated as fail-open.
+  `CONFIGURATION_ERROR` event) instead of allowing every DingTalk user.
+- A DingTalk source **without any enabled allowlist also fails closed**: every
+  DingTalk login is denied (with a `CONFIGURATION_ERROR` event) until an
+  allowlist is saved and applied on the source's DingTalk Allowlist tab. An
+  empty whitelist therefore means "nobody may sign in", never "everybody may
+  sign in". Company discovery through the admin panel keeps working while
+  logins are denied, so the first company can still be added interactively.
 
 ## Identity and matching mode
 

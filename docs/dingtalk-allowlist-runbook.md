@@ -47,6 +47,10 @@ The allowlist is a multi-company contract:
 - Missing department data fails only when the matched company has department
   restrictions.
 - Department IDs are compared as strings.
+- A DingTalk source with no enabled allowlist configured fails closed: every
+  DingTalk login is denied (with a `CONFIGURATION_ERROR` event) until an
+  allowlist is saved and applied. Admin-panel company discovery keeps working
+  while logins are denied.
 
 Managed policies must keep this marker and JSON comment at the top of the
 Expression Policy body:

@@ -6,6 +6,7 @@ from requests_mock import Mocker
 
 from authentik.core.models import User, UserTypes
 from authentik.core.tests.utils import create_test_admin_user, create_test_flow, create_test_user
+from authentik.events.models import Event, EventAction
 from authentik.flows.models import FlowStageBinding
 from authentik.flows.views.executor import SESSION_KEY_PLAN
 from authentik.policies.expression.models import ExpressionPolicy
@@ -416,6 +417,41 @@ class TestDingTalkSourceLinkGuard(TestCase):
             expression=f"{DINGTALK_ALLOWLIST_MARKER}\n# config: {{not-valid-json\nreturn True",
         )
         PolicyBinding.objects.create(target=self.source, policy=policy, order=0, enabled=True)
+        state = self.start_login()
+
+        with Mocker() as mocker:
+            self.mock_dingtalk_callback(mocker, depts=[10])
+            response = self.callback(state)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())
+
+    def test_login_without_allowlist_fails_closed(self):
+        """A DingTalk source with no configured allowlist denies every login (whitelist)."""
+        state = self.start_login()
+
+        with Mocker() as mocker:
+            self.mock_dingtalk_callback(mocker, depts=[10])
+            response = self.callback(state)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())
+        self.assertTrue(
+            Event.objects.filter(
+                action=EventAction.CONFIGURATION_ERROR,
+                context__message__icontains="No enabled DingTalk allowlist",
+            ).exists()
+        )
+
+    def test_login_with_disabled_allowlist_binding_fails_closed(self):
+        """A managed allowlist whose binding is disabled counts as unconfigured and denies."""
+        policy = ExpressionPolicy.objects.create(
+            name="managed-dingtalk",
+            expression=render_dingtalk_allowlist_policy(
+                {"companies": [{"corp_id": "CORP_FAKE", "allow_all": True}]}
+            ),
+        )
+        PolicyBinding.objects.create(target=self.source, policy=policy, order=0, enabled=False)
         state = self.start_login()
 
         with Mocker() as mocker:

@@ -12,6 +12,9 @@ from authentik.core.sources.stage import PLAN_CONTEXT_SOURCES_CONNECTION
 from authentik.core.tests.utils import create_test_admin_user, create_test_flow
 from authentik.flows.views.executor import SESSION_KEY_PLAN
 from authentik.lib.utils.reflection import all_subclasses
+from authentik.policies.expression.models import ExpressionPolicy
+from authentik.policies.models import PolicyBinding
+from authentik.sources.oauth.api.dingtalk_allowlist import render_dingtalk_allowlist_policy
 from authentik.sources.oauth.models import DingTalkOAuthSource, OAuthSource
 from authentik.sources.oauth.types.dingtalk import (
     DINGTALK_ACCESS_TOKEN_URL,
@@ -303,9 +306,7 @@ class TestTypeDingTalk(TestCase):
         callback = DingTalkOAuth2Callback()
 
         self.assertEqual(
-            callback.get_user_id(
-                {"corpId": "CORP_ID", "userid": "USER_ID", "unionId": "UNION_ID"}
-            ),
+            callback.get_user_id({"corpId": "CORP_ID", "userid": "USER_ID", "unionId": "UNION_ID"}),
             "UNION_ID",
         )
         self.assertEqual(callback.get_user_id({"unionId": "UNION_ID"}), "UNION_ID")
@@ -394,6 +395,14 @@ class TestTypeDingTalk(TestCase):
         """Test DingTalk callback stores profile details for enrollment/write stages"""
         self.source.enrollment_flow = create_test_flow()
         self.source.save()
+        # DingTalk logins fail closed without a configured allowlist, so allow this corp.
+        policy = ExpressionPolicy.objects.create(
+            name="managed-dingtalk-allowlist",
+            expression=render_dingtalk_allowlist_policy(
+                {"companies": [{"corp_id": "CORP_ID", "allow_all": True}]}
+            ),
+        )
+        PolicyBinding.objects.create(target=self.source, policy=policy, order=0, enabled=True)
 
         login_response = self.client.get(
             reverse(
