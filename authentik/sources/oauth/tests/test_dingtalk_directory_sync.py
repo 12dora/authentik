@@ -71,6 +71,7 @@ class TestDingTalkDirectorySync(TestCase):
     @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
     def test_sync_upserts_departments_and_users(self, client_cls):
         client = client_cls.return_value
+        client.get_user_detail.return_value = {}
         client.iter_departments.return_value = [
             {"dept_id": "2", "name": "Engineering", "parent_dept_id": "1", "raw": {"dept_id": 2}},
         ]
@@ -107,6 +108,29 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertEqual(user.manager_user_id, "MANAGER")
         self.assertEqual(user.dept_id_list, ["2"])
         self.assertEqual(DingTalkDirectorySyncStatus.objects.get().status, "success")
+
+    @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
+    def test_sync_enriches_manager_from_user_detail(self, client_cls):
+        """v2/user/list never returns manager_userid; it must be enriched via v2/user/get."""
+        client = client_cls.return_value
+        client.iter_departments.return_value = []
+        client.iter_department_users.side_effect = [
+            [
+                {
+                    "userid": "USER",
+                    "unionid": "UNION",
+                    "name": "Ada",
+                    "dept_id_list": [1],
+                    "active": True,
+                }
+            ],
+        ]
+        client.get_user_detail.return_value = {"manager_userid": "BOSS"}
+
+        _ = sync_dingtalk_directory(self.source, corp_id="CORP")
+
+        user = DingTalkDirectoryUser.objects.get(user_id="USER")
+        self.assertEqual(user.manager_user_id, "BOSS")
 
     @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
     def test_sync_error_status_survives_raised_client_error(self, client_cls):

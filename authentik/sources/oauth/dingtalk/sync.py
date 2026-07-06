@@ -4,6 +4,7 @@ from typing import Any
 
 from django.db import transaction
 from django.utils.timezone import now
+from requests.exceptions import RequestException
 from structlog.stdlib import get_logger
 
 from authentik.sources.oauth.dingtalk.client import DingTalkDirectoryClient
@@ -86,12 +87,24 @@ def sync_dingtalk_directory(source: OAuthSource, corp_id: str) -> dict[str, Any]
                 user = normalize_dingtalk_user(raw_user, str(corp_id))
                 users_by_id[user["user_id"]] = user
 
-        # C4: user/list returns manager_userid only for members whose "direct manager"
-        # field is actually maintained in the DingTalk admin backend (contacts editor /
-        # smart HR roster). There is no separately grantable permission point for it, so
-        # an all-empty result almost always means the org never filled the field in.
-        # unionid is required for downstream user resolution. Surface warnings when these
-        # are broadly missing so the managed-user hierarchy does not silently break.
+        # C4: topapi/v2/user/list never returns manager_userid at all (verified 2026-07-06:
+        # its rows only carry the dept-leader boolean). The direct-manager field is exposed
+        # exclusively by the per-user detail endpoint, so enrich every synced user with one
+        # topapi/v2/user/get call; failures degrade to an empty manager for that user only.
+        for user_id, user in users_by_id.items():
+            try:
+                detail = client.get_user_detail(user_id)
+            except (ValueError, RequestException):
+                continue
+            manager_id = detail.get("manager_userid") or detail.get("managerUserId") or ""
+            if manager_id:
+                user["manager_user_id"] = str(manager_id)
+
+        # An all-empty result after enrichment almost always means the org never maintained
+        # the direct-manager field in the DingTalk admin backend (contacts editor / smart HR
+        # roster) — there is no separately grantable permission point for it. unionid is
+        # required for downstream user resolution. Surface warnings when these are broadly
+        # missing so the managed-user hierarchy does not silently break.
         total_users = len(users_by_id)
         warnings: list[str] = []
         if total_users > 1 and all(not user["manager_user_id"] for user in users_by_id.values()):
