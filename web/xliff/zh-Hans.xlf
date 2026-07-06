@@ -11855,6 +11855,10 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>Select departments…</source>
   <target>选择部门…</target>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.fail-closed.unconfigured">
+  <source>No allowlist is configured. All DingTalk logins are denied until an allowlist is saved and applied.</source>
+  <target>尚未配置企业白名单。在保存并应用白名单之前，所有钉钉登录都会被拒绝。</target>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.picker.headline">
   <source>Allowed departments for <x id="0" equiv-text="${company.label || company.corpId}"/></source>
   <target><x id="0" equiv-text="${company.label || company.corpId}"/> 的允许部门</target>
@@ -11920,8 +11924,8 @@ Bindings to groups/users are checked against the user of the event.</source>
   <target>移除钉钉白名单</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.remove.body">
-  <source>This deletes the managed allowlist policy and all of its flow bindings. DingTalk logins will no longer be restricted by company or department.</source>
-  <target>这将删除托管的白名单策略及其所有流程绑定。钉钉登录将不再按企业或部门进行限制。</target>
+  <source>This deletes the managed allowlist policy and all of its flow bindings. All DingTalk logins will then be denied until a new allowlist is saved and applied.</source>
+  <target>这将删除托管的白名单策略及其所有流程绑定。此后所有钉钉登录都将被拒绝，直到保存并应用新的白名单。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.remove.success">
   <source>DingTalk allowlist policy and bindings removed.</source>

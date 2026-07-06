@@ -65,6 +65,13 @@ describe("DingTalkAllowlistPanel localization and controls", () => {
         expect(departmentPicker).toContain("this.onApply?.(this.value)");
     });
 
+    it("warns that DingTalk logins fail closed while no allowlist is configured", () => {
+        expect(allowlistPanel).toContain("renderFailClosedNotice(");
+        expect(allowlistPanel).toContain(
+            "sources.oauth.dingtalk-allowlist.fail-closed.unconfigured",
+        );
+    });
+
     it("normalizes discovered company labels from DingTalk corp name fields", () => {
         expect(allowlistPanel).toContain("payload.companyName");
         expect(allowlistPanel).toContain("payload.corp_name");

@@ -1475,6 +1475,23 @@ export class DingTalkAllowlistPanel extends AKElement {
         </ak-alert>`;
     }
 
+    // DingTalk logins fail closed: without a saved allowlist the backend denies
+    // every DingTalk sign-in, so surface that state prominently instead of letting
+    // an empty panel read as "no restrictions".
+    private renderFailClosedNotice(): TemplateResult {
+        if (this.policy) {
+            return html``;
+        }
+        return html`<ak-alert class="ak-dingtalk-section" level="warning" icon="fa-ban">
+            ${msg(
+                "No allowlist is configured. All DingTalk logins are denied until an allowlist is saved and applied.",
+                {
+                    id: "sources.oauth.dingtalk-allowlist.fail-closed.unconfigured",
+                },
+            )}
+        </ak-alert>`;
+    }
+
     private renderDetectedSharedConfig(): TemplateResult {
         const detected = this.detectedSharedConfig;
         if (!detected || detected.companies.length < 1) {
@@ -1562,7 +1579,7 @@ export class DingTalkAllowlistPanel extends AKElement {
             >
             <p slot="body">
                 ${msg(
-                    "This deletes the managed allowlist policy and all of its flow bindings. DingTalk logins will no longer be restricted by company or department.",
+                    "This deletes the managed allowlist policy and all of its flow bindings. All DingTalk logins will then be denied until a new allowlist is saved and applied.",
                     {
                         id: "sources.oauth.dingtalk-allowlist.remove.body",
                     },
@@ -1617,7 +1634,8 @@ export class DingTalkAllowlistPanel extends AKElement {
                         ${this.renderRemoveConfiguration()}
                     </div>
                     ${this.loaded
-                        ? html`${this.renderUnsavedChanges()} ${this.renderDiscoveryDetails()}
+                        ? html`${this.renderFailClosedNotice()} ${this.renderUnsavedChanges()}
+                              ${this.renderDiscoveryDetails()}
                               <ul class="ak-dingtalk-status ak-dingtalk-section">
                                   ${this.statusItems().map((item) => this.renderStatus(item))}
                               </ul>
