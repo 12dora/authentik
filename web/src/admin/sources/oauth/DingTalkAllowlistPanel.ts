@@ -9,7 +9,7 @@ import { parseAPIResponseError, pluckErrorDetail } from "#common/errors/network"
 import { MessageLevel } from "#common/messages";
 
 import { AKElement } from "#elements/Base";
-import { modalInvoker } from "#elements/dialogs";
+import { modalInvoker, renderDialog } from "#elements/dialogs";
 import { showMessage } from "#elements/messages/MessageContainer";
 import { SlottedTemplateResult } from "#elements/types";
 
@@ -18,20 +18,13 @@ import type { StatusItem } from "#admin/sources/oauth/DingTalkAllowlistPanelStat
 import {
     addDingTalkDepartments,
     applyDingTalkDepartmentInputs,
-    buildDingTalkDepartmentTreeRows,
     dingtalkDepartmentFetchFailureStatus,
     dingtalkDepartmentInputsFromModel,
-    dingtalkDepartmentPageWindow,
     dingtalkStatusLabelProperties,
-    filterDingTalkDepartmentTreeRows,
-    invertLoadedDingTalkDepartmentInput,
     isDingTalkCompanyMissingDepartments,
     removeDingTalkCompany,
     renderDingTalkDepartmentInput,
     saveDingTalkAllowlistConfiguration,
-    selectLoadedDingTalkDepartmentInput,
-    splitDingTalkDepartmentIds,
-    toggleDingTalkDepartmentTreeInput,
     updateDingTalkCompany,
     upsertDingTalkCompany,
 } from "#admin/sources/oauth/DingTalkAllowlistPanelState";
@@ -41,6 +34,7 @@ import {
     hasDingTalkAllowlistPolicyMarker,
     parseDingTalkAllowlistPolicy,
 } from "#admin/sources/oauth/DingTalkAllowlistPolicy";
+import { DingTalkDepartmentPickerModal } from "#admin/sources/oauth/DingTalkDepartmentPickerModal";
 
 import {
     DingTalkAllowlistStatusResponse,
@@ -60,7 +54,6 @@ import { ifDefined } from "lit/directives/if-defined.js";
 
 import PFButton from "@patternfly/patternfly/components/Button/button.css";
 import PFCard from "@patternfly/patternfly/components/Card/card.css";
-import PFCheck from "@patternfly/patternfly/components/Check/check.css";
 import PFContent from "@patternfly/patternfly/components/Content/content.css";
 import PFForm from "@patternfly/patternfly/components/Form/form.css";
 import PFFormControl from "@patternfly/patternfly/components/FormControl/form-control.css";
@@ -70,10 +63,6 @@ import PFFlex from "@patternfly/patternfly/layouts/Flex/flex.css";
 
 const DINGTALK_DISCOVERY_MESSAGE_SOURCE = "goauthentik.io";
 const DINGTALK_DISCOVERY_MESSAGE_CONTEXT = "dingtalk-allowlist-discovery";
-
-// Client-side page size for the loaded department tree; large directories would
-// otherwise render thousands of rows into the DOM at once.
-const DINGTALK_DEPARTMENT_PAGE_SIZE = 50;
 
 // How often the discovery popup is polled for a manual close so the pending action
 // resolves instead of leaving the discovery button spinning forever.
@@ -166,17 +155,6 @@ export class DingTalkAllowlistPanel extends AKElement {
     @state()
     private departmentInputs: Record<string, string> = {};
 
-    @state()
-    private fetchedDepartments: Record<string, DingTalkDepartment[]> = {};
-
-    // Per-company filter query for the loaded department tree.
-    @state()
-    private departmentFilters: Record<string, string> = {};
-
-    // Per-company 1-based page for the loaded department tree.
-    @state()
-    private departmentPages: Record<string, number> = {};
-
     // Companies detected on a shared flow that belong to a sibling DingTalk source.
     // Kept read-only until the admin explicitly adopts them, so this source never
     // silently shows or saves another source's allowlist.
@@ -242,7 +220,6 @@ export class DingTalkAllowlistPanel extends AKElement {
     static styles: CSSResult[] = [
         PFButton,
         PFCard,
-        PFCheck,
         PFContent,
         PFForm,
         PFFormControl,
@@ -270,6 +247,8 @@ export class DingTalkAllowlistPanel extends AKElement {
             .ak-dingtalk-input-row {
                 display: flex;
                 gap: var(--pf-global--spacer--sm);
+                flex-wrap: wrap;
+                align-items: center;
             }
 
             .ak-dingtalk-input-row .pf-c-form-control {
@@ -303,31 +282,6 @@ export class DingTalkAllowlistPanel extends AKElement {
                 display: flex;
                 gap: var(--pf-global--spacer--sm);
                 flex-wrap: wrap;
-            }
-
-            .ak-dingtalk-department-actions {
-                display: flex;
-                gap: var(--pf-global--spacer--sm);
-                margin-block: var(--pf-global--spacer--sm);
-                flex-wrap: wrap;
-                align-items: center;
-            }
-
-            .ak-dingtalk-department-tree-cell {
-                display: flex;
-                align-items: center;
-                gap: var(--pf-global--spacer--sm);
-            }
-
-            .ak-dingtalk-department-filter {
-                min-width: 12rem;
-            }
-
-            .ak-dingtalk-department-pager {
-                display: flex;
-                gap: var(--pf-global--spacer--sm);
-                align-items: center;
-                margin-block-start: var(--pf-global--spacer--sm);
             }
         `,
     ];
@@ -737,11 +691,8 @@ export class DingTalkAllowlistPanel extends AKElement {
     private removeCompany(corpId: string): void {
         this.model = removeDingTalkCompany(this.model, corpId);
         // Drop the per-corp UI state too, otherwise re-adding the same corpId would
-        // surface the previous round's (possibly stale) departments, input, filter and page.
+        // surface the previous round's (possibly stale) department input.
         this.departmentInputs = omitRecordKey(this.departmentInputs, corpId);
-        this.fetchedDepartments = omitRecordKey(this.fetchedDepartments, corpId);
-        this.departmentFilters = omitRecordKey(this.departmentFilters, corpId);
-        this.departmentPages = omitRecordKey(this.departmentPages, corpId);
         this.markDirty();
     }
 
@@ -784,25 +735,6 @@ export class DingTalkAllowlistPanel extends AKElement {
         this.markDirty();
     }
 
-    private setDepartmentFilter(corpId: string, value: string): void {
-        this.departmentFilters = {
-            ...this.departmentFilters,
-            [corpId]: value,
-        };
-        // Reset to the first page so the filtered result set starts from the top.
-        this.departmentPages = {
-            ...this.departmentPages,
-            [corpId]: 1,
-        };
-    }
-
-    private setDepartmentPage(corpId: string, page: number): void {
-        this.departmentPages = {
-            ...this.departmentPages,
-            [corpId]: page,
-        };
-    }
-
     private applyDepartmentInput(corpId: string, departmentInput: string): void {
         const company = this.model.companies.find((candidate) => candidate.corpId === corpId);
         if (!company || company.allowAll) {
@@ -814,55 +746,22 @@ export class DingTalkAllowlistPanel extends AKElement {
             corpId,
         );
         if (result.error) {
+            showMessage({
+                level: MessageLevel.error,
+                message: result.invalidDepartmentId
+                    ? msg(
+                          str`${result.invalidDepartmentId} is not a valid DingTalk department ID.`,
+                          {
+                              id: "sources.oauth.dingtalk-allowlist.validation.department-id-invalid",
+                          },
+                      )
+                    : result.error,
+            });
             return;
         }
         this.model = result.model;
         this.departmentInputs = result.departmentInputs;
         this.markDirty();
-    }
-
-    private toggleLoadedDepartment(corpId: string, deptId: string, selected: boolean): void {
-        const company = this.model.companies.find((candidate) => candidate.corpId === corpId);
-        if (!company || company.allowAll) {
-            return;
-        }
-        this.applyDepartmentInput(
-            corpId,
-            toggleDingTalkDepartmentTreeInput(
-                this.currentDepartmentInput(company, corpId),
-                this.fetchedDepartments[corpId] || [],
-                deptId,
-                selected,
-            ),
-        );
-    }
-
-    private selectAllLoadedDepartments(corpId: string): void {
-        const company = this.model.companies.find((candidate) => candidate.corpId === corpId);
-        if (!company || company.allowAll) {
-            return;
-        }
-        this.applyDepartmentInput(
-            corpId,
-            selectLoadedDingTalkDepartmentInput(
-                this.currentDepartmentInput(company, corpId),
-                this.fetchedDepartments[corpId] || [],
-            ),
-        );
-    }
-
-    private invertLoadedDepartments(corpId: string): void {
-        const company = this.model.companies.find((candidate) => candidate.corpId === corpId);
-        if (!company || company.allowAll) {
-            return;
-        }
-        this.applyDepartmentInput(
-            corpId,
-            invertLoadedDingTalkDepartmentInput(
-                this.currentDepartmentInput(company, corpId),
-                this.fetchedDepartments[corpId] || [],
-            ),
-        );
     }
 
     private async discoverCompany(): Promise<void> {
@@ -912,11 +811,11 @@ export class DingTalkAllowlistPanel extends AKElement {
         });
     }
 
-    // Loading departments only populates the selection tree; it never changes the
+    // Loading departments only feeds the selection dialog; it never changes the
     // configured allowlist. Selection state stays entirely with the admin's input.
-    private async loadDepartments(corpId: string): Promise<void> {
+    private async loadDepartments(corpId: string): Promise<DingTalkDepartment[] | null> {
         if (!this.source?.slug) {
-            return;
+            return null;
         }
         try {
             const response = await this.sourcesApi.sourcesOauthDingtalkAllowlistDepartmentsCreate({
@@ -924,10 +823,6 @@ export class DingTalkAllowlistPanel extends AKElement {
                 dingTalkAllowlistDepartmentsRequestRequest: { corpId },
             });
             const departments = normalizeDingTalkDepartments(response.departments);
-            this.fetchedDepartments = {
-                ...this.fetchedDepartments,
-                [corpId]: departments,
-            };
             this.lastDepartmentFetch = {
                 label: this.lastDepartmentFetch.label,
                 state: "good",
@@ -938,6 +833,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                     id: "sources.oauth.dingtalk-allowlist.departments.loaded",
                 }),
             };
+            return departments;
         } catch (error) {
             const detail = await this.apiErrorMessage(error);
             this.lastDepartmentFetch = dingtalkDepartmentFetchFailureStatus(
@@ -948,7 +844,30 @@ export class DingTalkAllowlistPanel extends AKElement {
                 level: MessageLevel.error,
                 message: detail,
             });
+            return null;
         }
+    }
+
+    // Fetches the directory fresh on every open (departments change server-side),
+    // then hands selection editing to the modal picker. The allowlist model is only
+    // touched when the admin applies the selection.
+    private async pickDepartments(corpId: string): Promise<void> {
+        const company = this.model.companies.find((candidate) => candidate.corpId === corpId);
+        if (!company || company.allowAll) {
+            return;
+        }
+        const departments = await this.loadDepartments(corpId);
+        if (!departments) {
+            return;
+        }
+        const picker = new DingTalkDepartmentPickerModal();
+        picker.headline = msg(str`Allowed departments for ${company.label || company.corpId}`, {
+            id: "sources.oauth.dingtalk-allowlist.picker.headline",
+        });
+        picker.departments = departments;
+        picker.value = this.currentDepartmentInput(company, corpId);
+        picker.onApply = (value) => this.applyDepartmentInput(corpId, value);
+        await renderDialog(picker);
     }
 
     private async saveAndApply(): Promise<void> {
@@ -1500,8 +1419,16 @@ export class DingTalkAllowlistPanel extends AKElement {
                             id: "sources.oauth.dingtalk-allowlist.departments.add",
                         })}
                     </button>
+                    <ak-spinner-button
+                        class="pf-m-secondary"
+                        ?disabled=${company.allowAll}
+                        .callAction=${() => this.pickDepartments(company.corpId)}
+                    >
+                        ${msg("Select departments…", {
+                            id: "sources.oauth.dingtalk-allowlist.departments.select",
+                        })}
+                    </ak-spinner-button>
                 </div>
-                ${this.renderDepartments(company)}
             </td>
             <td
                 data-label=${msg("Actions", {
@@ -1509,14 +1436,6 @@ export class DingTalkAllowlistPanel extends AKElement {
                 })}
             >
                 <div class="ak-dingtalk-table-actions">
-                    <ak-spinner-button
-                        class="pf-m-secondary"
-                        .callAction=${() => this.loadDepartments(company.corpId)}
-                    >
-                        ${msg("Load departments", {
-                            id: "sources.oauth.dingtalk-allowlist.departments.load",
-                        })}
-                    </ak-spinner-button>
                     <button
                         type="button"
                         class="pf-c-button pf-m-danger"
@@ -1527,202 +1446,6 @@ export class DingTalkAllowlistPanel extends AKElement {
                 </div>
             </td>
         </tr>`;
-    }
-
-    private renderDepartments(company: DingTalkAllowlistModel["companies"][0]): TemplateResult {
-        const departments = this.fetchedDepartments[company.corpId] || [];
-        if (departments.length < 1) {
-            return html``;
-        }
-        const selected = new Set(
-            splitDingTalkDepartmentIds(
-                this.departmentInputs[company.corpId] ??
-                    renderDingTalkDepartmentInput(company.deptIds.map(String)),
-            ),
-        );
-        const allRows = buildDingTalkDepartmentTreeRows(departments, selected);
-        const filter = this.departmentFilters[company.corpId] ?? "";
-        const filteredRows = filterDingTalkDepartmentTreeRows(allRows, filter);
-        const pageWindow = dingtalkDepartmentPageWindow(
-            filteredRows.length,
-            this.departmentPages[company.corpId] ?? 1,
-            DINGTALK_DEPARTMENT_PAGE_SIZE,
-        );
-        const pageRows = filteredRows.slice(pageWindow.start, pageWindow.end);
-        return html`<table class="pf-c-table pf-m-compact pf-m-grid-md" role="grid">
-                <caption>
-                    <div class="ak-dingtalk-department-actions">
-                        <input
-                            class="pf-c-form-control ak-dingtalk-department-filter"
-                            type="search"
-                            .value=${filter}
-                            aria-label=${msg("Filter departments by ID or name", {
-                                id: "sources.oauth.dingtalk-allowlist.departments.filter.aria-label",
-                            })}
-                            placeholder=${msg("Filter departments", {
-                                id: "sources.oauth.dingtalk-allowlist.departments.filter.placeholder",
-                            })}
-                            @compositionstart=${this.startComposition}
-                            @compositionend=${(event: CompositionEvent) =>
-                                this.handleCompositionEnd(event, (value) =>
-                                    this.setDepartmentFilter(company.corpId, value),
-                                )}
-                            @input=${(event: InputEvent) =>
-                                this.handleComposedInput(event, (value) =>
-                                    this.setDepartmentFilter(company.corpId, value),
-                                )}
-                        />
-                        <button
-                            type="button"
-                            class="pf-c-button pf-m-secondary pf-m-small"
-                            ?disabled=${company.allowAll}
-                            @click=${() => this.selectAllLoadedDepartments(company.corpId)}
-                        >
-                            ${msg("Select all", {
-                                id: "sources.oauth.dingtalk-allowlist.departments.select-all",
-                            })}
-                        </button>
-                        <button
-                            type="button"
-                            class="pf-c-button pf-m-secondary pf-m-small"
-                            ?disabled=${company.allowAll}
-                            @click=${() => this.invertLoadedDepartments(company.corpId)}
-                        >
-                            ${msg("Invert selection", {
-                                id: "sources.oauth.dingtalk-allowlist.departments.invert",
-                            })}
-                        </button>
-                    </div>
-                </caption>
-                <thead>
-                    <tr>
-                        <th>
-                            ${msg("Allowed", {
-                                id: "sources.oauth.dingtalk-allowlist.department.allowed",
-                            })}
-                        </th>
-                        <th>
-                            ${msg("Department ID", {
-                                id: "sources.oauth.dingtalk-allowlist.department.id",
-                            })}
-                        </th>
-                        <th>
-                            ${msg("Name", {
-                                id: "sources.oauth.dingtalk-allowlist.department.name",
-                            })}
-                        </th>
-                        <th>
-                            ${msg("Parent ID", {
-                                id: "sources.oauth.dingtalk-allowlist.department.parent-id",
-                            })}
-                        </th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${pageRows.length < 1
-                        ? html`<tr>
-                              <td colspan="4" class="ak-dingtalk-muted">
-                                  ${msg("No departments match the filter.", {
-                                      id: "sources.oauth.dingtalk-allowlist.departments.filter.empty",
-                                  })}
-                              </td>
-                          </tr>`
-                        : nothing}
-                    ${pageRows.map(
-                        (row) =>
-                            html`<tr>
-                                <td
-                                    data-label=${msg("Allowed", {
-                                        id: "sources.oauth.dingtalk-allowlist.department.allowed",
-                                    })}
-                                >
-                                    <input
-                                        class="pf-c-check__input"
-                                        type="checkbox"
-                                        ?disabled=${company.allowAll}
-                                        aria-label=${msg(
-                                            str`Allow ${row.department.name} (${row.department.deptId})`,
-                                            {
-                                                id: "sources.oauth.dingtalk-allowlist.department.checkbox.aria-label",
-                                            },
-                                        )}
-                                        .checked=${row.selection === "checked"}
-                                        .indeterminate=${row.selection === "indeterminate"}
-                                        @change=${(event: InputEvent) => {
-                                            this.toggleLoadedDepartment(
-                                                company.corpId,
-                                                row.department.deptId,
-                                                (event.target as HTMLInputElement).checked,
-                                            );
-                                        }}
-                                    />
-                                </td>
-                                <td
-                                    data-label=${msg("Department ID", {
-                                        id: "sources.oauth.dingtalk-allowlist.department.id",
-                                    })}
-                                >
-                                    <span
-                                        class="ak-dingtalk-department-tree-cell"
-                                        style=${`padding-inline-start: ${row.level * 1.5}rem;`}
-                                    >
-                                        ${row.department.deptId}
-                                    </span>
-                                </td>
-                                <td
-                                    data-label=${msg("Name", {
-                                        id: "sources.oauth.dingtalk-allowlist.department.name",
-                                    })}
-                                >
-                                    ${row.department.name}
-                                </td>
-                                <td
-                                    data-label=${msg("Parent ID", {
-                                        id: "sources.oauth.dingtalk-allowlist.department.parent-id",
-                                    })}
-                                >
-                                    ${row.department.parentId || "-"}
-                                </td>
-                            </tr>`,
-                    )}
-                </tbody>
-            </table>
-            ${this.renderDepartmentPager(company.corpId, pageWindow)}`;
-    }
-
-    private renderDepartmentPager(
-        corpId: string,
-        pageWindow: ReturnType<typeof dingtalkDepartmentPageWindow>,
-    ): TemplateResult {
-        if (pageWindow.totalPages < 2) {
-            return html``;
-        }
-        return html`<div class="ak-dingtalk-department-pager">
-            <button
-                type="button"
-                class="pf-c-button pf-m-secondary pf-m-small"
-                ?disabled=${pageWindow.page <= 1}
-                @click=${() => this.setDepartmentPage(corpId, pageWindow.page - 1)}
-            >
-                ${msg("Previous", { id: "sources.oauth.dingtalk-allowlist.departments.page.prev" })}
-            </button>
-            <span class="ak-dingtalk-muted">
-                ${msg(
-                    str`Showing ${pageWindow.start + 1}–${pageWindow.end} of ${pageWindow.total}`,
-                    {
-                        id: "sources.oauth.dingtalk-allowlist.departments.page.range",
-                    },
-                )}
-            </span>
-            <button
-                type="button"
-                class="pf-c-button pf-m-secondary pf-m-small"
-                ?disabled=${pageWindow.page >= pageWindow.totalPages}
-                @click=${() => this.setDepartmentPage(corpId, pageWindow.page + 1)}
-            >
-                ${msg("Next", { id: "sources.oauth.dingtalk-allowlist.departments.page.next" })}
-            </button>
-        </div>`;
     }
 
     private renderDiscoveryDetails(): TemplateResult {

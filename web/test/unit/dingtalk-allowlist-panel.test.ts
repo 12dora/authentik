@@ -8,12 +8,19 @@ const allowlistPanel = readFileSync(
     "utf8",
 );
 
+const departmentPicker = readFileSync(
+    resolve(import.meta.dirname, "../../src/admin/sources/oauth/DingTalkDepartmentPickerModal.ts"),
+    "utf8",
+);
+
 const zhHans = readFileSync(resolve(import.meta.dirname, "../../xliff/zh-Hans.xlf"), "utf8");
 
 describe("DingTalkAllowlistPanel localization and controls", () => {
     it("has Simplified Chinese translations for every DingTalk allowlist message id", () => {
         const ids = Array.from(
-            allowlistPanel.matchAll(/id:\s*"([^"]*sources\.oauth\.dingtalk-allowlist[^"]*)"/gu),
+            `${allowlistPanel}\n${departmentPicker}`.matchAll(
+                /id:\s*"([^"]*sources\.oauth\.dingtalk-allowlist[^"]*)"/gu,
+            ),
             (match) => match[1],
         );
 
@@ -34,18 +41,28 @@ describe("DingTalkAllowlistPanel localization and controls", () => {
         );
     });
 
-    it("renders loaded department checkboxes that synchronize with the department input", () => {
-        expect(allowlistPanel).toContain("toggleLoadedDepartment(");
-        expect(allowlistPanel).toContain("buildDingTalkDepartmentTreeRows(");
-        expect(allowlistPanel).toContain('.indeterminate=${row.selection === "indeterminate"}');
-        expect(allowlistPanel).not.toContain("toggleDepartment(");
+    it("renders loaded department checkboxes in the picker that synchronize with the input", () => {
+        expect(departmentPicker).toContain("toggleDingTalkDepartmentTreeInput(");
+        expect(departmentPicker).toContain("buildDingTalkDepartmentTreeRows(");
+        expect(departmentPicker).toContain('.indeterminate=${row.selection === "indeterminate"}');
     });
 
-    it("renders bulk loaded-department selection controls", () => {
-        expect(allowlistPanel).toContain("selectAllLoadedDepartments(");
-        expect(allowlistPanel).toContain("invertLoadedDepartments(");
-        expect(allowlistPanel).toContain("sources.oauth.dingtalk-allowlist.departments.select-all");
-        expect(allowlistPanel).toContain("sources.oauth.dingtalk-allowlist.departments.invert");
+    it("renders bulk loaded-department selection controls in the picker", () => {
+        expect(departmentPicker).toContain("selectLoadedDingTalkDepartmentInput(");
+        expect(departmentPicker).toContain("invertLoadedDingTalkDepartmentInput(");
+        expect(departmentPicker).toContain(
+            "sources.oauth.dingtalk-allowlist.departments.select-all",
+        );
+        expect(departmentPicker).toContain("sources.oauth.dingtalk-allowlist.departments.invert");
+    });
+
+    it("opens the department picker as a modal dialog instead of an inline tree", () => {
+        expect(allowlistPanel).toContain("new DingTalkDepartmentPickerModal()");
+        expect(allowlistPanel).toContain("await renderDialog(picker)");
+        expect(allowlistPanel).not.toContain("renderDepartments(");
+        expect(departmentPicker).toContain("extends AKModal");
+        // Cancel discards the local edit; only Apply hands the value back.
+        expect(departmentPicker).toContain("this.onApply?.(this.value)");
     });
 
     it("normalizes discovered company labels from DingTalk corp name fields", () => {
@@ -102,12 +119,12 @@ describe("DingTalkAllowlistPanel localization and controls", () => {
     });
 
     it("gives every department-tree checkbox an accessible name and PatternFly styling", () => {
-        expect(allowlistPanel).toContain(
+        expect(departmentPicker).toContain(
             "sources.oauth.dingtalk-allowlist.department.checkbox.aria-label",
         );
         // aria-level is only meaningful on treeitem/row/heading roles, not a checkbox.
-        expect(allowlistPanel).not.toContain("aria-level=");
-        expect(allowlistPanel).toContain('class="pf-c-check__input"');
+        expect(departmentPicker).not.toContain("aria-level=");
+        expect(departmentPicker).toContain('class="pf-c-check__input"');
     });
 
     it("styles the allow-full-company toggle as a PatternFly switch", () => {
@@ -121,7 +138,6 @@ describe("DingTalkAllowlistPanel localization and controls", () => {
     });
 
     it("drops per-corp state when a company is removed so a re-add starts clean", () => {
-        expect(allowlistPanel).toContain("omitRecordKey(this.fetchedDepartments, corpId)");
         expect(allowlistPanel).toContain("omitRecordKey(this.departmentInputs, corpId)");
     });
 
@@ -135,11 +151,11 @@ describe("DingTalkAllowlistPanel localization and controls", () => {
         expect(allowlistPanel).toContain("this.listAllPolicyBindings({ policy: policy.pk })");
     });
 
-    it("paginates and filters the loaded department tree", () => {
-        expect(allowlistPanel).toContain("filterDingTalkDepartmentTreeRows(");
-        expect(allowlistPanel).toContain("dingtalkDepartmentPageWindow(");
-        expect(allowlistPanel).toContain("renderDepartmentPager(");
-        expect(allowlistPanel).toContain(
+    it("paginates and filters the loaded department tree in the picker", () => {
+        expect(departmentPicker).toContain("filterDingTalkDepartmentTreeRows(");
+        expect(departmentPicker).toContain("dingtalkDepartmentPageWindow(");
+        expect(departmentPicker).toContain("renderPager(");
+        expect(departmentPicker).toContain(
             "sources.oauth.dingtalk-allowlist.departments.filter.placeholder",
         );
     });
@@ -166,8 +182,9 @@ describe("DingTalkAllowlistPanel localization and controls", () => {
 
     it("binds checkboxes through the checked property so programmatic state stays visible", () => {
         expect(allowlistPanel).toContain(".checked=${company.allowAll}");
-        expect(allowlistPanel).toContain('.checked=${row.selection === "checked"}');
         expect(allowlistPanel).not.toContain("?checked=");
+        expect(departmentPicker).toContain('.checked=${row.selection === "checked"}');
+        expect(departmentPicker).not.toContain("?checked=");
     });
 
     it("binds the manual company inputs through the value property so they clear after adding", () => {

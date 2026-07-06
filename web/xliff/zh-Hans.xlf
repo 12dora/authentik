@@ -1540,6 +1540,10 @@
   <source>Remove</source>
   <target>删除</target>
 </trans-unit>
+<trans-unit id="common.actions.cancel">
+  <source>Cancel</source>
+  <target>取消</target>
+</trans-unit>
 <trans-unit id="s0ba85594344a5c02">
   <source>Remove All</source>
   <target>删除所有</target>
@@ -11847,9 +11851,25 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>Invert selection</source>
   <target>反选</target>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.departments.load">
-  <source>Load departments</source>
-  <target>加载部门</target>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.select">
+  <source>Select departments…</source>
+  <target>选择部门…</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.picker.headline">
+  <source>Allowed departments for <x id="0" equiv-text="${company.label || company.corpId}"/></source>
+  <target><x id="0" equiv-text="${company.label || company.corpId}"/> 的允许部门</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.picker.apply">
+  <source>Apply selection</source>
+  <target>应用所选</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.picker.selected-count">
+  <source>Selected department IDs: <x id="0" equiv-text="${selectedCount}"/></source>
+  <target>已选部门 ID：<x id="0" equiv-text="${selectedCount}"/></target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.picker.empty">
+  <source>No departments were loaded for this company.</source>
+  <target>未能为该企业加载到任何部门。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.departments.loaded">
   <source><x id="0" equiv-text="${response.departments.length}"/> departments loaded for <x id="1" equiv-text="${corpId}"/></source>
