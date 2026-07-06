@@ -86,16 +86,20 @@ def sync_dingtalk_directory(source: OAuthSource, corp_id: str) -> dict[str, Any]
                 user = normalize_dingtalk_user(raw_user, str(corp_id))
                 users_by_id[user["user_id"]] = user
 
-        # C4: user/list only returns manager_userid when the app has the direct-manager
-        # permission, and unionid is required for downstream user resolution. Surface warnings
-        # when these are broadly missing so the managed-user hierarchy does not silently break.
+        # C4: user/list returns manager_userid only for members whose "direct manager"
+        # field is actually maintained in the DingTalk admin backend (contacts editor /
+        # smart HR roster). There is no separately grantable permission point for it, so
+        # an all-empty result almost always means the org never filled the field in.
+        # unionid is required for downstream user resolution. Surface warnings when these
+        # are broadly missing so the managed-user hierarchy does not silently break.
         total_users = len(users_by_id)
         warnings: list[str] = []
         if total_users > 1 and all(not user["manager_user_id"] for user in users_by_id.values()):
             warnings.append(
-                "No DingTalk user reported a manager_userid; the app likely lacks the "
-                "'read employee direct manager' permission, so managed-user hierarchies "
-                "will be empty."
+                "No DingTalk user reported a manager_userid; the org has probably never "
+                "maintained the direct-manager field in the DingTalk admin backend "
+                "(contacts editor / smart HR roster), so managed-user hierarchies will "
+                "be empty until it is filled in there."
             )
         missing_union = sum(1 for user in users_by_id.values() if not user["union_id"])
         if missing_union:
