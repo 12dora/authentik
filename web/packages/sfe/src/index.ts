@@ -328,7 +328,7 @@ class PasswordStage extends Stage<PasswordChallenge> {
                         type="text"
                         readonly
                         class="form-control-plaintext"
-                        value=${fallbackMessage("welcome", this.challenge?.pendingUser)}
+                        value=${fallbackMessage("welcome", this.challenge?.pendingUser ?? "")}
                     />
                 </div>
                 <div class="form-label-group my-3 has-validation">

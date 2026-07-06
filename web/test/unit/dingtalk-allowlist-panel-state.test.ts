@@ -6,6 +6,7 @@ import {
     dingtalkStatusLabelProperties,
     filterDingTalkDepartmentTreeRows,
     invertLoadedDingTalkDepartmentInput,
+    isDingTalkCompanyMissingDepartments,
     removeDingTalkCompany,
     saveDingTalkAllowlistConfiguration,
     selectLoadedDingTalkDepartmentInput,
@@ -243,6 +244,38 @@ describe("DingTalkAllowlistPanelState", () => {
             { deptId: "40", level: 2, selection: "unchecked" },
             { deptId: "30", level: 1, selection: "unchecked" },
         ]);
+    });
+
+    it("does not infinitely recurse when malformed data forms a department cycle", () => {
+        // A duplicate department id whose second entry points back up the tree forms a
+        // cycle reachable from the root; without cycle protection this recurses forever.
+        const rows = buildDingTalkDepartmentTreeRows(
+            [
+                { deptId: "10", name: "Root", parentId: null },
+                { deptId: "20", name: "Child", parentId: "10" },
+                { deptId: "10", name: "Root (loop)", parentId: "20" },
+            ],
+            new Set(),
+        );
+
+        expect(rows.map((row) => row.department.deptId)).toEqual(["10", "20"]);
+    });
+
+    it("treats a self-referencing department as a root instead of its own child", () => {
+        const rows = buildDingTalkDepartmentTreeRows(
+            [{ deptId: "10", name: "Self", parentId: "10" }],
+            new Set(["10"]),
+        );
+
+        expect(rows.map((row) => ({ deptId: row.department.deptId, level: row.level }))).toEqual([
+            { deptId: "10", level: 0 },
+        ]);
+    });
+
+    it("toggles a self-referencing department without infinite recursion", () => {
+        const departments = [{ deptId: "10", name: "Self", parentId: "10" }];
+
+        expect(toggleDingTalkDepartmentTreeInput("", departments, "10", true)).toEqual("10");
     });
 
     it("toggles a parent department together with all loaded descendants", () => {
@@ -507,5 +540,41 @@ describe("DingTalkAllowlistPanelState", () => {
         expect(bindingCalls).toEqual(["binding:shared-flow-pk"]);
         expect(result?.failures).toEqual([]);
         expect(result?.authFlow).toBe(result?.enrollmentFlow);
+    });
+
+    it("flags a restricted company with no departments as missing", () => {
+        expect(
+            isDingTalkCompanyMissingDepartments(
+                { corpId: "corp-a", label: "Alpha", allowAll: false, deptIds: [] },
+                undefined,
+            ),
+        ).toBe(true);
+    });
+
+    it("clears the missing-departments flag once the pending input has a department", () => {
+        expect(
+            isDingTalkCompanyMissingDepartments(
+                { corpId: "corp-a", label: "Alpha", allowAll: false, deptIds: [] },
+                "10",
+            ),
+        ).toBe(false);
+    });
+
+    it("falls back to the model departments when there is no pending input", () => {
+        expect(
+            isDingTalkCompanyMissingDepartments(
+                { corpId: "corp-a", label: "Alpha", allowAll: false, deptIds: ["10"] },
+                undefined,
+            ),
+        ).toBe(false);
+    });
+
+    it("never flags an allow-all company as missing departments", () => {
+        expect(
+            isDingTalkCompanyMissingDepartments(
+                { corpId: "corp-a", label: "Alpha", allowAll: true, deptIds: [] },
+                "",
+            ),
+        ).toBe(false);
     });
 });

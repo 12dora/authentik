@@ -13,6 +13,9 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("#elements/tasks/ScheduleList", () => ({}));
 vi.mock("#elements/forms/ConfirmationForm", () => ({}));
+// ak-timestamp is imported only to register the element; its intersection-observer
+// decorator touches browser-only globals absent from this Node suite, so stub it out.
+vi.mock("#elements/timestamp/ak-timestamp", () => ({}));
 // Replace the real message container (which touches the DOM) with a spy so the
 // panel's user-facing feedback can be asserted in the Node environment.
 vi.mock("#elements/messages/MessageContainer", () => ({

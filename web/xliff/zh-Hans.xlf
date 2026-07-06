@@ -11779,6 +11779,10 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>Ignored while full company is allowed</source>
   <target>允许整个企业时会忽略部门限制</target>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.company.departments-required.warning">
+  <source>Restricted mode needs at least one department. Add a department or enable full company access before saving.</source>
+  <target>限定部门模式至少需要一个部门。保存前请添加部门或启用整企业访问。</target>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.company.label">
   <source>Label</source>
   <target>标签</target>
@@ -12023,6 +12027,30 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>One visible DingTalk login entry is expected</source>
   <target>应只有一个可见的钉钉登录入口</target>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.good.bound">
+  <source>Bound</source>
+  <target>已绑定</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.good.enabled">
+  <source>Enabled</source>
+  <target>已启用</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.good.loaded">
+  <source>Loaded</source>
+  <target>已加载</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.good.ok">
+  <source>OK</source>
+  <target>正常</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.good.present">
+  <source>Present</source>
+  <target>存在</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.good.valid">
+  <source>Valid</source>
+  <target>有效</target>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.status.source-enabled">
   <source>Source enabled</source>
   <target>源已启用</target>
@@ -12118,6 +12146,18 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-directory.counters.empty">
   <source>-</source>
   <target>-</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.departments">
+  <source>Departments</source>
+  <target>部门</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.users">
+  <source>Users</source>
+  <target>用户</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.warnings">
+  <source>Warnings</source>
+  <target>警告</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.summary.total">
   <source><x id="0" equiv-text="${summary.total}"/> corp sync records</source>

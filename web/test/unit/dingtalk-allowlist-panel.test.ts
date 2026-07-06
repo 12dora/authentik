@@ -101,11 +101,32 @@ describe("DingTalkAllowlistPanel localization and controls", () => {
         expect(allowlistPanel).toContain('id="dingtalk-manual-label"');
     });
 
-    it("gives every department-tree checkbox an accessible name and level", () => {
+    it("gives every department-tree checkbox an accessible name and PatternFly styling", () => {
         expect(allowlistPanel).toContain(
             "sources.oauth.dingtalk-allowlist.department.checkbox.aria-label",
         );
-        expect(allowlistPanel).toContain("aria-level=${row.level + 1}");
+        // aria-level is only meaningful on treeitem/row/heading roles, not a checkbox.
+        expect(allowlistPanel).not.toContain("aria-level=");
+        expect(allowlistPanel).toContain('class="pf-c-check__input"');
+    });
+
+    it("styles the allow-full-company toggle as a PatternFly switch", () => {
+        expect(allowlistPanel).toContain('class="pf-c-switch"');
+        expect(allowlistPanel).toContain('class="pf-c-switch__input"');
+    });
+
+    it("submits the manual company and department inputs on Enter", () => {
+        expect(allowlistPanel).toContain("handleSubmitKey(");
+        expect(allowlistPanel).toContain("event.isComposing");
+    });
+
+    it("drops per-corp state when a company is removed so a re-add starts clean", () => {
+        expect(allowlistPanel).toContain("omitRecordKey(this.fetchedDepartments, corpId)");
+        expect(allowlistPanel).toContain("omitRecordKey(this.departmentInputs, corpId)");
+    });
+
+    it("closes the discovery popup itself when finishing discovery", () => {
+        expect(allowlistPanel).toContain("this.discoveryPopup?.close();");
     });
 
     it("pages through every policy binding before creating or deleting managed bindings", () => {

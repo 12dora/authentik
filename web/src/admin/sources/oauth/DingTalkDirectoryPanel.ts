@@ -3,6 +3,7 @@ import "#elements/EmptyState";
 import "#elements/buttons/SpinnerButton/index";
 import "#elements/forms/ConfirmationForm";
 import "#elements/tasks/ScheduleList";
+import "#elements/timestamp/ak-timestamp";
 
 import { DEFAULT_CONFIG } from "#common/api/config";
 import { parseAPIResponseError, pluckErrorDetail } from "#common/errors/network";
@@ -330,6 +331,15 @@ export class DingTalkDirectoryPanel extends AKElement {
         this.syncPollAttempts = 0;
     }
 
+    // Refresh triggered by an explicit admin action (the Refresh button). The attempt
+    // cap only exists to stop unattended background polling from running forever, so a
+    // deliberate refresh restarts it — otherwise a sync that stays running past the cap
+    // would leave the table frozen until the admin reloads the page.
+    private async manualRefresh(): Promise<void> {
+        this.syncPollAttempts = 0;
+        await this.refreshStatus();
+    }
+
     private async triggerManualSync(): Promise<void> {
         if (!this.source?.slug) {
             return;
@@ -364,6 +374,9 @@ export class DingTalkDirectoryPanel extends AKElement {
             });
         }
         this.manualCorpId = "";
+        // Queuing is an explicit action; restart the bounded poll so the freshly queued
+        // corp is followed to completion even if an earlier run had exhausted the cap.
+        this.syncPollAttempts = 0;
         await this.refreshStatus();
     }
 
@@ -409,11 +422,69 @@ export class DingTalkDirectoryPanel extends AKElement {
         }
     }
 
-    private renderTimestamp(value: Date | null | undefined): string {
-        if (!value || Number.isNaN(value.valueOf())) {
-            return msg("-", { id: "sources.oauth.dingtalk-directory.timestamp.empty" });
+    private renderTimestamp(value: Date | null | undefined): TemplateResult {
+        // Match the rest of the admin UI: a relative "x minutes ago" with the absolute
+        // datetime alongside, instead of a bare toLocaleString(). ak-timestamp renders
+        // "-" on its own for a missing or invalid value.
+        const timestamp = value && !Number.isNaN(value.valueOf()) ? value : null;
+        return html`<ak-timestamp .timestamp=${timestamp} datetime></ak-timestamp>`;
+    }
+
+    // The counters JSON field carries known keys (departments/users) plus a warnings
+    // list; localize what we recognize and fall back to the raw key otherwise.
+    private localizeCounterKey(key: string): string {
+        switch (key) {
+            case "departments":
+                return msg("Departments", {
+                    id: "sources.oauth.dingtalk-directory.counters.departments",
+                });
+            case "users":
+                return msg("Users", {
+                    id: "sources.oauth.dingtalk-directory.counters.users",
+                });
+            case "warnings":
+                return msg("Warnings", {
+                    id: "sources.oauth.dingtalk-directory.counters.warnings",
+                });
+            default:
+                return key;
         }
-        return value.toLocaleString();
+    }
+
+    private renderCounterValue(value: unknown): TemplateResult | string {
+        if (value === null || value === undefined) {
+            return msg("-", { id: "sources.oauth.dingtalk-directory.counters.empty" });
+        }
+        // Arrays (e.g. the warnings list) and nested objects render as their own rows
+        // instead of a raw JSON literal dumped into the table cell.
+        if (Array.isArray(value)) {
+            if (value.length < 1) {
+                return msg("-", { id: "sources.oauth.dingtalk-directory.counters.empty" });
+            }
+            return html`<ul class="ak-dingtalk-directory-counters">
+                ${value.map((item) => html`<li>${this.renderCounterValue(item)}</li>`)}
+            </ul>`;
+        }
+        if (typeof value === "object") {
+            const nested = Object.entries(value as Record<string, unknown>);
+            if (nested.length < 1) {
+                return msg("-", { id: "sources.oauth.dingtalk-directory.counters.empty" });
+            }
+            return this.renderCounterList(nested);
+        }
+        return String(value);
+    }
+
+    private renderCounterList(entries: [string, unknown][]): TemplateResult {
+        return html`<ul class="ak-dingtalk-directory-counters">
+            ${entries.map(
+                ([key, value]) =>
+                    html`<li>
+                        <span>${this.localizeCounterKey(key)}</span>:
+                        <span>${this.renderCounterValue(value)}</span>
+                    </li>`,
+            )}
+        </ul>`;
     }
 
     private renderCounters(counters: Record<string, unknown> | null): TemplateResult | string {
@@ -421,19 +492,7 @@ export class DingTalkDirectoryPanel extends AKElement {
         if (entries.length < 1) {
             return msg("-", { id: "sources.oauth.dingtalk-directory.counters.empty" });
         }
-        return html`<ul class="ak-dingtalk-directory-counters">
-            ${entries.map(
-                ([key, value]) =>
-                    html`<li>
-                        <span>${key}</span>:
-                        <span
-                            >${typeof value === "object"
-                                ? JSON.stringify(value)
-                                : String(value)}</span
-                        >
-                    </li>`,
-            )}
-        </ul>`;
+        return this.renderCounterList(entries);
     }
 
     private renderSummary(): TemplateResult {
@@ -450,7 +509,7 @@ export class DingTalkDirectoryPanel extends AKElement {
 
     private renderActions(): TemplateResult {
         return html`<div class="pf-l-flex ak-dingtalk-directory-actions">
-            <ak-spinner-button class="pf-m-secondary" .callAction=${() => this.refreshStatus()}>
+            <ak-spinner-button class="pf-m-secondary" .callAction=${() => this.manualRefresh()}>
                 ${msg("Refresh", { id: "sources.oauth.dingtalk-directory.refresh" })}
             </ak-spinner-button>
             <div class="pf-c-form__group">

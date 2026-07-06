@@ -12,6 +12,9 @@ export interface StatusItem {
     label: string;
     state: StatusState;
     detail?: string | TemplateResult;
+    // Overrides ak-status-label's default "Yes" for the good state so each row reads
+    // semantically (e.g. "Enabled", "Valid") instead of a generic affirmative.
+    goodLabel?: string;
 }
 
 export type DingTalkFlowBindingKind = "authentication" | "enrollment";
@@ -148,6 +151,20 @@ function sortDingTalkDepartmentIds(deptIds: string[]): string[] {
 
 export function renderDingTalkDepartmentInput(deptIds: string[]): string {
     return sortDingTalkDepartmentIds(deptIds).join(" ");
+}
+
+// A restricted company (allowAll=false) with no departments admits nobody, and
+// validateDingTalkAllowlistModel rejects it on save. Detecting it from the live model +
+// pending input lets the panel warn inline while editing instead of only at save time.
+export function isDingTalkCompanyMissingDepartments(
+    company: DingTalkAllowlistModel["companies"][number],
+    departmentInput: string | undefined,
+): boolean {
+    if (company.allowAll) {
+        return false;
+    }
+    const effective = departmentInput ?? renderDingTalkDepartmentInput(company.deptIds.map(String));
+    return splitDingTalkDepartmentIds(effective).length < 1;
 }
 
 export function dingtalkDepartmentInputsFromModel(
@@ -330,8 +347,12 @@ function dingtalkDepartmentChildrenByParent<TDepartment extends DingTalkDepartme
     const departmentIds = new Set(departments.map((department) => department.deptId));
     const childrenByParent = new Map<string, TDepartment[]>();
     for (const department of departments) {
+        // A department that names itself as parent (self-reference) is treated as a root
+        // rather than its own child, so it cannot seed an infinite descent below.
         const parentId =
-            department.parentId && departmentIds.has(department.parentId)
+            department.parentId &&
+            department.parentId !== department.deptId &&
+            departmentIds.has(department.parentId)
                 ? department.parentId
                 : "";
         childrenByParent.set(parentId, [...(childrenByParent.get(parentId) || []), department]);
@@ -345,11 +366,19 @@ function dingtalkDepartmentChildrenByParent<TDepartment extends DingTalkDepartme
 function collectDingTalkDepartmentSubtreeIds(
     childrenByParent: Map<string, DingTalkDepartmentNode[]>,
     deptId: string,
+    // Guards against cycles in malformed external (DingTalk) data — e.g. duplicate
+    // department entries whose conflicting parentIds form a loop — that would
+    // otherwise recurse until the stack overflows.
+    visited: Set<string> = new Set(),
 ): string[] {
+    if (visited.has(deptId)) {
+        return [];
+    }
+    visited.add(deptId);
     return [
         deptId,
         ...(childrenByParent.get(deptId) || []).flatMap((child) =>
-            collectDingTalkDepartmentSubtreeIds(childrenByParent, child.deptId),
+            collectDingTalkDepartmentSubtreeIds(childrenByParent, child.deptId, visited),
         ),
     ];
 }
@@ -374,8 +403,15 @@ export function buildDingTalkDepartmentTreeRows<TDepartment extends DingTalkDepa
 ): DingTalkDepartmentTreeRow<TDepartment>[] {
     const childrenByParent = dingtalkDepartmentChildrenByParent(departments);
     const rows: DingTalkDepartmentTreeRow<TDepartment>[] = [];
+    // Each department is rendered at most once; without this a cyclic children map
+    // (malformed external data) would recurse until the stack overflows.
+    const visited = new Set<string>();
 
     const visit = (department: TDepartment, level: number): void => {
+        if (visited.has(department.deptId)) {
+            return;
+        }
+        visited.add(department.deptId);
         rows.push({
             department,
             level,
