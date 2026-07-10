@@ -40,6 +40,24 @@ class TestDingTalkDirectoryAPI(TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_status_includes_snapshot_generation(self):
+        DingTalkDirectorySyncStatus.objects.create(
+            source=self.source,
+            corp_id="CORP",
+            status="success",
+            generation=9,
+            finished_at=now(),
+            counters={"users": 1, "departments": 0},
+        )
+        self.client.force_login(create_test_admin_user())
+
+        response = self.client.get(
+            reverse("authentik_api:dingtalk-directory-status", kwargs={"source_slug": "dingtalk"})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["sync"][0]["generation"], 9)
+
     def test_user_list_hides_sensitive_fields(self):
         self.client.force_login(create_test_admin_user())
         response = self.client.get(

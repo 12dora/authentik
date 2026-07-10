@@ -84,6 +84,7 @@ class DingTalkDirectorySyncStatusSerializer(serializers.ModelSerializer):
         fields = [
             "corp_id",
             "status",
+            "generation",
             "started_at",
             "finished_at",
             "error",
@@ -165,6 +166,7 @@ class DingTalkDirectoryStatusView(APIView):
                     {
                         "corp_id": item.corp_id,
                         "status": item.status,
+                        "generation": item.generation,
                         "started_at": item.started_at,
                         "finished_at": item.finished_at,
                         "error": item.error,

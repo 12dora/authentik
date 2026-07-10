@@ -107,7 +107,9 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertEqual(user.user_id, "USER")
         self.assertEqual(user.manager_user_id, "MANAGER")
         self.assertEqual(user.dept_id_list, ["2"])
-        self.assertEqual(DingTalkDirectorySyncStatus.objects.get().status, "success")
+        status = DingTalkDirectorySyncStatus.objects.get()
+        self.assertEqual(status.status, "success")
+        self.assertEqual(status.generation, 1)
 
     @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
     def test_sync_enriches_manager_from_user_detail(self, client_cls):
@@ -134,6 +136,13 @@ class TestDingTalkDirectorySync(TestCase):
 
     @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
     def test_sync_error_status_survives_raised_client_error(self, client_cls):
+        DingTalkDirectorySyncStatus.objects.create(
+            source=self.source,
+            corp_id="CORP",
+            status="success",
+            generation=7,
+            finished_at=now(),
+        )
         client_cls.return_value.iter_departments.side_effect = ValueError("missing permission")
 
         with self.assertRaisesMessage(ValueError, "missing permission"):
@@ -142,10 +151,10 @@ class TestDingTalkDirectorySync(TestCase):
         status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
         self.assertEqual(status.status, "error")
         self.assertEqual(status.error, "missing permission")
+        self.assertEqual(status.generation, 7)
 
     @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
-    def test_incomplete_sync_does_not_soft_delete_previously_cached_users(self, client_cls):
-        """C2: an empty-but-"successful" sync must not wipe a populated cache."""
+    def test_empty_sync_soft_deletes_previously_cached_entries(self, client_cls):
         seen = now()
         DingTalkDirectorySyncStatus.objects.create(
             source=self.source, corp_id="CORP", status="success", finished_at=seen
@@ -159,17 +168,39 @@ class TestDingTalkDirectorySync(TestCase):
             dept_id_list=["1"],
             last_seen_at=seen,
         )
+        DingTalkDirectoryDepartment.objects.create(
+            source=self.source,
+            corp_id="CORP",
+            dept_id="2",
+            name="Old department",
+            parent_dept_id="1",
+            last_seen_at=seen,
+        )
         client = client_cls.return_value
         client.iter_departments.return_value = []
         client.iter_department_users.return_value = []
 
         result = sync_dingtalk_directory(self.source, corp_id="CORP")
 
-        cached = DingTalkDirectoryUser.objects.get(source=self.source, corp_id="CORP", user_id="USER")
-        self.assertFalse(cached.is_deleted)
-        self.assertTrue(
-            any("Skipped user deletion" in warning for warning in result.get("warnings", []))
+        cached = DingTalkDirectoryUser.objects.get(
+            source=self.source, corp_id="CORP", user_id="USER"
         )
+        old_department = DingTalkDirectoryDepartment.objects.get(
+            source=self.source, corp_id="CORP", dept_id="2"
+        )
+        status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
+        self.assertTrue(cached.is_deleted)
+        self.assertTrue(old_department.is_deleted)
+        self.assertEqual(result["users"], 0)
+        self.assertEqual(result["departments"], 1)
+        self.assertEqual(status.counters["users"], 0)
+        self.assertEqual(status.counters["departments"], 1)
+        self.assertEqual(status.generation, 1)
+
+        sync_dingtalk_directory(self.source, corp_id="CORP")
+
+        status.refresh_from_db()
+        self.assertEqual(status.generation, 2)
 
 
 class TestDingTalkOrgContext(TestCase):

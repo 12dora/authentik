@@ -332,6 +332,7 @@ class DingTalkDirectorySyncStatus(InternallyManagedMixin, SerializerModel):
     source = models.ForeignKey("OAuthSource", on_delete=models.CASCADE)
     corp_id = models.TextField()
     status = models.TextField(default="unknown")
+    generation = models.PositiveBigIntegerField(default=0)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     error = models.TextField(blank=True, default="")

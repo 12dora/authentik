@@ -1,5 +1,6 @@
 """DingTalk directory sync orchestration."""
 
+from datetime import datetime
 from typing import Any
 
 from django.db import transaction
@@ -16,17 +17,6 @@ from authentik.sources.oauth.models import (
 )
 
 LOGGER = get_logger()
-
-
-def _should_skip_orphan_deletion(seen_count: int, previous_count: int) -> bool:
-    """Return True when soft-deleting orphans would be unsafe for this sync result.
-
-    A sync that returns zero records for a corp that previously had records is almost certainly
-    incomplete (throttling / transient permission loss / an empty page), so it must not wipe the
-    whole cache — the next full sync self-heals (C2). A partial-but-non-empty fetch still applies
-    deletions so genuine departures are reflected.
-    """
-    return previous_count > 0 and seen_count == 0
 
 
 def normalize_id_list(value: Any) -> list[str]:
@@ -57,6 +47,67 @@ def normalize_dingtalk_user(raw: dict[str, Any], corp_id: str) -> dict[str, Any]
     }
 
 
+def _publish_snapshot(
+    source: OAuthSource,
+    corp_id: str,
+    departments: list[dict[str, Any]],
+    users_by_id: dict[str, dict[str, Any]],
+    started_at: datetime,
+    warnings: list[str],
+) -> dict[str, Any]:
+    seen_depts: set[str] = set()
+    seen_users: set[str] = set()
+    with transaction.atomic():
+        status = DingTalkDirectorySyncStatus.objects.select_for_update().get(
+            source=source, corp_id=corp_id
+        )
+        for department in departments:
+            seen_depts.add(department["dept_id"])
+            DingTalkDirectoryDepartment.objects.update_or_create(
+                source=source,
+                corp_id=corp_id,
+                dept_id=department["dept_id"],
+                defaults={
+                    "name": department["name"],
+                    "parent_dept_id": department["parent_dept_id"],
+                    "raw": department["raw"],
+                    "is_deleted": False,
+                    "last_seen_at": started_at,
+                },
+            )
+        for user in users_by_id.values():
+            seen_users.add(user["user_id"])
+            DingTalkDirectoryUser.objects.update_or_create(
+                source=source,
+                corp_id=corp_id,
+                user_id=user["user_id"],
+                defaults={**user, "is_deleted": False, "last_seen_at": started_at},
+            )
+
+        DingTalkDirectoryDepartment.objects.filter(source=source, corp_id=corp_id).exclude(
+            dept_id__in=seen_depts
+        ).update(is_deleted=True)
+        DingTalkDirectoryUser.objects.filter(source=source, corp_id=corp_id).exclude(
+            user_id__in=seen_users
+        ).update(is_deleted=True)
+        counters = {
+            "departments": DingTalkDirectoryDepartment.objects.filter(
+                source=source, corp_id=corp_id, is_deleted=False
+            ).count(),
+            "users": DingTalkDirectoryUser.objects.filter(
+                source=source, corp_id=corp_id, is_deleted=False
+            ).count(),
+            "warnings": warnings,
+        }
+        status.status = "success"
+        status.generation += 1
+        status.error = ""
+        status.counters = counters
+        status.finished_at = now()
+        status.save()
+    return counters
+
+
 def sync_dingtalk_directory(source: OAuthSource, corp_id: str) -> dict[str, Any]:
     """Sync departments and users for one DingTalk source/corp pair."""
     if source.provider_type != "dingtalk":
@@ -74,12 +125,8 @@ def sync_dingtalk_directory(source: OAuthSource, corp_id: str) -> dict[str, Any]
     )
     client = DingTalkDirectoryClient(source)
     counters = {"departments": 0, "users": 0}
-    seen_depts: set[str] = set()
-    seen_users: set[str] = set()
     try:
-        departments = [
-            {"dept_id": "1", "name": "", "parent_dept_id": "", "raw": {"dept_id": "1"}}
-        ]
+        departments = [{"dept_id": "1", "name": "", "parent_dept_id": "", "raw": {"dept_id": "1"}}]
         departments.extend(list(client.iter_departments()))
         users_by_id: dict[str, dict[str, Any]] = {}
         for department in departments:
@@ -94,7 +141,7 @@ def sync_dingtalk_directory(source: OAuthSource, corp_id: str) -> dict[str, Any]
         for user_id, user in users_by_id.items():
             try:
                 detail = client.get_user_detail(user_id)
-            except (ValueError, RequestException):
+            except ValueError, RequestException:
                 continue
             manager_id = detail.get("manager_userid") or detail.get("managerUserId") or ""
             if manager_id:
@@ -128,74 +175,9 @@ def sync_dingtalk_directory(source: OAuthSource, corp_id: str) -> dict[str, Any]
                 warnings=warnings,
             )
 
-        with transaction.atomic():
-            status = DingTalkDirectorySyncStatus.objects.select_for_update().get(
-                source=source, corp_id=str(corp_id)
-            )
-            previous_dept_count = DingTalkDirectoryDepartment.objects.filter(
-                source=source, corp_id=str(corp_id), is_deleted=False
-            ).count()
-            previous_user_count = DingTalkDirectoryUser.objects.filter(
-                source=source, corp_id=str(corp_id), is_deleted=False
-            ).count()
-            for department in departments:
-                seen_depts.add(department["dept_id"])
-                DingTalkDirectoryDepartment.objects.update_or_create(
-                    source=source,
-                    corp_id=str(corp_id),
-                    dept_id=department["dept_id"],
-                    defaults={
-                        "name": department["name"],
-                        "parent_dept_id": department["parent_dept_id"],
-                        "raw": department["raw"],
-                        "is_deleted": False,
-                        "last_seen_at": started_at,
-                    },
-                )
-                counters["departments"] += 1
-            for user in users_by_id.values():
-                seen_users.add(user["user_id"])
-                DingTalkDirectoryUser.objects.update_or_create(
-                    source=source,
-                    corp_id=str(corp_id),
-                    user_id=user["user_id"],
-                    defaults={
-                        **user,
-                        "is_deleted": False,
-                        "last_seen_at": started_at,
-                    },
-                )
-                counters["users"] += 1
-
-            # C2: skip orphan soft-deletion when the fetch is empty but the cache was populated,
-            # so an incomplete-but-"successful" sync cannot wipe the directory. The synthetic
-            # root department is excluded when judging whether any real department was seen.
-            seen_real_dept_count = len(seen_depts - {"1"})
-            if _should_skip_orphan_deletion(seen_real_dept_count, previous_dept_count):
-                warnings.append(
-                    "Skipped department deletion: the sync returned no departments while "
-                    f"{previous_dept_count} were previously cached (treated as incomplete)."
-                )
-            else:
-                DingTalkDirectoryDepartment.objects.filter(
-                    source=source, corp_id=str(corp_id)
-                ).exclude(dept_id__in=seen_depts).update(is_deleted=True)
-            if _should_skip_orphan_deletion(len(seen_users), previous_user_count):
-                warnings.append(
-                    "Skipped user deletion: the sync returned no users while "
-                    f"{previous_user_count} were previously cached (treated as incomplete)."
-                )
-            else:
-                DingTalkDirectoryUser.objects.filter(source=source, corp_id=str(corp_id)).exclude(
-                    user_id__in=seen_users
-                ).update(is_deleted=True)
-            counters["warnings"] = warnings
-            status.status = "success"
-            status.error = ""
-            status.counters = counters
-            status.finished_at = now()
-            status.save()
-        return counters
+        return _publish_snapshot(
+            source, str(corp_id), departments, users_by_id, started_at, warnings
+        )
     except Exception as exc:
         DingTalkDirectorySyncStatus.objects.update_or_create(
             source=source,
