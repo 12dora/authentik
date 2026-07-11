@@ -16,9 +16,16 @@ def check_is_already_setup(apps: Apps, schema_editor: BaseDatabaseSchemaEditor):
 
     db_alias = schema_editor.connection.alias
 
-    # Upgrading from a previous version
-    if not settings.TEST and VersionHistory.objects.using(db_alias).count() > 1:
-        return True
+    # Upgrading from a previous version.
+    # VersionHistory is unmanaged (created outside Django migrations); during
+    # test DB creation the table may not exist yet, and settings.TEST is not
+    # always reliable inside RunPython. Fail closed by skipping when missing.
+    if not settings.TEST:
+        table_names = schema_editor.connection.introspection.table_names()
+        if "authentik_version_history" in table_names:
+            if VersionHistory.objects.using(db_alias).count() > 1:
+                return True
+
     # OOBE flow sets itself to this authentication requirement once finished
     if (
         Flow.objects.using(db_alias)
