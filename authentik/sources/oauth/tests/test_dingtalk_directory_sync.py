@@ -4,10 +4,16 @@ from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils.timezone import now
+from requests import HTTPError, Response
 
 from authentik.core.tests.utils import create_test_user
 from authentik.sources.oauth.dingtalk.selectors import get_dingtalk_org_context
-from authentik.sources.oauth.dingtalk.sync import sync_dingtalk_directory
+from authentik.sources.oauth.dingtalk.sync import (
+    _publish_snapshot,
+    _start_sync_run,
+    safe_dingtalk_sync_error,
+    sync_dingtalk_directory,
+)
 from authentik.sources.oauth.models import (
     DingTalkDirectoryDepartment,
     DingTalkDirectorySyncStatus,
@@ -152,6 +158,58 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertEqual(status.status, "error")
         self.assertEqual(status.error, "missing permission")
         self.assertEqual(status.generation, 7)
+
+    def test_out_of_order_run_cannot_publish_over_newer_snapshot(self):
+        first_started = now()
+        first_run_id, first_sequence = _start_sync_run(self.source, "CORP", first_started)
+        second_started = now()
+        second_run_id, second_sequence = _start_sync_run(self.source, "CORP", second_started)
+
+        second = _publish_snapshot(
+            self.source,
+            "CORP",
+            [{"dept_id": "2", "name": "New", "parent_dept_id": "1", "raw": {}}],
+            {},
+            second_started,
+            [],
+            (second_run_id, second_sequence),
+        )
+        stale = _publish_snapshot(
+            self.source,
+            "CORP",
+            [{"dept_id": "3", "name": "Old", "parent_dept_id": "1", "raw": {}}],
+            {},
+            first_started,
+            [],
+            (first_run_id, first_sequence),
+        )
+
+        status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
+        self.assertEqual(second["departments"], 1)
+        self.assertTrue(stale["stale"])
+        self.assertEqual(status.generation, second_sequence)
+        self.assertTrue(
+            DingTalkDirectoryDepartment.objects.filter(
+                source=self.source, corp_id="CORP", dept_id="2", is_deleted=False
+            ).exists()
+        )
+        self.assertFalse(
+            DingTalkDirectoryDepartment.objects.filter(
+                source=self.source, corp_id="CORP", dept_id="3"
+            ).exists()
+        )
+
+    def test_http_error_status_never_persists_request_url_or_token(self):
+        response = Response()
+        response.status_code = 403
+        response.url = "https://oapi.dingtalk.com/path?access_token=SECRET_TOKEN"
+        error = HTTPError(f"403 for url: {response.url}", response=response)
+
+        detail = safe_dingtalk_sync_error(error)
+
+        self.assertEqual(detail, "DingTalk HTTP request failed (status 403).")
+        self.assertNotIn("SECRET_TOKEN", detail)
+        self.assertNotIn("access_token", detail)
 
     @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
     def test_empty_sync_soft_deletes_previously_cached_entries(self, client_cls):

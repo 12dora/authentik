@@ -333,6 +333,8 @@ class DingTalkDirectorySyncStatus(InternallyManagedMixin, SerializerModel):
     corp_id = models.TextField()
     status = models.TextField(default="unknown")
     generation = models.PositiveBigIntegerField(default=0)
+    run_sequence = models.PositiveBigIntegerField(default=0)
+    active_run_id = models.UUIDField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     error = models.TextField(blank=True, default="")

@@ -1,7 +1,9 @@
 """DingTalk directory sync orchestration."""
 
 from datetime import datetime
+from re import sub
 from typing import Any
+from uuid import UUID, uuid4
 
 from django.db import transaction
 from django.utils.timezone import now
@@ -17,6 +19,43 @@ from authentik.sources.oauth.models import (
 )
 
 LOGGER = get_logger()
+
+
+def safe_dingtalk_sync_error(exc: Exception) -> str:
+    """Return a bounded, credential-free status message safe to persist and expose."""
+    if isinstance(exc, RequestException):
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+        if status_code is not None:
+            return f"DingTalk HTTP request failed (status {status_code})."
+        return "DingTalk HTTP request failed."
+    if not isinstance(exc, ValueError):
+        return f"DingTalk directory sync failed ({type(exc).__name__})."
+    message = str(exc)
+    message = sub(
+        r"(?i)(access_token|appsecret|consumer_secret|x-acs-dingtalk-access-token)"
+        r"([=:]\s*)[^&\s,;]+",
+        r"\1\2[redacted]",
+        message,
+    )
+    message = sub(r"(?i)(https?://[^?\s]+)\?[^\s]+", r"\1?[redacted]", message)
+    return message[:500] or "DingTalk directory sync failed."
+
+
+def _start_sync_run(source: OAuthSource, corp_id: str, started_at: datetime) -> tuple[UUID, int]:
+    run_id = uuid4()
+    with transaction.atomic():
+        DingTalkDirectorySyncStatus.objects.get_or_create(source=source, corp_id=corp_id)
+        status = DingTalkDirectorySyncStatus.objects.select_for_update().get(
+            source=source, corp_id=corp_id
+        )
+        status.run_sequence += 1
+        status.active_run_id = run_id
+        status.status = "running"
+        status.started_at = started_at
+        status.finished_at = None
+        status.error = ""
+        status.save()
+        return run_id, status.run_sequence
 
 
 def normalize_id_list(value: Any) -> list[str]:
@@ -54,13 +93,17 @@ def _publish_snapshot(
     users_by_id: dict[str, dict[str, Any]],
     started_at: datetime,
     warnings: list[str],
+    run: tuple[UUID, int],
 ) -> dict[str, Any]:
+    run_id, run_sequence = run
     seen_depts: set[str] = set()
     seen_users: set[str] = set()
     with transaction.atomic():
         status = DingTalkDirectorySyncStatus.objects.select_for_update().get(
             source=source, corp_id=corp_id
         )
+        if status.active_run_id != run_id or status.run_sequence != run_sequence:
+            return {"departments": 0, "users": 0, "warnings": [], "stale": True}
         for department in departments:
             seen_depts.add(department["dept_id"])
             DingTalkDirectoryDepartment.objects.update_or_create(
@@ -100,7 +143,8 @@ def _publish_snapshot(
             "warnings": warnings,
         }
         status.status = "success"
-        status.generation += 1
+        status.generation = run_sequence
+        status.active_run_id = None
         status.error = ""
         status.counters = counters
         status.finished_at = now()
@@ -113,16 +157,8 @@ def sync_dingtalk_directory(source: OAuthSource, corp_id: str) -> dict[str, Any]
     if source.provider_type != "dingtalk":
         raise ValueError("Source is not a DingTalk OAuth source.")
     started_at = now()
-    DingTalkDirectorySyncStatus.objects.update_or_create(
-        source=source,
-        corp_id=str(corp_id),
-        defaults={
-            "status": "running",
-            "started_at": started_at,
-            "finished_at": None,
-            "error": "",
-        },
-    )
+    corp_id = str(corp_id)
+    run_id, run_sequence = _start_sync_run(source, corp_id, started_at)
     client = DingTalkDirectoryClient(source)
     counters = {"departments": 0, "users": 0}
     try:
@@ -176,17 +212,24 @@ def sync_dingtalk_directory(source: OAuthSource, corp_id: str) -> dict[str, Any]
             )
 
         return _publish_snapshot(
-            source, str(corp_id), departments, users_by_id, started_at, warnings
+            source,
+            corp_id,
+            departments,
+            users_by_id,
+            started_at,
+            warnings,
+            (run_id, run_sequence),
         )
     except Exception as exc:
-        DingTalkDirectorySyncStatus.objects.update_or_create(
-            source=source,
-            corp_id=str(corp_id),
-            defaults={
-                "status": "error",
-                "error": str(exc),
-                "counters": counters,
-                "finished_at": now(),
-            },
-        )
+        with transaction.atomic():
+            status = DingTalkDirectorySyncStatus.objects.select_for_update().get(
+                source=source, corp_id=corp_id
+            )
+            if status.active_run_id == run_id and status.run_sequence == run_sequence:
+                status.status = "error"
+                status.error = safe_dingtalk_sync_error(exc)
+                status.counters = counters
+                status.finished_at = now()
+                status.active_run_id = None
+                status.save()
         raise
