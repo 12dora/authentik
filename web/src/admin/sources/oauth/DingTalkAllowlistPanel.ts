@@ -298,15 +298,40 @@ export class DingTalkAllowlistPanel extends AKElement {
     }
 
     protected willUpdate(changedProperties: PropertyValues<this>): void {
-        if (changedProperties.has("source") && this.source?.slug) {
+        if (changedProperties.has("source")) {
             // Only a different source warrants an automatic refresh; the same source
             // object is re-assigned after saves and global refresh events, and
             // refreshing again would race the explicit refresh already in flight.
             const previous = changedProperties.get("source") as OAuthSource | undefined;
-            if (previous?.slug !== this.source.slug) {
+            if (previous?.slug !== this.source?.slug) {
+                this.resetSourceState();
+            }
+            if (this.source?.slug && previous?.slug !== this.source.slug) {
                 this.refreshStatus().catch(console.error);
             }
         }
+    }
+
+    private resetSourceState(): void {
+        // Invalidate every in-flight read before clearing the source-scoped draft. This
+        // prevents a late response for source A from repopulating the panel for source B.
+        this.refreshGeneration += 1;
+        this.finishDiscovery();
+        this.model = { companies: [] };
+        this.policy = undefined;
+        this.authFlow = undefined;
+        this.enrollmentFlow = undefined;
+        this.authBinding = undefined;
+        this.enrollmentBinding = undefined;
+        this.manualCorpId = "";
+        this.manualLabel = "";
+        this.departmentInputs = {};
+        this.detectedSharedConfig = undefined;
+        this.lastDiscovery = undefined;
+        this.expressionValid = undefined;
+        this.partialFailures = [];
+        this.loaded = false;
+        this.dirty = false;
     }
 
     private get policyName(): string {
@@ -449,31 +474,32 @@ export class DingTalkAllowlistPanel extends AKElement {
         if (!this.source?.slug) {
             return;
         }
+        const sourceSlug = this.source.slug;
         const generation = ++this.refreshGeneration;
         const failures: string[] = [];
         let modelFromPolicy = false;
 
         try {
-            modelFromPolicy = await this.refreshManagedPolicy(generation);
+            modelFromPolicy = await this.refreshManagedPolicy(generation, sourceSlug);
         } catch (error) {
             failures.push(await this.apiErrorMessage(error));
         }
 
         try {
-            await this.refreshFlowsAndBindings(generation);
+            await this.refreshFlowsAndBindings(generation, sourceSlug);
         } catch (error) {
             failures.push(await this.apiErrorMessage(error));
         }
 
         try {
             const status = await this.sourcesApi.sourcesOauthDingtalkAllowlistStatusRetrieve({
-                sourceSlug: this.source.slug,
+                sourceSlug,
             });
-            if (generation === this.refreshGeneration) {
+            if (generation === this.refreshGeneration && this.source?.slug === sourceSlug) {
                 this.applyBackendStatus(status, modelFromPolicy);
             }
         } catch (error) {
-            if (generation === this.refreshGeneration) {
+            if (generation === this.refreshGeneration && this.source?.slug === sourceSlug) {
                 this.sourceLinkGuard = {
                     label: this.sourceLinkGuard.label,
                     state: "unknown",
@@ -485,11 +511,11 @@ export class DingTalkAllowlistPanel extends AKElement {
             failures.push(await this.apiErrorMessage(error));
         }
 
-        if (generation === this.refreshGeneration) {
+        if (generation === this.refreshGeneration && this.source?.slug === sourceSlug) {
             this.partialFailures = failures;
+            // The first refresh for this source has settled; render real status.
+            this.loaded = true;
         }
-        // The first refresh has settled; render real status instead of the loader.
-        this.loaded = true;
     }
 
     // Refresh action bound to the "Refresh status" button. Unlike refreshStatus it
@@ -506,15 +532,16 @@ export class DingTalkAllowlistPanel extends AKElement {
         }
     }
 
-    private async refreshManagedPolicy(generation: number): Promise<boolean> {
+    private async refreshManagedPolicy(generation: number, sourceSlug: string): Promise<boolean> {
+        const policyName = `dingtalk-allowlist-${sourceSlug}`;
         const response = await this.policiesApi.policiesExpressionList({
-            name: this.policyName,
+            name: policyName,
             pageSize: 1,
         });
-        if (generation !== this.refreshGeneration) {
+        if (generation !== this.refreshGeneration || this.source?.slug !== sourceSlug) {
             return false;
         }
-        this.policy = response.results.find((policy) => policy.name === this.policyName);
+        this.policy = response.results.find((policy) => policy.name === policyName);
         if (!this.policy) {
             this.expressionValid = undefined;
             return false;
@@ -532,7 +559,7 @@ export class DingTalkAllowlistPanel extends AKElement {
         return true;
     }
 
-    private async refreshFlowsAndBindings(generation: number): Promise<void> {
+    private async refreshFlowsAndBindings(generation: number, sourceSlug: string): Promise<void> {
         const authFlow = await this.resolveFlow(this.source?.authenticationFlow);
         const enrollmentFlow = await this.resolveFlow(this.source?.enrollmentFlow);
 
@@ -541,7 +568,7 @@ export class DingTalkAllowlistPanel extends AKElement {
             this.findPolicyBinding(enrollmentFlow?.policybindingmodelPtrId, this.policy?.pk),
         ]);
 
-        if (generation !== this.refreshGeneration) {
+        if (generation !== this.refreshGeneration || this.source?.slug !== sourceSlug) {
             return;
         }
         this.authFlow = authFlow;
@@ -768,6 +795,7 @@ export class DingTalkAllowlistPanel extends AKElement {
         if (!this.source?.slug) {
             return;
         }
+        const sourceSlug = this.source.slug;
         // Open the popup synchronously within the user gesture; strict popup
         // blockers reject window.open calls made after an await.
         const popup = window.open(
@@ -790,8 +818,12 @@ export class DingTalkAllowlistPanel extends AKElement {
         this.discoveryPopup = popup;
         try {
             const start = await this.sourcesApi.sourcesOauthDingtalkAllowlistDiscoverStartCreate({
-                sourceSlug: this.source.slug,
+                sourceSlug,
             });
+            if (this.source?.slug !== sourceSlug) {
+                this.finishDiscovery();
+                return;
+            }
             popup.location.assign(start.url);
         } catch (error) {
             popup.close();
@@ -817,11 +849,15 @@ export class DingTalkAllowlistPanel extends AKElement {
         if (!this.source?.slug) {
             return null;
         }
+        const sourceSlug = this.source.slug;
         try {
             const response = await this.sourcesApi.sourcesOauthDingtalkAllowlistDepartmentsCreate({
-                sourceSlug: this.source.slug,
+                sourceSlug,
                 dingTalkAllowlistDepartmentsRequestRequest: { corpId },
             });
+            if (this.source?.slug !== sourceSlug) {
+                return null;
+            }
             const departments = normalizeDingTalkDepartments(response.departments);
             this.lastDepartmentFetch = {
                 label: this.lastDepartmentFetch.label,
@@ -835,6 +871,9 @@ export class DingTalkAllowlistPanel extends AKElement {
             };
             return departments;
         } catch (error) {
+            if (this.source?.slug !== sourceSlug) {
+                return null;
+            }
             const detail = await this.apiErrorMessage(error);
             this.lastDepartmentFetch = dingtalkDepartmentFetchFailureStatus(
                 this.lastDepartmentFetch,
@@ -871,6 +910,10 @@ export class DingTalkAllowlistPanel extends AKElement {
     }
 
     private async saveAndApply(): Promise<void> {
+        const sourceSlug = this.source?.slug;
+        if (!sourceSlug) {
+            return;
+        }
         const departmentInputResult = applyDingTalkDepartmentInputs(
             this.model,
             this.departmentInputs,
@@ -894,8 +937,8 @@ export class DingTalkAllowlistPanel extends AKElement {
 
         const result = await saveDingTalkAllowlistConfiguration({
             model: departmentInputResult.model,
-            sourceSlug: this.source?.slug,
-            createOrUpdatePolicy: (expression) => this.createOrUpdatePolicy(expression),
+            sourceSlug,
+            createOrUpdatePolicy: (expression) => this.createOrUpdatePolicy(expression, sourceSlug),
             retrieveSource: (slug) =>
                 this.sourcesApi.sourcesOauthRetrieve({
                     slug,
@@ -915,24 +958,26 @@ export class DingTalkAllowlistPanel extends AKElement {
                       }),
             errorMessage: (error) => this.errorMessage(error),
             onValidatedModel: (model) => {
-                this.model = model;
+                if (this.source?.slug === sourceSlug) this.model = model;
             },
             onPolicySaved: (policy) => {
+                if (this.source?.slug !== sourceSlug) return;
                 this.policy = policy;
                 this.expressionValid = true;
                 // The configured allowlist is persisted; refreshes may take over again.
                 this.dirty = false;
             },
             onSourceRefreshed: (source) => {
-                this.source = source;
+                if (this.source?.slug === sourceSlug) this.source = source;
             },
             onFlowsResolved: (authFlow, enrollmentFlow) => {
+                if (this.source?.slug !== sourceSlug) return;
                 this.authFlow = authFlow;
                 this.enrollmentFlow = enrollmentFlow;
             },
         });
 
-        if (!result) {
+        if (!result || this.source?.slug !== sourceSlug) {
             return;
         }
 
@@ -951,16 +996,20 @@ export class DingTalkAllowlistPanel extends AKElement {
         });
     }
 
-    private async createOrUpdatePolicy(expression: string): Promise<ExpressionPolicy> {
+    private async createOrUpdatePolicy(
+        expression: string,
+        sourceSlug: string,
+    ): Promise<ExpressionPolicy> {
+        const policyName = `dingtalk-allowlist-${sourceSlug}`;
         const existing = await this.policiesApi.policiesExpressionList({
-            name: this.policyName,
+            name: policyName,
             pageSize: 1,
         });
-        const policy = existing.results.find((candidate) => candidate.name === this.policyName);
+        const policy = existing.results.find((candidate) => candidate.name === policyName);
         if (!policy) {
             return this.policiesApi.policiesExpressionCreate({
                 expressionPolicyRequest: {
-                    name: this.policyName,
+                    name: policyName,
                     expression,
                     executionLogging: false,
                 },
@@ -1609,6 +1658,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                     <div class="pf-l-flex ak-dingtalk-actions ak-dingtalk-section">
                         <ak-spinner-button
                             class="pf-m-secondary"
+                            ?disabled=${!this.loaded}
                             .callAction=${() => this.discoverCompany()}
                         >
                             ${msg("Discover company", {
@@ -1617,6 +1667,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                         </ak-spinner-button>
                         <ak-spinner-button
                             class="pf-m-primary"
+                            ?disabled=${!this.loaded}
                             .callAction=${() => this.saveAndApply()}
                         >
                             ${msg("Save and apply", {

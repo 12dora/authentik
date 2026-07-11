@@ -154,9 +154,46 @@ describe("renderDingTalkAllowlistPolicy", () => {
         expect(policy).toContain(
             '# config: {"companies":[{"allow_all":false,"corp_id":"corp-a","dept_ids":["10","9"],"label":"Alpha"}]}',
         );
+        expect(policy).toContain(
+            'marker.get("config_version") != "{\\"companies\\":[{\\"allow_all\\":false,\\"corp_id\\":\\"corp-a\\",\\"dept_ids\\":[\\"10\\",\\"9\\"]}]}"',
+        );
     });
 
-    it("renders Chinese denial messages matching the backend allowlist contract", () => {
+    it("does not include display labels in the session authorization version", () => {
+        const alpha = renderDingTalkAllowlistPolicy(
+            {
+                companies: [
+                    {
+                        corpId: "corp-a",
+                        label: "Alpha",
+                        allowAll: true,
+                        deptIds: [],
+                    },
+                ],
+            },
+            "dingtalk",
+        );
+        const renamed = renderDingTalkAllowlistPolicy(
+            {
+                companies: [
+                    {
+                        corpId: "corp-a",
+                        label: "Renamed",
+                        allowAll: true,
+                        deptIds: [],
+                    },
+                ],
+            },
+            "dingtalk",
+        );
+
+        const markerCheck = (policy: string) =>
+            policy.split("\n").find((line) => line.includes('marker.get("config_version")'));
+        expect(markerCheck(alpha)).toBe(markerCheck(renamed));
+        expect(alpha).not.toContain('config_version") != "{\\"companies\\":[{\\"label\\"');
+    });
+
+    it("renders translatable English denial message IDs matching the backend contract", () => {
         const policy = renderDingTalkAllowlistPolicy(
             {
                 companies: [
@@ -171,21 +208,29 @@ describe("renderDingTalkAllowlistPolicy", () => {
             "dingtalk",
         );
 
-        expect(policy).toContain('ak_message("钉钉登录失败：无法确认企业信息，请联系管理员。")');
+        expect(policy).toContain(
+            'ak_message("DingTalk login failed: unable to verify your company. Contact your administrator.")',
+        );
         // B4: a DingTalk login that reached policy evaluation without a company id fails closed.
         expect(policy).toContain(
-            'ak_message("钉钉登录失败：无法确定您的企业信息，请重新通过钉钉登录。")',
+            'ak_message("DingTalk login failed: unable to determine your company. Sign in with DingTalk again.")',
         );
         expect(policy).toContain(
-            'ak_message("钉钉登录失败：当前白名单状态已更新，请重新通过钉钉登录。")',
+            'ak_message("DingTalk login failed: the allowlist changed. Sign in with DingTalk again.")',
         );
         // B6: application access without a DingTalk marker is no longer blocked outright.
         expect(policy).not.toContain(
             'ak_message("钉钉登录失败：请通过允许的钉钉组织登录后访问此应用。")',
         );
-        expect(policy).toContain('ak_message("钉钉登录失败：当前企业未被允许，请联系管理员。")');
-        expect(policy).toContain('ak_message("钉钉登录失败：无法确认部门信息，请联系管理员。")');
-        expect(policy).toContain('ak_message("钉钉登录失败：当前部门未被允许，请联系管理员。")');
+        expect(policy).toContain(
+            'ak_message("DingTalk login failed: your company is not allowed. Contact your administrator.")',
+        );
+        expect(policy).toContain(
+            'ak_message("DingTalk login failed: unable to verify your department. Contact your administrator.")',
+        );
+        expect(policy).toContain(
+            'ak_message("DingTalk login failed: your department is not allowed. Contact your administrator.")',
+        );
         expect(policy).not.toContain("DingTalk did not return a company ID.");
         expect(policy).not.toContain("This DingTalk company is not allowed.");
         expect(policy).not.toContain("This DingTalk account is not in an allowed department.");

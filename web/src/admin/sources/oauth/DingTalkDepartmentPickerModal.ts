@@ -255,7 +255,12 @@ export class DingTalkDepartmentPickerModal extends AKModal {
                     })}
                 </button>
             </div>
-            <table class="pf-c-table pf-m-compact pf-m-grid-md" role="grid">
+            <table
+                class="pf-c-table pf-m-compact pf-m-grid-md"
+                aria-label=${msg("DingTalk department hierarchy", {
+                    id: "sources.oauth.dingtalk-allowlist.departments.table.aria-label",
+                })}
+            >
                 <thead>
                     <tr>
                         <th>

@@ -14739,6 +14739,18 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>Flags allow you to enable new functionality and behavior in authentik early.</source>
   <target>标志允许您提前在 authentik 中启用新功能和行为。</target>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.table.aria-label">
+  <source>DingTalk department hierarchy</source>
+  <target>钉钉部门层级</target>
+</trans-unit>
+<trans-unit id="sources.oauth.view.error.load">
+  <source>Failed to load OAuth source.</source>
+  <target>无法加载 OAuth 源。</target>
+</trans-unit>
+<trans-unit id="common.actions.retry">
+  <source>Retry</source>
+  <target>重试</target>
+</trans-unit>
 </body>
 </file>
 </xliff>

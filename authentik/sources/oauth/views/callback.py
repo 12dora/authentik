@@ -162,6 +162,10 @@ class OAuthSourceFlowManager(SourceFlowManager):
             self._logger.warning("failed to evaluate source policy", exc=exc)
             source_policy_result = PolicyResult(False, str(exc))
         if not source_policy_result.passing:
+            if getattr(self.source, "provider_type", "") == "dingtalk":
+                source_policy_result = PolicyResult(
+                    False, *(_(message) for message in source_policy_result.messages)
+                )
             return self.error_handler(FlowNonApplicableException(source_policy_result))
         return super().get_flow(**kwargs)
 
@@ -195,7 +199,10 @@ class OAuthSourceFlowManager(SourceFlowManager):
                     ),
                     source=self.source,
                 ).from_http(self.request)
-                return _("钉钉登录失败：企业白名单配置异常，请联系管理员。")
+                return _(
+                    "DingTalk login failed: the company allowlist is invalid. "
+                    "Contact your administrator."
+                )
             Event.new(
                 EventAction.CONFIGURATION_ERROR,
                 message=(
@@ -205,7 +212,10 @@ class OAuthSourceFlowManager(SourceFlowManager):
                 ),
                 source=self.source,
             ).from_http(self.request)
-            return _("钉钉登录失败：管理员尚未配置企业白名单，请联系管理员。")
+            return _(
+                "DingTalk login failed: no company allowlist is configured. "
+                "Contact your administrator."
+            )
         userinfo = self.policy_context.get("oauth_userinfo") or {}
         marker = build_dingtalk_allowlist_session_marker(
             config,
@@ -215,7 +225,10 @@ class OAuthSourceFlowManager(SourceFlowManager):
         )
         if not marker:
             self.policy_context.pop(DINGTALK_ALLOWLIST_PLAN_CONTEXT, None)
-            return _("钉钉登录失败：当前企业或部门未被允许，请联系管理员。")
+            return _(
+                "DingTalk login failed: your company or department is not allowed. "
+                "Contact your administrator."
+            )
         self.policy_context[DINGTALK_ALLOWLIST_PLAN_CONTEXT] = marker
         return None
 
@@ -275,7 +288,12 @@ class OAuthSourceFlowManager(SourceFlowManager):
         if userinfo.get("userid") or userinfo.get("userId"):
             return None
         return self.error_handler(
-            Exception(_("钉钉登录失败：暂时无法获取您的钉钉用户信息，请稍后重试或联系管理员。"))
+            Exception(
+                _(
+                    "DingTalk login failed: your DingTalk user information is temporarily "
+                    "unavailable. Try again later or contact your administrator."
+                )
+            )
         )
 
     def handle_enroll(self, connection: UserOAuthSourceConnection) -> HttpResponse:

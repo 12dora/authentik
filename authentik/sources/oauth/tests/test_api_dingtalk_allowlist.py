@@ -30,6 +30,7 @@ from authentik.sources.oauth.types.dingtalk import (
     DINGTALK_ORG_AUTH_INFO_URL,
     DINGTALK_PROFILE_URL,
     _extract_dingtalk_corp_label,
+    dingtalk_allowlist_config_version,
     fetch_dingtalk_departments,
 )
 
@@ -84,8 +85,8 @@ class TestDingTalkAllowlistPolicyHelpers(TestCase):
 
         self.assertTrue(policy.passes(request).passing)
 
-    def test_rendered_expression_emits_chinese_deny_messages(self):
-        """Rendered deny paths add a clear Chinese policy message."""
+    def test_rendered_expression_emits_translatable_english_deny_messages(self):
+        """Rendered deny paths emit stable English gettext message IDs."""
         body = render_dingtalk_allowlist_policy(
             {"companies": [{"corp_id": "CORP_ALLOWED", "dept_ids": [10]}]}
         )
@@ -96,13 +97,47 @@ class TestDingTalkAllowlistPolicyHelpers(TestCase):
         denied_corp = policy.passes(request)
 
         self.assertFalse(denied_corp.passing)
-        self.assertEqual(denied_corp.messages, ("钉钉登录失败：当前企业未被允许，请联系管理员。",))
+        self.assertEqual(
+            denied_corp.messages,
+            ("DingTalk login failed: your company is not allowed. Contact your administrator.",),
+        )
 
         request.context["oauth_userinfo"] = {"corpId": "CORP_ALLOWED", "dept_id_list": [30]}
         denied_dept = policy.passes(request)
 
         self.assertFalse(denied_dept.passing)
-        self.assertEqual(denied_dept.messages, ("钉钉登录失败：当前部门未被允许，请联系管理员。",))
+        self.assertEqual(
+            denied_dept.messages,
+            ("DingTalk login failed: your department is not allowed. Contact your administrator.",),
+        )
+
+    def test_authorization_version_ignores_display_label(self):
+        """Renaming a company does not invalidate otherwise-identical sessions."""
+        first = dingtalk_allowlist_config_version(
+            {
+                "companies": [
+                    {
+                        "corp_id": "CORP_ALLOWED",
+                        "label": "First label",
+                        "dept_ids": [10],
+                    }
+                ]
+            }
+        )
+        renamed = dingtalk_allowlist_config_version(
+            {
+                "companies": [
+                    {
+                        "corp_id": "CORP_ALLOWED",
+                        "label": "Renamed",
+                        "dept_ids": [10],
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(first, renamed)
+        self.assertNotIn("label", first)
 
     def test_rendered_expression_fails_closed_for_dingtalk_login_without_corp(self):
         """B4: a DingTalk source login (userinfo present) missing the corp id is denied."""
@@ -119,7 +154,7 @@ class TestDingTalkAllowlistPolicyHelpers(TestCase):
         self.assertFalse(policy.passes(request).passing)
 
     def test_rendered_expression_allows_other_source_sharing_flow(self):
-        """B4: a non-DingTalk source passing through a shared flow is not blocked by the allowlist."""
+        """B4: a non-DingTalk source on a shared flow is not blocked by the allowlist."""
         body = render_dingtalk_allowlist_policy(
             {"companies": [{"corp_id": "CORP_FAKE", "allow_all": True}]}
         )
@@ -153,16 +188,12 @@ class TestDingTalkAllowlistPolicyHelpers(TestCase):
             evaluate_dingtalk_allowlist(config, {"corpId": "CORP_DENIED", "dept_id_list": [20]})
         )
         self.assertFalse(
-            evaluate_dingtalk_allowlist(
-                config, {"corpId": "CORP_RESTRICTED", "dept_id_list": [30]}
-            )
+            evaluate_dingtalk_allowlist(config, {"corpId": "CORP_RESTRICTED", "dept_id_list": [30]})
         )
         self.assertFalse(evaluate_dingtalk_allowlist(config, {"dept_id_list": [10]}))
         self.assertFalse(evaluate_dingtalk_allowlist(config, {"corpId": "CORP_RESTRICTED"}))
         self.assertFalse(
-            evaluate_dingtalk_allowlist(
-                config, {"corpId": "CORP_RESTRICTED", "dept_id_list": "10"}
-            )
+            evaluate_dingtalk_allowlist(config, {"corpId": "CORP_RESTRICTED", "dept_id_list": "10"})
         )
 
     def test_parser_tolerates_legacy_department_and_name_keys(self):
@@ -211,10 +242,7 @@ class TestDingTalkAllowlistPolicyHelpers(TestCase):
 
     def test_parser_accepts_managed_marker_and_empty_config_denies_all(self):
         """Parser recognizes the managed marker and keeps empty allowlists fail-closed."""
-        body = (
-            "# authentik-managed-dingtalk-allowlist\n"
-            '# config: {"companies":[]}'
-        )
+        body = '# authentik-managed-dingtalk-allowlist\n# config: {"companies":[]}'
 
         parsed = parse_dingtalk_allowlist_policy(body)
 

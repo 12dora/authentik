@@ -33,9 +33,8 @@ function normalizeString(value: string | number | undefined | null): string {
     return String(value).trim();
 }
 
-// The serialized config doubles as the backend's `config_version` session-marker
-// comparison value; ordering must match Python's `sorted()` (plain code-point order),
-// not any locale- or numeric-aware collation.
+// Ordering must match Python's `sorted()` (plain code-point order), not any locale-
+// or numeric-aware collation.
 function sortStrings(values: string[]): string[] {
     return [...values].sort();
 }
@@ -47,6 +46,16 @@ function toStoredModel(model: DingTalkAllowlistModel): StoredDingTalkAllowlistMo
             corp_id: company.corpId,
             dept_ids: company.deptIds.map((deptId) => String(deptId)),
             label: company.label,
+        })),
+    };
+}
+
+function toAuthorizationModel(model: DingTalkAllowlistModel): StoredDingTalkAllowlistModel {
+    return {
+        companies: model.companies.map((company) => ({
+            allow_all: company.allowAll,
+            corp_id: company.corpId,
+            dept_ids: company.deptIds.map((deptId) => String(deptId)),
         })),
     };
 }
@@ -183,10 +192,12 @@ export function renderDingTalkAllowlistPolicy(
 ): string {
     const normalized = validateDingTalkAllowlistModel(model);
     const storedModel = toStoredModel(normalized);
-    const configVersion = JSON.stringify(storedModel);
+    // Labels are display metadata. Renaming a company must not invalidate every
+    // authenticated user's authorization marker.
+    const configVersion = JSON.stringify(toAuthorizationModel(normalized));
 
     return `# ${DINGTALK_ALLOWLIST_MARKER}
-# config: ${configVersion}
+# config: ${JSON.stringify(storedModel)}
 
 source = context.get("source")
 if source and getattr(source, "slug", None) != ${pythonString(sourceSlug)}:
@@ -220,7 +231,7 @@ if not corp_id:
         # Our own DingTalk source login attempt (other sources returned True above, and info
         # is present so this is a login rather than button rendering) reached policy evaluation
         # without a company id: fail closed instead of silently allowing it.
-        ak_message("钉钉登录失败：无法确定您的企业信息，请重新通过钉钉登录。")
+        ak_message("DingTalk login failed: unable to determine your company. Sign in with DingTalk again.")
         return False
     if request.obj.__class__.__name__ != "Application":
         return True
@@ -232,7 +243,7 @@ if not corp_id:
         # means are not blocked by this allowlist on application access.
         return True
     if marker.get("config_version") != ${pythonString(configVersion)}:
-        ak_message("钉钉登录失败：当前白名单状态已更新，请重新通过钉钉登录。")
+        ak_message("DingTalk login failed: the allowlist changed. Sign in with DingTalk again.")
         return False
     corp_id = marker.get("corp_id")
     raw_dept_ids = marker.get("dept_ids")
@@ -245,26 +256,26 @@ if not corp_id:
 ${renderPythonAllowlist(normalized)}
 
 if not corp_id:
-    ak_message("钉钉登录失败：无法确认企业信息，请联系管理员。")
+    ak_message("DingTalk login failed: unable to verify your company. Contact your administrator.")
     return False
 
 rule = allowlist.get(corp_id)
 if not rule:
-    ak_message("钉钉登录失败：当前企业未被允许，请联系管理员。")
+    ak_message("DingTalk login failed: your company is not allowed. Contact your administrator.")
     return False
 
 if rule.get("allow_all"):
     return True
 
 if dept_ids is None:
-    ak_message("钉钉登录失败：无法确认部门信息，请联系管理员。")
+    ak_message("DingTalk login failed: unable to verify your department. Contact your administrator.")
     return False
 
 allowed_dept_ids = {str(dept_id) for dept_id in rule.get("dept_ids") or set()}
 if dept_ids & allowed_dept_ids:
     return True
 
-ak_message("钉钉登录失败：当前部门未被允许，请联系管理员。")
+ak_message("DingTalk login failed: your department is not allowed. Contact your administrator.")
 return False
 `;
 }

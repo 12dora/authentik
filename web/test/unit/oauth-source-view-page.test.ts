@@ -14,6 +14,7 @@ vi.mock("#admin/sources/oauth/DingTalkAllowlistPanel", () => ({}));
 vi.mock("#admin/sources/oauth/DingTalkDirectoryPanel", () => ({}));
 vi.mock("#admin/sources/oauth/OAuthSourceDiagram", () => ({}));
 vi.mock("#elements/CodeMirror", () => ({}));
+vi.mock("#elements/EmptyState", () => ({}));
 vi.mock("#elements/Tabs", () => ({}));
 vi.mock("#elements/buttons/SpinnerButton/index", () => ({}));
 vi.mock("#admin/sources/oauth/OAuthSourceForm", () => ({
@@ -114,5 +115,18 @@ describe("OAuthSourceViewPage", () => {
             expect(source).toContain(`id: "${id}"`);
             expect(zhHans).toContain(`<trans-unit id="${id}">`);
         }
+    });
+
+    it("invalidates stale route requests and exposes a retryable error state", () => {
+        const source = readFileSync(
+            resolve(import.meta.dirname, "../../src/admin/sources/oauth/OAuthSourceViewPage.ts"),
+            "utf8",
+        );
+
+        expect(source).toContain("private requestGeneration = 0;");
+        expect(source).toContain("const generation = ++this.requestGeneration;");
+        expect(source).toContain("generation === this.requestGeneration");
+        expect(source).toContain("this.source = undefined;");
+        expect(source).toContain('id: "sources.oauth.view.error.load"');
     });
 });

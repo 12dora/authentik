@@ -5,6 +5,7 @@ import "#admin/sources/oauth/DingTalkDirectoryPanel";
 import "#admin/sources/oauth/OAuthSourceDiagram";
 import "#admin/events/ObjectChangelog";
 import "#elements/CodeMirror";
+import "#elements/EmptyState";
 import "#elements/Tabs";
 import "#elements/buttons/SpinnerButton/index";
 
@@ -24,7 +25,7 @@ import { ModelEnum, OAuthSource, ProviderTypeEnum, SourcesApi } from "@goauthent
 
 import { msg } from "@lit/localize";
 import { CSSResult, html, nothing } from "lit";
-import { customElement, property } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 
 import PFButton from "@patternfly/patternfly/components/Button/button.css";
 import PFCard from "@patternfly/patternfly/components/Card/card.css";
@@ -82,17 +83,34 @@ export function ProviderToLabel(provider?: ProviderTypeEnum): string {
 export class OAuthSourceViewPage extends AKElement {
     @property({ type: String })
     set sourceSlug(value: string) {
-        new SourcesApi(DEFAULT_CONFIG)
-            .sourcesOauthRetrieve({
-                slug: value,
-            })
-            .then((source) => {
-                this.source = source;
-            });
+        this.loadSource(value);
     }
 
     @property({ attribute: false })
     source?: OAuthSource;
+
+    @state()
+    private loadError = false;
+
+    private requestedSlug = "";
+    private requestGeneration = 0;
+
+    private async loadSource(slug: string): Promise<void> {
+        const generation = ++this.requestGeneration;
+        this.requestedSlug = slug;
+        this.source = undefined;
+        this.loadError = false;
+        try {
+            const source = await new SourcesApi(DEFAULT_CONFIG).sourcesOauthRetrieve({ slug });
+            if (generation === this.requestGeneration && this.requestedSlug === slug) {
+                this.source = source;
+            }
+        } catch {
+            if (generation === this.requestGeneration && this.requestedSlug === slug) {
+                this.loadError = true;
+            }
+        }
+    }
 
     static styles: CSSResult[] = [PFPage, PFButton, PFGrid, PFContent, PFCard, PFDescriptionList];
 
@@ -105,6 +123,23 @@ export class OAuthSourceViewPage extends AKElement {
     }
 
     render(): SlottedTemplateResult {
+        if (this.loadError) {
+            return html`<ak-empty-state icon="fa-exclamation-triangle">
+                <span
+                    >${msg("Failed to load OAuth source.", {
+                        id: "sources.oauth.view.error.load",
+                    })}</span
+                >
+                <button
+                    slot="primary-action"
+                    type="button"
+                    class="pf-c-button pf-m-primary"
+                    @click=${() => this.loadSource(this.requestedSlug)}
+                >
+                    ${msg("Retry", { id: "common.actions.retry" })}
+                </button>
+            </ak-empty-state>`;
+        }
         if (!this.source) {
             return nothing;
         }

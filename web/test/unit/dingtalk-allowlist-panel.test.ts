@@ -179,6 +179,20 @@ describe("DingTalkAllowlistPanel localization and controls", () => {
         expect(allowlistPanel).toContain("sources.oauth.dingtalk-allowlist.unsaved.title");
     });
 
+    it("atomically resets source-scoped drafts before loading a different source", () => {
+        expect(allowlistPanel).toContain("private resetSourceState(): void");
+        expect(allowlistPanel).toContain("this.model = { companies: [] };");
+        expect(allowlistPanel).toContain("this.departmentInputs = {};");
+        expect(allowlistPanel).toContain("this.loaded = false;");
+        expect(allowlistPanel).toContain("this.dirty = false;");
+    });
+
+    it("binds async reads and saves to the source slug that started the action", () => {
+        expect(allowlistPanel).toContain("const sourceSlug = this.source.slug;");
+        expect(allowlistPanel).toContain("this.source?.slug !== sourceSlug");
+        expect(allowlistPanel).toContain("this.createOrUpdatePolicy(expression, sourceSlug)");
+    });
+
     it("reports refresh failures through the button result and an alert instead of a silent success", () => {
         expect(allowlistPanel).toContain("refreshStatusAction(");
         expect(allowlistPanel).toContain("this.refreshStatusAction()");

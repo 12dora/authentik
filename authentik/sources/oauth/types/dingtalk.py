@@ -181,9 +181,24 @@ def dingtalk_allowlist_config_hash(config: dict[str, Any]) -> str:
 
 
 def dingtalk_allowlist_config_version(config: dict[str, Any]) -> str:
-    """Return a stable serialized version for a normalized DingTalk allowlist config."""
+    """Return a stable version containing authorization facts only.
+
+    Company labels are display metadata; changing one must not revoke otherwise-valid
+    DingTalk sessions.
+    """
+    normalized = normalize_dingtalk_allowlist_config(config)
+    authorization_config = {
+        "companies": [
+            {
+                "allow_all": company["allow_all"],
+                "corp_id": company["corp_id"],
+                "dept_ids": company["dept_ids"],
+            }
+            for company in normalized["companies"]
+        ]
+    }
     return dumps(
-        normalize_dingtalk_allowlist_config(config),
+        authorization_config,
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,
@@ -308,7 +323,8 @@ def render_dingtalk_allowlist_policy(config: dict[str, Any]) -> str:
     normalized = normalize_dingtalk_allowlist_config(config)
     config_json = dumps(normalized, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     config_python = repr(normalized)
-    config_hash = dingtalk_allowlist_config_hash(normalized)
+    config_version = dingtalk_allowlist_config_version(normalized)
+    config_hash = sha256(config_version.encode("utf-8")).hexdigest()
     return f"""{DINGTALK_ALLOWLIST_MARKER}
 # config: {config_json}
 userinfo = request.context.get("oauth_userinfo") or {{}}
@@ -324,7 +340,10 @@ if not corp_id:
         # A DingTalk source login attempt (userinfo present) that reached policy evaluation
         # without a company id must fail closed instead of silently allowing the login. The
         # ``userinfo`` guard keeps login-button rendering (no userinfo) unaffected.
-        ak_message("钉钉登录失败：无法确定您的企业信息，请重新通过钉钉登录。")
+        ak_message(
+            "DingTalk login failed: unable to determine your company. "
+            "Sign in with DingTalk again."
+        )
         return False
     if request.obj.__class__.__name__ != "Application":
         # Another source passing through a shared flow: this allowlist does not apply.
@@ -338,10 +357,10 @@ if not corp_id:
         return True
     marker_current = (
         marker.get("config_hash") == "{config_hash}"
-        or marker.get("config_version") == {config_json!r}
+        or marker.get("config_version") == {config_version!r}
     )
     if not marker_current:
-        ak_message("钉钉登录失败：当前白名单状态已更新，请重新通过钉钉登录。")
+        ak_message("DingTalk login failed: the allowlist changed. Sign in with DingTalk again.")
         return False
     corp_id = marker.get("corp_id")
     dept_ids = marker.get("dept_ids") or []
@@ -350,7 +369,9 @@ if not corp_id:
     else:
         dept_ids = sorted({{str(item) for item in dept_ids if item is not None}})
     if not corp_id:
-        ak_message("钉钉登录失败：当前企业未被允许，请联系管理员。")
+        ak_message(
+            "DingTalk login failed: your company is not allowed. Contact your administrator."
+        )
         return False
 config = {config_python}
 corp_found = False
@@ -363,9 +384,9 @@ for company in config.get("companies", []):
     if set(dept_ids).intersection(company.get("dept_ids") or []):
         return True
 if not corp_found:
-    ak_message("钉钉登录失败：当前企业未被允许，请联系管理员。")
+    ak_message("DingTalk login failed: your company is not allowed. Contact your administrator.")
     return False
-ak_message("钉钉登录失败：当前部门未被允许，请联系管理员。")
+ak_message("DingTalk login failed: your department is not allowed. Contact your administrator.")
 return False
 """
 

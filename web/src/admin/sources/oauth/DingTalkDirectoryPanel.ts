@@ -262,27 +262,40 @@ export class DingTalkDirectoryPanel extends AKElement {
     }
 
     protected willUpdate(changedProperties: PropertyValues<this>): void {
-        if (changedProperties.has("source") && this.source?.slug) {
+        if (changedProperties.has("source")) {
             // Only a different source warrants an automatic refresh; the same source
             // object is re-assigned after saves and on global EVENT_REFRESH, and
             // refreshing again would race the explicit refresh already in flight.
             const previous = changedProperties.get("source") as OAuthSource | undefined;
-            if (previous?.slug !== this.source.slug) {
+            if (previous?.slug !== this.source?.slug) {
+                this.resetSourceState();
+            }
+            if (this.source?.slug && previous?.slug !== this.source.slug) {
                 this.refreshStatus().catch(console.error);
             }
         }
+    }
+
+    private resetSourceState(): void {
+        this.refreshGeneration += 1;
+        this.stopSyncPoll();
+        this.statuses = [];
+        this.manualCorpId = "";
+        this.loadError = undefined;
+        this.loaded = false;
     }
 
     private async refreshStatus(): Promise<void> {
         if (!this.source?.slug) {
             return;
         }
+        const sourceSlug = this.source.slug;
         const generation = ++this.refreshGeneration;
         let statuses: DingTalkDirectorySyncStatus[] | undefined;
         let loadError: string | undefined;
         try {
             const response = await this.api.sourcesOauthDingtalkDirectoryStatusRetrieve({
-                sourceSlug: this.source.slug,
+                sourceSlug,
             });
             statuses = response.sync;
         } catch (error) {
@@ -290,7 +303,7 @@ export class DingTalkDirectoryPanel extends AKElement {
         }
         // A newer refresh started while this one awaited; discard the stale result so
         // the later-returning response cannot overwrite fresher state.
-        if (generation !== this.refreshGeneration) {
+        if (generation !== this.refreshGeneration || this.source?.slug !== sourceSlug) {
             return;
         }
         if (statuses) {
@@ -344,6 +357,7 @@ export class DingTalkDirectoryPanel extends AKElement {
         if (!this.source?.slug) {
             return;
         }
+        const sourceSlug = this.source.slug;
         const corpId = this.manualCorpId.trim();
         if (!corpId) {
             throw new Error(
@@ -353,7 +367,7 @@ export class DingTalkDirectoryPanel extends AKElement {
             );
         }
         const response = await this.api.sourcesOauthDingtalkDirectorySyncCreate({
-            sourceSlug: this.source.slug,
+            sourceSlug,
             dingTalkDirectorySyncRequestRequest: { corpId },
         });
         if (response.queued) {
@@ -373,6 +387,9 @@ export class DingTalkDirectoryPanel extends AKElement {
                 }),
             });
         }
+        if (this.source?.slug !== sourceSlug) {
+            return;
+        }
         this.manualCorpId = "";
         // Queuing is an explicit action; restart the bounded poll so the freshly queued
         // corp is followed to completion even if an earlier run had exhausted the cap.
@@ -380,11 +397,14 @@ export class DingTalkDirectoryPanel extends AKElement {
         await this.refreshStatus();
     }
 
-    private async deleteSyncStatus(corpId: string): Promise<void> {
-        if (!this.source?.slug) {
+    private async deleteSyncStatus(sourceSlug: string, corpId: string): Promise<void> {
+        if (this.source?.slug !== sourceSlug) {
             return;
         }
-        await this.api.sourcesOauthDingtalkDirectorySyncDestroy(this.source.slug, corpId);
+        await this.api.sourcesOauthDingtalkDirectorySyncDestroy(sourceSlug, corpId);
+        if (this.source?.slug !== sourceSlug) {
+            return;
+        }
         await this.refreshStatus();
     }
 
@@ -508,12 +528,14 @@ export class DingTalkDirectoryPanel extends AKElement {
     }
 
     private renderActions(): TemplateResult {
+        const sourceSlug = this.source?.slug;
+        const inputId = `dingtalk-directory-corp-id-${sourceSlug ?? ""}`;
         return html`<div class="pf-l-flex ak-dingtalk-directory-actions">
             <ak-spinner-button class="pf-m-secondary" .callAction=${() => this.manualRefresh()}>
                 ${msg("Refresh", { id: "sources.oauth.dingtalk-directory.refresh" })}
             </ak-spinner-button>
             <div class="pf-c-form__group">
-                <label class="pf-c-form__label">
+                <label class="pf-c-form__label" for=${inputId}>
                     <span class="pf-c-form__label-text"
                         >${msg("Corp ID", {
                             id: "sources.oauth.dingtalk-directory.corp-id",
@@ -521,20 +543,33 @@ export class DingTalkDirectoryPanel extends AKElement {
                     >
                 </label>
                 <input
+                    id=${inputId}
                     class="pf-c-form-control"
                     .value=${this.manualCorpId}
+                    ?disabled=${!this.loaded}
+                    @keydown=${(event: KeyboardEvent) => {
+                        if (event.key === "Enter" && !event.isComposing) {
+                            event.preventDefault();
+                            this.triggerManualSync().catch(console.error);
+                        }
+                    }}
                     @input=${(event: InputEvent) => {
                         this.manualCorpId = (event.target as HTMLInputElement).value;
                     }}
                 />
             </div>
-            <ak-spinner-button class="pf-m-primary" .callAction=${() => this.triggerManualSync()}>
+            <ak-spinner-button
+                class="pf-m-primary"
+                ?disabled=${!this.loaded}
+                .callAction=${() => this.triggerManualSync()}
+            >
                 ${msg("Sync now", { id: "sources.oauth.dingtalk-directory.sync-now" })}
             </ak-spinner-button>
         </div>`;
     }
 
     private renderDeleteAction(status: DingTalkDirectorySyncStatus): TemplateResult {
+        const sourceSlug = this.source?.slug ?? "";
         return html`<ak-forms-confirm
             successMessage=${msg(str`Deleted DingTalk directory sync record for ${status.corpId}`, {
                 id: "sources.oauth.dingtalk-directory.delete.success",
@@ -545,7 +580,7 @@ export class DingTalkDirectoryPanel extends AKElement {
             action=${msg("Delete", {
                 id: "sources.oauth.dingtalk-directory.delete",
             })}
-            .onConfirm=${() => this.deleteSyncStatus(status.corpId)}
+            .onConfirm=${() => this.deleteSyncStatus(sourceSlug, status.corpId)}
         >
             <span slot="header"
                 >${msg("Delete DingTalk directory data", {

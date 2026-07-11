@@ -52,6 +52,7 @@ interface DirectoryPanelInternals {
     api: DirectoryStatusApiStub;
     refreshStatus(): Promise<void>;
     triggerManualSync(): Promise<void>;
+    resetSourceState(): void;
     stopSyncPoll(): void;
 }
 
@@ -277,7 +278,32 @@ describe("DingTalkDirectoryPanel", () => {
         expect(directoryPanelSource).toContain(
             'const previous = changedProperties.get("source") as OAuthSource | undefined;',
         );
-        expect(directoryPanelSource).toContain("if (previous?.slug !== this.source.slug)");
+        expect(directoryPanelSource).toContain("if (previous?.slug !== this.source?.slug)");
+        expect(directoryPanelSource).toContain("this.resetSourceState();");
+    });
+
+    it("clears source-scoped rows and form state immediately on source change", () => {
+        const panel = new DingTalkDirectoryPanelElement();
+        const internals = panel as unknown as DirectoryPanelInternals;
+        internals.statuses = [makeSyncStatus("corp-a", "success")];
+        internals.manualCorpId = "corp-a";
+
+        internals.resetSourceState();
+
+        expect(internals.statuses).toEqual([]);
+        expect(internals.manualCorpId).toBe("");
+    });
+
+    it("binds destructive actions to the source slug that rendered the row", () => {
+        expect(directoryPanelSource).toContain("this.deleteSyncStatus(sourceSlug, status.corpId)");
+        expect(directoryPanelSource).toContain("if (this.source?.slug !== sourceSlug)");
+    });
+
+    it("associates the corp input label and submits on Enter", () => {
+        expect(directoryPanelSource).toContain("for=${inputId}");
+        expect(directoryPanelSource).toContain("id=${inputId}");
+        expect(directoryPanelSource).toContain('event.key === "Enter"');
+        expect(directoryPanelSource).toContain("event.isComposing");
     });
 
     it("clears the running-sync poll timer when the panel disconnects", () => {
