@@ -122,6 +122,7 @@ describe("renderDingTalkAllowlistPolicy", () => {
         );
 
         expect(policy).toContain(`# ${DINGTALK_ALLOWLIST_MARKER}`);
+        expect(policy).toContain('# source: "dingtalk"');
         expect(policy).toContain(
             '# config: {"companies":[{"allow_all":false,"corp_id":"corp-a","dept_ids":["1","2"],"label":"Alpha"},{"allow_all":true,"corp_id":"corp-b","dept_ids":[],"label":"Beta"}]}',
         );

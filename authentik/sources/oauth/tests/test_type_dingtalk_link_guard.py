@@ -22,6 +22,7 @@ from authentik.sources.oauth.types.dingtalk import (
     DINGTALK_GET_BY_UNION_ID_URL,
     DINGTALK_PROFILE_URL,
     DINGTALK_USER_DETAIL_URL,
+    get_dingtalk_allowlist_binding,
 )
 from authentik.stages.dummy.models import DummyStage
 from authentik.tenants.utils import get_current_tenant
@@ -50,7 +51,9 @@ class TestDingTalkSourceLinkGuard(TestCase):
         """Bind a managed DingTalk allowlist expression to the source."""
         policy = ExpressionPolicy.objects.create(
             name="managed-dingtalk",
-            expression=render_dingtalk_allowlist_policy({"companies": companies}),
+            expression=render_dingtalk_allowlist_policy(
+                {"companies": companies}, source_slug=self.source.slug
+            ),
         )
         PolicyBinding.objects.create(
             target=target or self.source,
@@ -195,6 +198,42 @@ class TestDingTalkSourceLinkGuard(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())
+
+    def test_shared_flow_resolves_each_sources_own_managed_policy(self):
+        shared_flow = self.source.authentication_flow
+        other = OAuthSource.objects.create(
+            name="Other DingTalk",
+            slug="dingtalk-other",
+            provider_type="dingtalk",
+            consumer_key="OTHER_CLIENT_ID",
+            consumer_secret="OTHER_CLIENT_SECRET",
+            authentication_flow=shared_flow,
+            enrollment_flow=create_test_flow(),
+        )
+        own_policy = ExpressionPolicy.objects.create(
+            name=f"dingtalk-allowlist-{self.source.slug}",
+            expression=render_dingtalk_allowlist_policy(
+                {"companies": [{"corp_id": "CORP_OWN", "allow_all": True}]},
+                source_slug=self.source.slug,
+            ),
+        )
+        other_policy = ExpressionPolicy.objects.create(
+            name=f"dingtalk-allowlist-{other.slug}",
+            expression=render_dingtalk_allowlist_policy(
+                {"companies": [{"corp_id": "CORP_OTHER", "allow_all": True}]},
+                source_slug=other.slug,
+            ),
+        )
+        PolicyBinding.objects.create(target=shared_flow, policy=other_policy, order=0, enabled=True)
+        PolicyBinding.objects.create(target=shared_flow, policy=own_policy, order=10, enabled=True)
+
+        _, resolved_own, own_config = get_dingtalk_allowlist_binding(self.source)
+        _, resolved_other, other_config = get_dingtalk_allowlist_binding(other)
+
+        self.assertEqual(resolved_own, own_policy)
+        self.assertEqual(own_config["companies"][0]["corp_id"], "CORP_OWN")
+        self.assertEqual(resolved_other, other_policy)
+        self.assertEqual(other_config["companies"][0]["corp_id"], "CORP_OTHER")
 
     def test_authenticated_link_denies_when_allowlist_bound_to_enrollment_flow(self):
         """Source-link guard finds the UI-managed policy on the enrollment flow."""

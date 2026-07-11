@@ -348,7 +348,8 @@ class TestDingTalkAllowlistAPI(APITestCase):
         policy = ExpressionPolicy.objects.create(
             name="managed-dingtalk",
             expression=render_dingtalk_allowlist_policy(
-                {"companies": [{"corp_id": "CORP_FAKE", "dept_ids": [10]}]}
+                {"companies": [{"corp_id": "CORP_FAKE", "dept_ids": [10]}]},
+                source_slug=self.source.slug,
             ),
         )
         PolicyBinding.objects.create(

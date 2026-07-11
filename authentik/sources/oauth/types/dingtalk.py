@@ -1,6 +1,7 @@
 """DingTalk OAuth Views"""
 
 from hashlib import sha256
+from http import HTTPStatus
 from json import dumps, loads
 from secrets import token_urlsafe
 from typing import Any
@@ -54,6 +55,10 @@ DINGTALK_DEPARTMENT_CORP_UNAVAILABLE = _(
 
 class DingTalkDepartmentCorpUnavailable(ValueError):
     """Raised when the current DingTalk app token cannot verify the requested corp."""
+
+
+class DingTalkAppTokenError(ValueError):
+    """Credential-free DingTalk app-token failure safe for logs and API responses."""
 
 
 def _legacy_error(data: dict[str, Any]) -> str:
@@ -114,23 +119,31 @@ def _extract_dingtalk_corp_label(data: dict[str, Any]) -> str:
 
 
 def _fetch_dingtalk_app_token(source: OAuthSource, session: Session) -> str:
-    token_response = session.get(
-        DINGTALK_APP_ACCESS_TOKEN_URL,
-        params={"appkey": source.consumer_key, "appsecret": source.consumer_secret},
-    )
-    token_response.raise_for_status()
-    token_data = token_response.json()
-    error = _legacy_error(token_data)
+    try:
+        token_response = session.get(
+            DINGTALK_APP_ACCESS_TOKEN_URL,
+            params={"appkey": source.consumer_key, "appsecret": source.consumer_secret},
+        )
+        token_response.raise_for_status()
+        token_data = token_response.json()
+    except (RequestException, JSONDecodeError) as exc:
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+        suffix = f" (status {status_code})" if status_code is not None else ""
+        raise DingTalkAppTokenError(f"DingTalk app token request failed{suffix}.") from exc
+    errcode = token_data.get("errcode")
     app_token = token_data.get("access_token") or token_data.get("accessToken")
-    if error or not app_token:
-        raise ValueError(error or "DingTalk app token response did not include a token.")
+    if errcode not in (None, 0):
+        raise DingTalkAppTokenError(f"DingTalk app token request failed (code {errcode}).")
+    if not app_token:
+        raise DingTalkAppTokenError("DingTalk app token response did not include a token.")
     return str(app_token)
 
 
 def _dingtalk_app_token_cache_key(source: OAuthSource) -> str:
-    # Scope the cache entry to the source and its app key so a credential change
+    # Scope the cache entry to the complete credential pair so rotating either value
     # transparently invalidates the cached token instead of reusing a stale one.
-    fingerprint = sha256((source.consumer_key or "").encode("utf-8")).hexdigest()[:16]
+    credentials = f"{source.consumer_key or ''}\0{source.consumer_secret or ''}"
+    fingerprint = sha256(credentials.encode("utf-8")).hexdigest()[:16]
     return f"authentik/sources/oauth/dingtalk/app_token/{source.pk}/{fingerprint}"
 
 
@@ -319,17 +332,25 @@ def finalize_dingtalk_allowlist_session(sender, request, user, stage_view, **kwa
     request.session.modified = True
 
 
-def render_dingtalk_allowlist_policy(config: dict[str, Any]) -> str:
+def render_dingtalk_allowlist_policy(config: dict[str, Any], source_slug: str | None = None) -> str:
     normalized = normalize_dingtalk_allowlist_config(config)
     config_json = dumps(normalized, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     config_python = repr(normalized)
     config_version = dingtalk_allowlist_config_version(normalized)
     config_hash = sha256(config_version.encode("utf-8")).hexdigest()
+    source_marker = f"# source: {dumps(source_slug)}\n" if source_slug else ""
+    source_guard = (
+        f"""if source and getattr(source, "slug", None) != {source_slug!r}:
+    return True
+"""
+        if source_slug
+        else ""
+    )
     return f"""{DINGTALK_ALLOWLIST_MARKER}
-# config: {config_json}
+{source_marker}# config: {config_json}
 userinfo = request.context.get("oauth_userinfo") or {{}}
 source = request.context.get("source")
-corp_id = userinfo.get("corp_id") or userinfo.get("corpId")
+{source_guard}corp_id = userinfo.get("corp_id") or userinfo.get("corpId")
 dept_values = userinfo.get("dept_id_list") or userinfo.get("deptIdList") or []
 if not isinstance(dept_values, (list, tuple, set)):
     dept_ids = []
@@ -401,6 +422,33 @@ def _dingtalk_allowlist_binding_targets(source: OAuthSource) -> list:
     return targets
 
 
+def _dingtalk_policy_source_slug(expression: str) -> str | None:
+    for raw_line in expression.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("# source:"):
+            continue
+        try:
+            value = loads(line.removeprefix("# source:").strip())
+        except ValueError:
+            return ""
+        return str(value) if value else ""
+    return None
+
+
+def _dingtalk_policy_belongs_to_source(
+    binding: PolicyBinding, policy: ExpressionPolicy, source: OAuthSource
+) -> bool:
+    marked_source = _dingtalk_policy_source_slug(policy.expression)
+    if marked_source is not None:
+        return marked_source == source.slug
+    # Legacy policies predate the source marker. The managed frontend name and a
+    # direct source binding are the only unambiguous ownership signals; a nameless
+    # legacy policy on a shared flow must not be borrowed by another source.
+    return (
+        policy.name == f"dingtalk-allowlist-{source.slug}" or binding.target_id == source.pbm_uuid
+    )
+
+
 def dingtalk_allowlist_has_unparseable_binding(source: OAuthSource) -> bool:
     """Return True when a managed DingTalk allowlist policy exists but its config is unreadable.
 
@@ -418,6 +466,8 @@ def dingtalk_allowlist_has_unparseable_binding(source: OAuthSource) -> bool:
         if not isinstance(policy, ExpressionPolicy):
             policy = ExpressionPolicy.objects.filter(pk=policy.pk).first()
         if not policy:
+            continue
+        if not _dingtalk_policy_belongs_to_source(binding, policy, source):
             continue
         if (
             DINGTALK_ALLOWLIST_MARKER in policy.expression
@@ -441,6 +491,8 @@ def get_dingtalk_allowlist_binding(
         if not isinstance(policy, ExpressionPolicy):
             policy = ExpressionPolicy.objects.filter(pk=policy.pk).first()
         if not policy:
+            continue
+        if not _dingtalk_policy_belongs_to_source(binding, policy, source):
             continue
         config = parse_dingtalk_allowlist_policy(policy.expression)
         if config is not None:
@@ -563,12 +615,19 @@ def fetch_dingtalk_org_auth_info(
     session: Session | None = None,
 ) -> dict[str, Any]:
     session = session or get_http_session()
-    app_token = _fetch_dingtalk_app_token(source, session)
+    app_token = fetch_dingtalk_app_token_cached(source, session)
     response = session.get(
         DINGTALK_ORG_AUTH_INFO_URL,
         params={"targetCorpId": corp_id},
         headers={"x-acs-dingtalk-access-token": app_token},
     )
+    if response.status_code == HTTPStatus.UNAUTHORIZED:
+        app_token = fetch_dingtalk_app_token_cached(source, session, force=True)
+        response = session.get(
+            DINGTALK_ORG_AUTH_INFO_URL,
+            params={"targetCorpId": corp_id},
+            headers={"x-acs-dingtalk-access-token": app_token},
+        )
     response.raise_for_status()
     data = response.json()
     if error := _legacy_error(data):

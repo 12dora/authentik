@@ -197,6 +197,7 @@ export function renderDingTalkAllowlistPolicy(
     const configVersion = JSON.stringify(toAuthorizationModel(normalized));
 
     return `# ${DINGTALK_ALLOWLIST_MARKER}
+# source: ${JSON.stringify(sourceSlug)}
 # config: ${JSON.stringify(storedModel)}
 
 source = context.get("source")

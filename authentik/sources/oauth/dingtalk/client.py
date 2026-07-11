@@ -1,6 +1,7 @@
 """DingTalk directory API client."""
 
 from collections.abc import Iterator
+from http import HTTPStatus
 from typing import Any
 
 from requests import Session
@@ -20,6 +21,7 @@ DINGTALK_MAX_DEPARTMENTS = 10000
 DINGTALK_PAGE_SIZE = 100
 # Hard cap on department-user pages to bound a broken/looping cursor (each page is 100 users).
 DINGTALK_MAX_USER_PAGES = 10000
+DINGTALK_INVALID_TOKEN_CODES = {40014, 42001}
 
 
 class DingTalkDirectoryClient:
@@ -39,19 +41,34 @@ class DingTalkDirectoryClient:
         self._app_token = fetch_dingtalk_app_token_cached(self.source, self.session)
         return self._app_token
 
+    def _refresh_app_token(self) -> None:
+        self._app_token = fetch_dingtalk_app_token_cached(self.source, self.session, force=True)
+
+    def _post_json(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
+        for attempt in range(2):
+            response = self.session.post(
+                url,
+                params={"access_token": self.app_token},
+                json=payload,
+            )
+            if response.status_code == HTTPStatus.UNAUTHORIZED and attempt == 0:
+                self._refresh_app_token()
+                continue
+            response.raise_for_status()
+            data = response.json()
+            if data.get("errcode") in DINGTALK_INVALID_TOKEN_CODES and attempt == 0:
+                self._refresh_app_token()
+                continue
+            return data
+        raise ValueError("DingTalk app token refresh did not recover the request.")
+
     def iter_departments(self) -> Iterator[dict[str, Any]]:
         seen: set[str] = set()
 
         def fetch_children(parent_id: str = "1", depth: int = 0) -> Iterator[dict[str, Any]]:
             if depth > DINGTALK_MAX_DEPARTMENT_DEPTH:
                 raise ValueError("DingTalk department traversal depth limit exceeded.")
-            response = self.session.post(
-                DINGTALK_DEPARTMENT_LIST_URL,
-                params={"access_token": self.app_token},
-                json={"dept_id": parent_id},
-            )
-            response.raise_for_status()
-            data = response.json()
+            data = self._post_json(DINGTALK_DEPARTMENT_LIST_URL, {"dept_id": parent_id})
             if error := _legacy_error(data):
                 raise ValueError(error)
             result = data.get("result") or []
@@ -88,13 +105,10 @@ class DingTalkDirectoryClient:
         cursor = 0
         pages = 0
         while True:
-            response = self.session.post(
+            data = self._post_json(
                 DINGTALK_DEPARTMENT_USER_LIST_URL,
-                params={"access_token": self.app_token},
-                json={"dept_id": dept_id, "cursor": cursor, "size": DINGTALK_PAGE_SIZE},
+                {"dept_id": dept_id, "cursor": cursor, "size": DINGTALK_PAGE_SIZE},
             )
-            response.raise_for_status()
-            data = response.json()
             if error := _legacy_error(data):
                 raise ValueError(error)
             result = data.get("result") or {}
@@ -110,7 +124,7 @@ class DingTalkDirectoryClient:
                 raw_next = result.get("nextCursor")
             try:
                 next_cursor = int(raw_next) if raw_next is not None else None
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 next_cursor = None
             # C5: DingTalk must return a strictly-advancing cursor while has_more is set;
             # a missing/non-advancing cursor (or too many pages) would otherwise re-fetch page 1
@@ -122,13 +136,7 @@ class DingTalkDirectoryClient:
             cursor = next_cursor
 
     def get_user_detail(self, user_id: str) -> dict[str, Any]:
-        response = self.session.post(
-            DINGTALK_USER_DETAIL_URL,
-            params={"access_token": self.app_token},
-            json={"userid": user_id},
-        )
-        response.raise_for_status()
-        data = response.json()
+        data = self._post_json(DINGTALK_USER_DETAIL_URL, {"userid": user_id})
         if error := _legacy_error(data):
             raise ValueError(error)
         return data.get("result") or {}
