@@ -47,6 +47,10 @@ Current-user organization context can include:
 Default current-user mappings must not expose mobile number, email address,
 raw DingTalk profile data, or full department membership.
 
+An email address cached from DingTalk is directory contact metadata. It is not
+a verified identity attribute and must not be used as a stable identity or
+account-correlation key.
+
 ## Directory API
 
 The optional DingTalk directory API is for applications that are explicitly
@@ -60,11 +64,17 @@ matching dedicated directory permission, such as
 current-user organization endpoint may return the authenticated user's own
 context without granting full directory enumeration.
 
-The default directory user response should expose operational organization
-fields such as user ID, name, title, avatar, department IDs, manager user ID,
-active state, deletion marker, and sync timestamps. It should not expose
-mobile, email, or raw profile data unless a later permissioned serializer is
-added for a reviewed use case.
+The directory users endpoint is a high-privilege release surface. Its
+serializer is available only when the caller has both read access to the
+requested DingTalk OAuth source and
+`view_dingtalkdirectoryuser`. It returns operational organization fields plus
+`email`, `mobile`, and `job_number` for approved downstream directory syncs.
+It deliberately excludes the cached `raw`, `union_id`, and `open_id` fields.
+
+This directory API contract does not change the default OIDC mappings or the
+current-user organization response. Those surfaces continue to omit contact
+fields unless a provider-specific claim mapping is explicitly reviewed and
+assigned.
 
 ## Sync And Freshness
 

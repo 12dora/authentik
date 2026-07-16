@@ -165,6 +165,12 @@ only for each downstream application that has an explicit need for them. Keep
 each OIDC `ScopeMapping` or SAML `SAMLPropertyMapping` scoped to the specific
 provider/application that is allowed to receive those attributes.
 
+The separately permissioned directory users endpoint is a high-privilege
+release surface: source read access plus
+`view_dingtalkdirectoryuser` releases `email`, `mobile`, and `job_number`, but
+does not release `raw`, `union_id`, or `open_id` and does not add those fields
+to OIDC or current-user claims.
+
 Do not map `dingtalk.raw_profile` to downstream applications. It is retained as
 source metadata for troubleshooting and future field compatibility, and may
 contain additional DingTalk fields beyond the explicit claims listed above.
