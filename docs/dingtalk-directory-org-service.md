@@ -44,8 +44,8 @@ Current-user organization context can include:
 - Direct manager and manager chain when requested by the mapping.
 - Cache freshness metadata.
 
-Default current-user mappings must not expose mobile number, email address,
-raw DingTalk profile data, or full department membership.
+The default current-user organization helper omits mobile number, email
+address, raw DingTalk profile data, and full department membership.
 
 An email address cached from DingTalk is directory contact metadata. It is not
 a verified identity attribute and must not be used as a stable identity or
@@ -71,10 +71,12 @@ requested DingTalk OAuth source and
 `email`, `mobile`, and `job_number` for approved downstream directory syncs.
 It deliberately excludes the cached `raw`, `union_id`, and `open_id` fields.
 
-This directory API contract does not change the default OIDC mappings or the
-current-user organization response. Those surfaces continue to omit contact
-fields unless a provider-specific claim mapping is explicitly reviewed and
-assigned.
+This directory API change does not add the cached directory `email`, `mobile`,
+or `job_number` fields to OIDC claims or the current-user organization
+response. The current-user organization helper continues to omit contact
+fields. Independently, an OIDC provider can release `request.user.email`
+through the standard email scope or release other fields through explicitly
+configured mappings.
 
 ## Sync And Freshness
 
