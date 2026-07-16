@@ -96,6 +96,9 @@ class TestDingTalkDirectorySync(TestCase):
                     "unionid": "UNION",
                     "name": "Ada",
                     "title": "Engineer",
+                    "email": "ada@example.invalid",
+                    "mobile": "13800000000",
+                    "job_number": "E-001",
                     "manager_userid": "MANAGER",
                     "dept_id_list": [2],
                     "active": True,
@@ -113,6 +116,9 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertEqual(user.user_id, "USER")
         self.assertEqual(user.manager_user_id, "MANAGER")
         self.assertEqual(user.dept_id_list, ["2"])
+        self.assertEqual(user.email, "ada@example.invalid")
+        self.assertEqual(user.mobile, "13800000000")
+        self.assertEqual(user.job_number, "E-001")
         status = DingTalkDirectorySyncStatus.objects.get()
         self.assertEqual(status.status, "success")
         self.assertEqual(status.generation, 1)

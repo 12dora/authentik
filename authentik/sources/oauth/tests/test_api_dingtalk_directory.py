@@ -29,16 +29,42 @@ class TestDingTalkDirectoryAPI(TestCase):
             name="Ada",
             mobile="13800000000",
             email="ada@example.invalid",
+            job_number="E-001",
+            union_id="UNION",
+            open_id="OPEN",
             dept_id_list=["1"],
+            raw={"userid": "USER", "sensitive": "value"},
             last_seen_at=now(),
         )
 
-    def test_user_list_requires_admin_permission(self):
+    def test_user_list_requires_directory_permissions(self):
         self.client.force_login(create_test_user("regular"))
         response = self.client.get(
             reverse("authentik_api:dingtalk-directory-users", kwargs={"source_slug": "dingtalk"})
         )
         self.assertEqual(response.status_code, 403)
+
+        source_reader = create_test_user("source-reader")
+        source_reader.assign_perms_to_managed_role("authentik_sources_oauth.view_oauthsource")
+        self.client.force_login(source_reader)
+        response = self.client.get(
+            reverse("authentik_api:dingtalk-directory-users", kwargs={"source_slug": "dingtalk"})
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_user_list_allows_directory_user_reader(self):
+        directory_reader = create_test_user("directory-reader")
+        directory_reader.assign_perms_to_managed_role("authentik_sources_oauth.view_oauthsource")
+        directory_reader.assign_perms_to_managed_role(
+            "authentik_sources_oauth.view_dingtalkdirectoryuser"
+        )
+        self.client.force_login(directory_reader)
+
+        response = self.client.get(
+            reverse("authentik_api:dingtalk-directory-users", kwargs={"source_slug": "dingtalk"})
+        )
+
+        self.assertEqual(response.status_code, 200)
 
     def test_status_includes_snapshot_generation(self):
         DingTalkDirectorySyncStatus.objects.create(
@@ -58,7 +84,7 @@ class TestDingTalkDirectoryAPI(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["sync"][0]["generation"], 9)
 
-    def test_user_list_hides_sensitive_fields(self):
+    def test_user_list_returns_contact_fields_without_private_identifiers(self):
         self.client.force_login(create_test_admin_user())
         response = self.client.get(
             reverse("authentik_api:dingtalk-directory-users", kwargs={"source_slug": "dingtalk"})
@@ -66,9 +92,12 @@ class TestDingTalkDirectoryAPI(TestCase):
         self.assertEqual(response.status_code, 200)
         item = response.json()["results"][0]
         self.assertEqual(item["user_id"], "USER")
-        self.assertNotIn("mobile", item)
-        self.assertNotIn("email", item)
+        self.assertEqual(item["email"], "ada@example.invalid")
+        self.assertEqual(item["mobile"], "13800000000")
+        self.assertEqual(item["job_number"], "E-001")
         self.assertNotIn("raw", item)
+        self.assertNotIn("union_id", item)
+        self.assertNotIn("open_id", item)
 
     def test_user_list_excludes_deleted_cache_entries(self):
         DingTalkDirectoryUser.objects.create(
