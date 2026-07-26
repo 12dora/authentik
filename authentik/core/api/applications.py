@@ -32,6 +32,11 @@ from authentik.policies.api.exec import PolicyTestResultSerializer
 from authentik.policies.engine import PolicyEngine
 from authentik.policies.types import CACHE_PREFIX, PolicyResult
 from authentik.rbac.filters import ObjectFilter
+from authentik.sources.oauth.dingtalk.messages import (
+    DINGTALK_DENY_NO_PERMISSION,
+    DINGTALK_DENY_RULES_UPDATED,
+    DINGTALK_DENY_TEMPORARILY_UNABLE,
+)
 
 LOGGER = get_logger()
 
@@ -46,6 +51,22 @@ def user_app_cache_key(
     if page_number:
         key += f"/{page_number}"
     return key
+
+
+DINGTALK_PUBLIC_DENIAL_MESSAGES = {
+    DINGTALK_DENY_NO_PERMISSION,
+    DINGTALK_DENY_RULES_UPDATED,
+    DINGTALK_DENY_TEMPORARILY_UNABLE,
+}
+
+
+def translate_dingtalk_public_denials(result: PolicyResult) -> PolicyResult:
+    """Translate DingTalk managed public denial messages for API policy result payloads."""
+    result.messages = tuple(
+        _(message) if message in DINGTALK_PUBLIC_DENIAL_MESSAGES else message
+        for message in result.messages
+    )
+    return result
 
 
 class ApplicationSerializer(ModelSerializer):
@@ -247,7 +268,7 @@ class ApplicationViewSet(UsedByMixin, ModelViewSet):
                     continue
                 log_messages.append(LogEventSerializer(log).data)
             result.log_messages = log_messages
-            response = PolicyTestResultSerializer(result)
+            response = PolicyTestResultSerializer(translate_dingtalk_public_denials(result))
         return Response(response.data)
 
     @extend_schema(

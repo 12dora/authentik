@@ -17,6 +17,7 @@ from authentik.providers.saml.models import SAMLProvider
 from authentik.sources.oauth.models import OAuthSource
 from authentik.sources.oauth.types.dingtalk import (
     DINGTALK_ALLOWLIST_SESSION_KEY,
+    DINGTALK_DENY_NO_PERMISSION,
     dingtalk_allowlist_config_hash,
     render_dingtalk_allowlist_policy,
 )
@@ -107,6 +108,17 @@ class TestApplicationsAPI(APITestCase):
         PolicyBinding.objects.create(target=self.allowed, policy=policy, order=0)
         return config, source
 
+    def assert_no_precise_dingtalk_denial(self, body):
+        response_text = str(body)
+        for precise in [
+            "钉钉登录失败：请通过允许的钉钉组织登录后访问此应用。",
+            "company is not allowed",
+            "department is not allowed",
+            "sign in through DingTalk before accessing this app",
+            "required DingTalk source",
+        ]:
+            self.assertNotIn(precise, response_text)
+
     def test_check_access_denies_protected_app_without_dingtalk_allowlist_session_marker(self):
         """Protected applications deny non-DingTalk or non-allowlisted sessions."""
         self.bind_dingtalk_marker_policy()
@@ -128,7 +140,7 @@ class TestApplicationsAPI(APITestCase):
         """Superusers testing access for a plain user see the DingTalk deny message."""
         self.bind_dingtalk_marker_policy()
         plain_user = create_test_user()
-        self.client.force_login(self.user)
+        self.client.force_authenticate(user=self.user)
 
         response = self.client.get(
             reverse(
@@ -141,7 +153,33 @@ class TestApplicationsAPI(APITestCase):
         self.assertEqual(response.status_code, 200)
         body = loads(response.content.decode())
         self.assertEqual(body["passing"], False)
-        self.assertEqual(body["messages"], ["钉钉登录失败：请通过允许的钉钉组织登录后访问此应用。"])
+        self.assertEqual(body["messages"], [DINGTALK_DENY_NO_PERMISSION])
+        self.assert_no_precise_dingtalk_denial(body)
+        self.assertIn("missing_session_marker", str(body["log_messages"]))
+        self.assertIn("no_permission", str(body["log_messages"]))
+
+    def test_check_access_reports_zh_hans_dingtalk_deny_message_for_user_without_marker(self):
+        """DingTalk check_access denial follows the active locale."""
+        self.bind_dingtalk_marker_policy()
+        plain_user = create_test_user()
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.get(
+            reverse(
+                "authentik_api:application-check-access",
+                kwargs={"slug": self.allowed.slug},
+            ),
+            {"for_user": plain_user.pk},
+            HTTP_ACCEPT_LANGUAGE="zh-Hans",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = loads(response.content.decode())
+        self.assertEqual(body["passing"], False)
+        self.assertEqual(body["messages"], ["您没有继续操作的权限，请联系管理员。"])
+        self.assert_no_precise_dingtalk_denial(body)
+        self.assertIn("missing_session_marker", str(body["log_messages"]))
+        self.assertIn("no_permission", str(body["log_messages"]))
 
     def test_check_access_allows_protected_app_for_superuser_without_marker(self):
         """Superusers keep access to protected applications without a DingTalk session."""

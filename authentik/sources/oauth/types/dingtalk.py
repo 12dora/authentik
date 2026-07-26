@@ -35,6 +35,11 @@ from authentik.sources.oauth.dingtalk.config import (
     DINGTALK_MAX_DEPARTMENTS,
     normalize_dingtalk_id_list,
 )
+from authentik.sources.oauth.dingtalk.messages import (
+    DINGTALK_DENY_NO_PERMISSION,
+    DINGTALK_DENY_RULES_UPDATED,
+    DINGTALK_DENY_TEMPORARILY_UNABLE,
+)
 from authentik.sources.oauth.dingtalk.redaction import redact_dingtalk_detail
 from authentik.sources.oauth.models import OAuthSource
 from authentik.sources.oauth.types.registry import SourceType, registry
@@ -56,15 +61,6 @@ DINGTALK_ALLOWLIST_MARKER = "# authentik-managed-dingtalk-allowlist"
 DINGTALK_ALLOWLIST_SESSION_KEY = "authentik/sources/oauth/dingtalk/allowlist"
 DINGTALK_ALLOWLIST_PLAN_CONTEXT = "authentik/sources/oauth/dingtalk/allowlist/pending"
 DINGTALK_ALLOWLIST_STATE_SALT = "authentik.sources.oauth.dingtalk.allowlist"
-DINGTALK_DENY_RULES_UPDATED = (
-    "DingTalk access rules were updated. Sign in with DingTalk again."
-)
-DINGTALK_DENY_NO_PERMISSION = (
-    "You do not have permission to continue. Contact your administrator."
-)
-DINGTALK_DENY_TEMPORARILY_UNABLE = (
-    "We are temporarily unable to verify your DingTalk access. Try again later."
-)
 DINGTALK_INVALID_TOKEN_CODES = {40014, 42001}
 # DingTalk app tokens are valid for 7200s; refresh slightly early to avoid edge expiry.
 DINGTALK_APP_TOKEN_CACHE_TTL = 7000
