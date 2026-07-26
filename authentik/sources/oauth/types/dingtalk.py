@@ -4,6 +4,7 @@ from copy import deepcopy
 from hashlib import sha256
 from http import HTTPStatus
 from json import dumps, loads
+from re import sub
 from secrets import token_urlsafe
 from time import sleep
 from typing import Any
@@ -19,6 +20,7 @@ from django.utils.timezone import now
 from django.utils.translation import gettext_lazy as _
 from requests import Session
 from requests.exceptions import JSONDecodeError, RequestException
+from structlog.stdlib import get_logger
 
 from authentik.core.models import UserTypes
 from authentik.events.models import Event, EventAction
@@ -38,6 +40,8 @@ from authentik.sources.oauth.models import OAuthSource
 from authentik.sources.oauth.types.registry import SourceType, registry
 from authentik.sources.oauth.views.callback import OAuthCallback
 from authentik.sources.oauth.views.redirect import OAuthRedirect
+
+LOGGER = get_logger()
 
 DINGTALK_AUTHORIZE_URL = "https://login.dingtalk.com/oauth2/auth"
 DINGTALK_ACCESS_TOKEN_URL = "https://api.dingtalk.com/v1.0/oauth2/userAccessToken"  # nosec
@@ -77,6 +81,16 @@ class DingTalkAppTokenError(ValueError):
     """Credential-free DingTalk app-token failure safe for logs and API responses."""
 
 
+class DingTalkDiscoveryPublicError(ValueError):
+    """Stable public discovery failure with non-sensitive machine-readable metadata."""
+
+    def __init__(self, code: str, message, params: dict[str, Any] | None = None):
+        super().__init__(str(message))
+        self.code = code
+        self.message = message
+        self.params = params or {}
+
+
 def _require_mapping(value: Any, message: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(message)
@@ -88,6 +102,33 @@ def _legacy_error(data: dict[str, Any]) -> str:
     if errcode in (None, 0):
         return ""
     return str(data.get("errmsg") or data.get("message") or data.get("error") or errcode)
+
+
+def _redact_dingtalk_detail(value: Any) -> str:
+    message = str(value)
+    message = sub(
+        r"(?i)(access_token|accessToken|refresh_token|refreshToken|id_token|idToken|"
+        r"appsecret|app_secret|appSecret|client_secret|clientSecret|consumer_secret|"
+        r"consumerSecret|x-acs-dingtalk-access-token|xAcsDingtalkAccessToken|"
+        r"x-acs-dingtalk-refresh-token|xAcsDingtalkRefreshToken)([=:]\s*)[^&\s,;]+",
+        r"\1\2[redacted]",
+        message,
+    )
+    message = sub(
+        r"(?i)(authorization[=:]\s*)(?:Bearer\s+)?[^&\s,;]+",
+        r"\1[redacted]",
+        message,
+    )
+    message = sub(
+        r"(?i)([?&](?:access_token|accessToken|refresh_token|refreshToken|id_token|"
+        r"idToken|appsecret|app_secret|appSecret|client_secret|clientSecret|"
+        r"consumer_secret|consumerSecret|x-acs-dingtalk-access-token|"
+        r"xAcsDingtalkAccessToken|x-acs-dingtalk-refresh-token|"
+        r"xAcsDingtalkRefreshToken|authorization)=)[^&\s]+",
+        r"\1[redacted]",
+        message,
+    )
+    return message[:500]
 
 
 def _normalize_id_list(value: Any) -> list[str]:
@@ -604,14 +645,27 @@ def _consume_dingtalk_discovery_state(request: HttpRequest, source: OAuthSource)
     try:
         data = signing.loads(state, salt=DINGTALK_ALLOWLIST_STATE_SALT, max_age=600)
     except signing.SignatureExpired as exc:
-        raise ValueError(str(exc)) from exc
+        raise DingTalkDiscoveryPublicError(
+            "state_expired",
+            _("The DingTalk discovery request expired. Start discovery again."),
+            {"max_age_seconds": 600},
+        ) from exc
     except signing.BadSignature as exc:
-        raise ValueError(_("Invalid DingTalk discovery state.")) from exc
+        raise DingTalkDiscoveryPublicError(
+            "state_invalid",
+            _("The DingTalk discovery request is invalid. Start discovery again."),
+        ) from exc
     if data.get("source_slug") != source.slug:
-        raise ValueError(_("DingTalk discovery state source mismatch."))
+        raise DingTalkDiscoveryPublicError(
+            "state_source_mismatch",
+            _("The DingTalk discovery request is invalid for this source."),
+        )
     session_key = f"dingtalk-allowlist-state:{state}"
     if not request.session.pop(session_key, False):
-        raise ValueError(_("DingTalk discovery state has already been used."))
+        raise DingTalkDiscoveryPublicError(
+            "state_replayed",
+            _("The DingTalk discovery request was already used. Start discovery again."),
+        )
     request.session.modified = True
     return state
 
@@ -667,7 +721,7 @@ def _fetch_dingtalk_user_profile(
         profile.setdefault("corp_id", corp_id)
         try:
             org_info = fetch_dingtalk_org_auth_info(source, str(corp_id), session=session)
-        except RequestException, ValueError:
+        except (RequestException, ValueError):
             org_info = {}
         if label := org_info.get("label"):
             profile.setdefault("label", label)
@@ -698,16 +752,81 @@ def _discovery_response(payload: dict[str, Any]) -> HttpResponse:
     )
 
 
+def _dingtalk_discovery_public_payload(profile: dict[str, Any]) -> dict[str, Any]:
+    corp_id = profile.get("corp_id") or profile.get("corpId")
+    if not corp_id:
+        raise DingTalkDiscoveryPublicError(
+            "provider_response_invalid",
+            _("DingTalk did not return the selected company. Start discovery again."),
+        )
+    payload = {
+        "ok": True,
+        "corp_id": str(corp_id),
+    }
+    if label := profile.get("label") or profile.get("corp_name") or profile.get("corpName"):
+        payload["label"] = str(label)
+    if user_id := profile.get("user_id") or profile.get("userid") or profile.get("userId"):
+        payload["user_id"] = str(user_id)
+    return payload
+
+
+def _dingtalk_discovery_error_payload(exc: DingTalkDiscoveryPublicError) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "code": exc.code,
+        "params": exc.params,
+    }
+
+
 def handle_dingtalk_discovery_callback(request: HttpRequest, source: OAuthSource) -> HttpResponse:
     try:
         _consume_dingtalk_discovery_state(request, source)
         code = request.GET.get("authCode") or request.GET.get("code")
         if not code:
-            raise ValueError(_("DingTalk discovery callback did not include a code."))
+            raise DingTalkDiscoveryPublicError(
+                "authorization_code_missing",
+                _("DingTalk did not return an authorization code. Start discovery again."),
+            )
         profile = _fetch_dingtalk_user_profile(source, code, get_http_session())
-    except (RequestException, ValueError) as exc:
-        return _discovery_response({"ok": False, "error": str(exc)})
-    return _discovery_response({"ok": True, "profile": profile, **profile})
+        payload = _dingtalk_discovery_public_payload(profile)
+    except DingTalkDiscoveryPublicError as exc:
+        LOGGER.warning(
+            "dingtalk_allowlist_discovery_public_error",
+            source_slug=source.slug,
+            code=exc.code,
+            params=exc.params,
+            detail=_redact_dingtalk_detail(exc),
+        )
+        return _discovery_response(_dingtalk_discovery_error_payload(exc))
+    except RequestException as exc:
+        LOGGER.warning(
+            "dingtalk_allowlist_discovery_provider_request_failed",
+            source_slug=source.slug,
+            detail=_redact_dingtalk_detail(exc),
+        )
+        return _discovery_response(
+            _dingtalk_discovery_error_payload(
+                DingTalkDiscoveryPublicError(
+                    "provider_unavailable",
+                    _("Could not complete DingTalk discovery. Try again."),
+                )
+            )
+        )
+    except ValueError as exc:
+        LOGGER.warning(
+            "dingtalk_allowlist_discovery_provider_response_invalid",
+            source_slug=source.slug,
+            detail=_redact_dingtalk_detail(exc),
+        )
+        return _discovery_response(
+            _dingtalk_discovery_error_payload(
+                DingTalkDiscoveryPublicError(
+                    "provider_response_invalid",
+                    _("DingTalk returned an invalid discovery response. Try again."),
+                )
+            )
+        )
+    return _discovery_response(payload)
 
 
 def fetch_dingtalk_org_auth_info(

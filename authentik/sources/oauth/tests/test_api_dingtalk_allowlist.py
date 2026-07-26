@@ -1,6 +1,7 @@
 """DingTalk allowlist API tests."""
 
 from html.parser import HTMLParser
+from json import loads
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
@@ -347,6 +348,18 @@ class TestDingTalkAllowlistAPI(APITestCase):
     def remove_path(self, source: OAuthSource | None = None) -> str:
         return f"/api/v3/sources/oauth/dingtalk-allowlist/{(source or self.source).slug}/remove/"
 
+    def discovery_payload(self, response) -> dict:
+        parser = ScriptCollector()
+        parser.feed(response.content.decode())
+        self.assertGreaterEqual(len(parser.scripts), 1)
+        self.assertEqual(parser.scripts[0]["attrs"].get("type"), "application/json")
+        return loads(parser.scripts[0]["data"])
+
+    def assert_no_public_prose_fields(self, payload: dict):
+        self.assertNotIn("error", payload)
+        self.assertNotIn("detail", payload)
+        self.assertNotIn("message", payload)
+
     def test_status_reports_policy_binding_guard_and_callback(self):
         """Status returns parsed allowlist and policy/binding/guard state."""
         policy = ExpressionPolicy.objects.create(
@@ -681,7 +694,12 @@ class TestDingTalkAllowlistAPI(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"window.opener.postMessage", response.content)
-        self.assertIn(b'"corpId": "CORP_FAKE"', response.content)
+        payload = self.discovery_payload(response)
+        self.assertEqual(payload["ok"], True)
+        self.assertEqual(payload["corp_id"], "CORP_FAKE")
+        self.assertNotIn("profile", payload)
+        self.assertNotIn("corpId", payload)
+        self.assertNotIn("unionId", payload)
         self.assertEqual(UserOAuthSourceConnection.objects.count(), 0)
         self.assertEqual(self.auth_session_snapshot(), auth_session_before)
         self.assertTrue(token_mock.called)
@@ -720,9 +738,11 @@ class TestDingTalkAllowlistAPI(APITestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        content = response.content.decode()
-        self.assertIn('"label": "示例公司"', content)
-        self.assertIn('"corp_name": "示例公司"', content)
+        payload = self.discovery_payload(response)
+        self.assertEqual(payload["corp_id"], "CORP_FAKE")
+        self.assertEqual(payload["label"], "示例公司")
+        self.assertNotIn("corp_name", payload)
+        self.assertNotIn("corpName", payload)
         self.assertEqual(
             parse_qs(urlparse(org_mock.last_request.url).query)["targetCorpId"], ["CORP_FAKE"]
         )
@@ -892,9 +912,48 @@ class TestDingTalkAllowlistAPI(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(department_mock.called)
         content = response.content.decode()
-        self.assertIn("authorized by this DingTalk application", content)
+        data = response.json()
+        self.assertEqual(data["code"], "department_access_denied")
+        self.assertEqual(data["params"], {"corp_id": "CORP_FAKE"})
+        self.assert_no_public_prose_fields(data)
+        self.assertNotIn("authorized by this DingTalk application", content)
         self.assertNotIn("FAKE_CLIENT_SECRET", content)
         self.assertNotIn("FAKE_APP_TOKEN", content)
+
+    def test_departments_unauthorized_and_forbidden_return_stable_access_denied(self):
+        """DingTalk authorization failures expose stable public error codes."""
+        for status_code in [401, 403]:
+            with self.subTest(status_code=status_code):
+                with Mocker() as mocker:
+                    mocker.get(
+                        DINGTALK_APP_ACCESS_TOKEN_URL,
+                        [
+                            {"json": {"access_token": "APP_TOKEN_A"}},
+                            {"json": {"access_token": "APP_TOKEN_B"}},
+                        ],
+                    )
+                    mocker.get(
+                        DINGTALK_ORG_AUTH_INFO_URL,
+                        status_code=status_code,
+                        text="access_token=FAKE_APP_TOKEN upstream says denied",
+                    )
+                    department_mock = mocker.post(DINGTALK_DEPARTMENT_LIST_URL, json={})
+
+                    response = self.client.post(
+                        f"/api/v3/sources/oauth/dingtalk-allowlist/{self.source.slug}/departments/",
+                        {"corp_id": "CORP_FAKE"},
+                        format="json",
+                    )
+
+                self.assertEqual(response.status_code, 400)
+                data = response.json()
+                self.assertEqual(data["code"], "department_access_denied")
+                self.assertEqual(data["params"], {"corp_id": "CORP_FAKE"})
+                self.assert_no_public_prose_fields(data)
+                content = response.content.decode()
+                self.assertNotIn("upstream says denied", content)
+                self.assertNotIn("FAKE_APP_TOKEN", content)
+                self.assertFalse(department_mock.called)
 
     def test_departments_error_response_does_not_leak_credentials(self):
         """Departments API hides upstream exception text containing query-string secrets."""
@@ -915,14 +974,43 @@ class TestDingTalkAllowlistAPI(APITestCase):
             )
 
         self.assertEqual(response.status_code, 503)
+        data = response.json()
+        self.assertEqual(data["code"], "department_dependency_unavailable")
+        self.assertEqual(data["params"], {"corp_id": "CORP_FAKE"})
+        self.assert_no_public_prose_fields(data)
         content = response.content.decode()
-        self.assertIn("Could not fetch DingTalk departments.", content)
+        self.assertNotIn("Could not fetch DingTalk departments.", content)
         self.assertNotIn("FAKE_CLIENT_SECRET", content)
         self.assertNotIn("FAKE_APP_TOKEN", content)
         self.assertNotIn("FAKE_CONSUMER_SECRET", content)
         self.assertNotIn("appsecret", content)
         self.assertNotIn("access_token", content)
         self.assertNotIn("consumer_secret", content)
+
+    def test_departments_bad_json_returns_stable_invalid_response(self):
+        """Invalid upstream department payloads expose a stable public contract."""
+        with Mocker() as mocker:
+            mocker.get(DINGTALK_APP_ACCESS_TOKEN_URL, json={"access_token": "FAKE_APP_TOKEN"})
+            mocker.get(
+                DINGTALK_ORG_AUTH_INFO_URL,
+                json={"authOrgInfo": {"corpId": "CORP_FAKE", "corpName": "Fake Company"}},
+            )
+            mocker.post(DINGTALK_DEPARTMENT_LIST_URL, text="not-json appsecret=FAKE_CLIENT_SECRET")
+
+            response = self.client.post(
+                f"/api/v3/sources/oauth/dingtalk-allowlist/{self.source.slug}/departments/",
+                {"corp_id": "CORP_FAKE"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 502)
+        data = response.json()
+        self.assertEqual(data["code"], "department_response_invalid")
+        self.assertEqual(data["params"], {"corp_id": "CORP_FAKE"})
+        self.assert_no_public_prose_fields(data)
+        content = response.content.decode()
+        self.assertNotIn("not-json", content)
+        self.assertNotIn("FAKE_CLIENT_SECRET", content)
 
     def test_departments_depth_limit_raises_stable_error(self):
         """Department traversal fails closed when the configured depth limit is exceeded."""
@@ -991,9 +1079,12 @@ class TestDingTalkAllowlistAPI(APITestCase):
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
         self.assertIn("window.opener.postMessage", content)
-        self.assertIn('"corp_id": "CORP_FAKE"', content)
-        self.assertIn('"corpId": "CORP_FAKE"', content)
-        self.assertIn('"unionId": "UNION_FAKE"', content)
+        payload = self.discovery_payload(response)
+        self.assertEqual(payload["ok"], True)
+        self.assertEqual(payload["corp_id"], "CORP_FAKE")
+        self.assertNotIn("profile", payload)
+        self.assertNotIn("corpId", payload)
+        self.assertNotIn("unionId", payload)
         self.assertNotIn("FAKE_USER_TOKEN", content)
         self.assertNotIn("FAKE_CLIENT_SECRET", content)
         self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())
@@ -1012,7 +1103,14 @@ class TestDingTalkAllowlistAPI(APITestCase):
             )
             mocker.get(
                 DINGTALK_PROFILE_URL,
-                json={"unionId": "UNION_FAKE", "corpId": "CORP_FAKE", "nick": hostile},
+                json={
+                    "unionId": "UNION_FAKE",
+                    "corpId": "CORP_FAKE",
+                    "nick": hostile,
+                    "mobile": "13800000000",
+                    "email": "ada@example.invalid",
+                    "accessToken": "PROFILE_TOKEN",
+                },
             )
             mocker.get(DINGTALK_APP_ACCESS_TOKEN_URL, status_code=403, json={"errcode": 88})
             response = self.client.get(
@@ -1026,9 +1124,74 @@ class TestDingTalkAllowlistAPI(APITestCase):
         parser.feed(content)
         self.assertEqual(len(parser.scripts), 2)
         self.assertEqual(parser.scripts[0]["attrs"].get("type"), "application/json")
-        self.assertIn("\\u003C/script\\u003E\\u003Cscript\\u003E", parser.scripts[0]["data"])
+        payload = loads(parser.scripts[0]["data"])
+        self.assertEqual(payload["corp_id"], "CORP_FAKE")
+        self.assertNotIn("profile", payload)
+        self.assertNotIn("unionId", payload)
+        self.assertNotIn("nick", payload)
+        self.assertNotIn("mobile", payload)
+        self.assertNotIn("email", payload)
+        self.assertNotIn("accessToken", payload)
+        self.assertNotIn("PROFILE_TOKEN", response.content.decode())
         self.assertNotIn("</script><script>", parser.scripts[0]["data"])
         self.assertNotIn("globalThis.pwned=1", parser.scripts[1]["data"])
+
+    def test_discovery_callback_rejects_missing_state_with_stable_code(self):
+        response = self.client.get(self.callback_url(), {"authCode": "AUTH_CODE"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = self.discovery_payload(response)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["code"], "state_invalid")
+        self.assert_no_public_prose_fields(payload)
+        self.assertNotIn("Signature", response.content.decode())
+        self.assertNotIn("BadSignature", response.content.decode())
+
+    def test_discovery_callback_rejects_bad_state_with_stable_code(self):
+        response = self.client.get(self.callback_url(), {"authCode": "AUTH_CODE", "state": "bad"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = self.discovery_payload(response)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["code"], "state_invalid")
+        self.assert_no_public_prose_fields(payload)
+        self.assertNotIn("BadSignature", response.content.decode())
+
+    def test_discovery_callback_rejects_missing_code_with_stable_code(self):
+        state = self.start_discovery()["state"]
+
+        response = self.client.get(self.callback_url(), {"state": state})
+
+        self.assertEqual(response.status_code, 200)
+        payload = self.discovery_payload(response)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["code"], "authorization_code_missing")
+        self.assert_no_public_prose_fields(payload)
+        self.assertNotIn("did not include a code", response.content.decode())
+
+    def test_discovery_callback_provider_failure_uses_stable_code_without_raw_detail(self):
+        state = self.start_discovery()["state"]
+
+        with Mocker() as mocker:
+            mocker.post(
+                DINGTALK_ACCESS_TOKEN_URL,
+                status_code=500,
+                text="access_token=FAKE_USER_TOKEN appsecret=FAKE_CLIENT_SECRET provider down",
+            )
+            response = self.client.get(
+                self.callback_url(),
+                {"authCode": "AUTH_CODE", "state": state},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        payload = self.discovery_payload(response)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["code"], "provider_unavailable")
+        self.assert_no_public_prose_fields(payload)
+        self.assertNotIn("provider down", content)
+        self.assertNotIn("FAKE_USER_TOKEN", content)
+        self.assertNotIn("FAKE_CLIENT_SECRET", content)
 
     def test_discovery_callback_rejects_replayed_state(self):
         """Discovery callback consumes state once and rejects a second use."""
@@ -1047,10 +1210,13 @@ class TestDingTalkAllowlistAPI(APITestCase):
             )
 
         self.assertEqual(first_response.status_code, 200)
-        self.assertIn('"ok": true', first_response.content.decode())
+        self.assertTrue(self.discovery_payload(first_response)["ok"])
         self.assertEqual(second_response.status_code, 200)
-        self.assertIn('"ok": false', second_response.content.decode())
-        self.assertIn("already been used", second_response.content.decode())
+        second_payload = self.discovery_payload(second_response)
+        self.assertFalse(second_payload["ok"])
+        self.assertEqual(second_payload["code"], "state_replayed")
+        self.assert_no_public_prose_fields(second_payload)
+        self.assertNotIn("already been used", second_response.content.decode())
         self.assertEqual(token_mock.call_count, 1)
         self.assertEqual(profile_mock.call_count, 1)
         self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())
@@ -1075,9 +1241,11 @@ class TestDingTalkAllowlistAPI(APITestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        content = response.content.decode()
-        self.assertIn('"ok": false', content)
-        self.assertIn("source mismatch", content)
+        payload = self.discovery_payload(response)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["code"], "state_source_mismatch")
+        self.assert_no_public_prose_fields(payload)
+        self.assertNotIn("source mismatch", response.content.decode())
         self.assertEqual(token_mock.call_count, 0)
         self.assertEqual(profile_mock.call_count, 0)
         self.assertFalse(UserOAuthSourceConnection.objects.filter(source=other_source).exists())
@@ -1097,8 +1265,12 @@ class TestDingTalkAllowlistAPI(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
-        self.assertIn('"ok": false', content)
-        self.assertIn("Signature age", content)
+        payload = self.discovery_payload(response)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["code"], "state_expired")
+        self.assertEqual(payload["params"], {"max_age_seconds": 600})
+        self.assert_no_public_prose_fields(payload)
+        self.assertNotIn("Signature age", content)
         self.assertEqual(token_mock.call_count, 0)
         self.assertEqual(profile_mock.call_count, 0)
         self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())

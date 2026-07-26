@@ -9,15 +9,16 @@ from django.shortcuts import get_object_or_404
 from django.utils.translation import gettext_lazy as _
 from django.views import View
 from drf_spectacular.utils import extend_schema
-from requests.exceptions import RequestException
+from requests.exceptions import JSONDecodeError, RequestException
 from rest_framework import serializers
 from rest_framework.exceptions import APIException, ValidationError
 from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.status import HTTP_409_CONFLICT
+from rest_framework.status import HTTP_409_CONFLICT, HTTP_502_BAD_GATEWAY
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
+from structlog.stdlib import get_logger
 
 from authentik.policies.expression.models import ExpressionPolicy
 from authentik.policies.models import PolicyBinding
@@ -28,6 +29,7 @@ from authentik.sources.oauth.types.dingtalk import (
     DINGTALK_AUTHORIZE_URL,
     DingTalkDepartmentCorpUnavailable,
     DingTalkDepartmentLoadFailed,
+    _redact_dingtalk_detail,
     create_dingtalk_discovery_state,
     dingtalk_oauth_callback_url,
     evaluate_dingtalk_allowlist,
@@ -38,6 +40,8 @@ from authentik.sources.oauth.types.dingtalk import (
     parse_dingtalk_allowlist_policy,
     render_dingtalk_allowlist_policy,
 )
+
+LOGGER = get_logger()
 
 
 class DingTalkDepartmentDiscoveryThrottle(UserRateThrottle):
@@ -56,13 +60,32 @@ __all__ = [
     "render_dingtalk_allowlist_policy",
 ]
 
-DINGTALK_ALLOWLIST_EXTERNAL_ERROR = _("Could not fetch DingTalk departments.")
+def dingtalk_department_public_error(
+    code: str,
+    params: dict | None = None,
+) -> dict:
+    return {
+        "code": code,
+        "params": params or {},
+    }
+
+
+class DingTalkDepartmentAccessDenied(APIException):
+    status_code = 400
+    default_detail = dingtalk_department_public_error("department_access_denied")
+    default_code = "department_access_denied"
 
 
 class DingTalkDepartmentDependencyUnavailable(APIException):
     status_code = 503
-    default_detail = DINGTALK_ALLOWLIST_EXTERNAL_ERROR
-    default_code = "department_load_failed"
+    default_detail = dingtalk_department_public_error("department_dependency_unavailable")
+    default_code = "department_dependency_unavailable"
+
+
+class DingTalkDepartmentInvalidResponse(APIException):
+    status_code = HTTP_502_BAD_GATEWAY
+    default_detail = dingtalk_department_public_error("department_response_invalid")
+    default_code = "department_response_invalid"
 
 
 class DingTalkAllowlistRevisionConflict(APIException):
@@ -466,9 +489,57 @@ class DingTalkAllowlistDepartmentsView(APIView):
         try:
             return Response(fetch_dingtalk_departments(source, str(corp_id)))
         except DingTalkDepartmentCorpUnavailable as exc:
-            raise ValidationError({"detail": str(exc)}) from exc
-        except (DingTalkDepartmentLoadFailed, RequestException, ValueError) as exc:
-            raise DingTalkDepartmentDependencyUnavailable() from exc
+            LOGGER.warning(
+                "dingtalk_department_access_denied",
+                source_slug=source.slug,
+                corp_id=str(corp_id),
+                detail=_redact_dingtalk_detail(exc),
+            )
+            raise DingTalkDepartmentAccessDenied(
+                detail=dingtalk_department_public_error(
+                    "department_access_denied",
+                    {"corp_id": str(corp_id)},
+                )
+            ) from exc
+        except JSONDecodeError as exc:
+            LOGGER.warning(
+                "dingtalk_department_response_invalid",
+                source_slug=source.slug,
+                corp_id=str(corp_id),
+                detail=_redact_dingtalk_detail(exc),
+            )
+            raise DingTalkDepartmentInvalidResponse(
+                detail=dingtalk_department_public_error(
+                    "department_response_invalid",
+                    {"corp_id": str(corp_id)},
+                )
+            ) from exc
+        except (DingTalkDepartmentLoadFailed, RequestException) as exc:
+            LOGGER.warning(
+                "dingtalk_department_dependency_unavailable",
+                source_slug=source.slug,
+                corp_id=str(corp_id),
+                detail=_redact_dingtalk_detail(exc),
+            )
+            raise DingTalkDepartmentDependencyUnavailable(
+                detail=dingtalk_department_public_error(
+                    "department_dependency_unavailable",
+                    {"corp_id": str(corp_id)},
+                )
+            ) from exc
+        except ValueError as exc:
+            LOGGER.warning(
+                "dingtalk_department_response_invalid",
+                source_slug=source.slug,
+                corp_id=str(corp_id),
+                detail=_redact_dingtalk_detail(exc),
+            )
+            raise DingTalkDepartmentInvalidResponse(
+                detail=dingtalk_department_public_error(
+                    "department_response_invalid",
+                    {"corp_id": str(corp_id)},
+                )
+            ) from exc
 
 
 class DingTalkAllowlistCallbackView(View):

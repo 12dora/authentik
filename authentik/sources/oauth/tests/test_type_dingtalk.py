@@ -3,7 +3,7 @@
 from unittest.mock import Mock
 from urllib.parse import parse_qs, urlparse
 
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, SimpleTestCase, TestCase
 from django.urls import reverse
 from requests_mock import Mocker
 
@@ -26,6 +26,7 @@ from authentik.sources.oauth.types.dingtalk import (
     DingTalkOAuth2Callback,
     DingTalkOAuth2Client,
     DingTalkType,
+    _redact_dingtalk_detail,
 )
 from authentik.sources.oauth.types.registry import registry
 from authentik.stages.prompt.stage import PLAN_CONTEXT_PROMPT
@@ -57,6 +58,54 @@ USER_DETAIL_RESPONSE = {
         "role_list": [{"id": 10, "name": "Admin"}],
     },
 }
+
+
+class TestDingTalkRedaction(SimpleTestCase):
+    """DingTalk log redaction helper tests."""
+
+    def test_redacts_sensitive_token_and_secret_fields(self):
+        detail = (
+            "access_token=SNAKE_ACCESS accessToken=CAMEL_ACCESS "
+            "refresh_token=SNAKE_REFRESH refreshToken=CAMEL_REFRESH "
+            "client_secret=SNAKE_CLIENT clientSecret=CAMEL_CLIENT "
+            "appsecret=LOWER_APP appSecret=CAMEL_APP "
+            "consumer_secret=SNAKE_CONSUMER consumerSecret=CAMEL_CONSUMER "
+            "x-acs-dingtalk-access-token=HEADER_ACCESS "
+            "xAcsDingtalkRefreshToken=HEADER_REFRESH "
+            "Authorization: Bearer AUTH_SECRET "
+            "https://api.example.invalid/path?accessToken=QUERY_ACCESS&"
+            "refreshToken=QUERY_REFRESH&corpId=CORP_ID"
+        )
+
+        redacted = _redact_dingtalk_detail(detail)
+
+        for secret in [
+            "SNAKE_ACCESS",
+            "CAMEL_ACCESS",
+            "SNAKE_REFRESH",
+            "CAMEL_REFRESH",
+            "SNAKE_CLIENT",
+            "CAMEL_CLIENT",
+            "LOWER_APP",
+            "CAMEL_APP",
+            "SNAKE_CONSUMER",
+            "CAMEL_CONSUMER",
+            "HEADER_ACCESS",
+            "HEADER_REFRESH",
+            "AUTH_SECRET",
+            "QUERY_ACCESS",
+            "QUERY_REFRESH",
+        ]:
+            self.assertNotIn(secret, redacted)
+        self.assertIn("accessToken=[redacted]", redacted)
+        self.assertIn("refreshToken=[redacted]", redacted)
+        self.assertIn("clientSecret=[redacted]", redacted)
+        self.assertIn("appSecret=[redacted]", redacted)
+        self.assertIn("consumerSecret=[redacted]", redacted)
+        self.assertIn("x-acs-dingtalk-access-token=[redacted]", redacted)
+        self.assertIn("xAcsDingtalkRefreshToken=[redacted]", redacted)
+        self.assertIn("Authorization: [redacted]", redacted)
+        self.assertIn("?accessToken=[redacted]&refreshToken=[redacted]&corpId=CORP_ID", redacted)
 
 
 class TestTypeDingTalk(TestCase):
