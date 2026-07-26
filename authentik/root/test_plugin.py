@@ -6,12 +6,55 @@ from typing import TextIO
 
 import pytest
 from cryptography.hazmat.backends.openssl.backend import backend
+from django.db import connection, models
 from pytest import Config, Item, TerminalReporter
 
 from authentik import authentik_full_version
 from tests.decorators import get_local_ip
 
 IS_CI = "CI" in environ
+
+
+def _ensure_model_table(model: type[models.Model]) -> None:
+    """Create an unmanaged model table when pytest's migrated test DB lacks it."""
+    if model._meta.db_table in connection.introspection.table_names():
+        return
+    with connection.schema_editor() as schema_editor:
+        schema_editor.create_model(model)
+
+
+def _ensure_unmanaged_system_tables() -> None:
+    from authentik.admin.models import VersionHistory
+
+    class InstallID(models.Model):
+        id = models.TextField(primary_key=True)
+
+        class Meta:
+            app_label = "authentik_root"
+            db_table = "authentik_install_id"
+            managed = False
+
+        def __str__(self) -> str:
+            return self.id
+
+    _ensure_model_table(InstallID)
+    _ensure_model_table(VersionHistory)
+
+    with connection.cursor() as cursor:
+        table_name = connection.ops.quote_name(InstallID._meta.db_table)
+        cursor.execute(f"SELECT COUNT(*) FROM {table_name};")  # noqa: S608
+        if cursor.fetchone()[0] == 0:
+            cursor.execute(
+                f"INSERT INTO {table_name} (id) VALUES (%s);",  # noqa: S608
+                ["test-install-id"],
+            )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def unmanaged_system_tables(django_db_setup, django_db_blocker):  # noqa: ARG001
+    """Add lifecycle-managed system tables to pytest-django test databases."""
+    with django_db_blocker.unblock():
+        _ensure_unmanaged_system_tables()
 
 
 @pytest.hookimpl(hookwrapper=True)

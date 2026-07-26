@@ -347,16 +347,23 @@ return False
         for action, user, create_connection in cases:
             with self.subTest(action=action):
                 UserOAuthSourceConnection.objects.filter(source=self.source).delete()
+                old_connection = None
+                connection_count = UserOAuthSourceConnection.objects.filter(
+                    source=self.source
+                ).count()
                 if create_connection:
-                    UserOAuthSourceConnection.objects.create(
-                        user=User.objects.create(
-                            username="auth-user",
-                            email="auth@example.com",
-                        ),
+                    old_user = User.objects.create(
+                        username="auth-user",
+                        email="auth@example.com",
+                    )
+                    old_connection = UserOAuthSourceConnection.objects.create(
+                        user=old_user,
                         source=self.source,
                         identifier=self.identifier,
                         access_token="OLD_ACCESS_TOKEN",
+                        refresh_token="OLD_REFRESH_TOKEN",
                     )
+                    connection_count += 1
                 request = self.request_factory.get("/", user=user)
                 flow_manager = OAuthSourceFlowManager(
                     self.source,
@@ -376,6 +383,19 @@ return False
                         access_token="NEW_ACCESS_TOKEN",
                     ).exists()
                 )
+                if old_connection is not None:
+                    old_connection.refresh_from_db()
+                    self.assertEqual(
+                        UserOAuthSourceConnection.objects.filter(
+                            source=self.source
+                        ).count(),
+                        connection_count,
+                    )
+                    self.assertEqual(old_connection.user_id, old_user.pk)
+                    self.assertEqual(old_connection.source_id, self.source.pk)
+                    self.assertEqual(old_connection.identifier, self.identifier)
+                    self.assertEqual(old_connection.access_token, "OLD_ACCESS_TOKEN")
+                    self.assertEqual(old_connection.refresh_token, "OLD_REFRESH_TOKEN")
                 if action == "link":
                     self.assertFalse(
                         UserOAuthSourceConnection.objects.filter(
