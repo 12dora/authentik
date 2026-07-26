@@ -29,6 +29,11 @@ DingTalk source or tenant must not be merged with another source or tenant
 unless a separate application-level integration explicitly handles that
 relationship.
 
+Run `ak reconcile_dingtalk --check` after upgrades and before enabling
+downstream mappings. Any reported missing DingTalk identity, open-ID-only
+connection, stale identifier, collision, or duplicate source identifier must be
+reconciled before relying on directory context for downstream authorization.
+
 ## Data Exposed To Downstream Applications
 
 Downstream applications should receive DingTalk organization data through

@@ -168,6 +168,14 @@ allowlist. Already-authenticated source linking must also be guarded so a
 disallowed DingTalk identity cannot create or update a
 `UserOAuthSourceConnection`.
 
+The allowlist API still returns two compatibility aliases for older callers:
+status responses include both `source_link_guard.enabled` and the legacy scalar
+`sourceLinkGuard`, and discovery-start responses include both
+`authorization_url` and `url`. Treat the snake-case object and
+`authorization_url` as canonical for new callers. Do not remove the aliases
+until external consumers have been inventoried, schema/client generation has
+been coordinated, and a deprecation window has elapsed.
+
 The source-link guard discovers the managed allowlist from flow-level bindings
 and from advanced stage-binding policies, so it stays aligned with both the
 panel/default path and manual earliest-stage deployments.
@@ -218,11 +226,27 @@ When the managed allowlist policy is bound to an `Application`, the policy:
 - re-checks the marker `corp_id` and department IDs against the current policy
   config instead of trusting a stored `allowed=True` flag.
 
-Managed policy bodies stored in the database are re-rendered automatically by
-the `authentik_sources_oauth` migration
-`0015_rerender_dingtalk_allowlist_policies` on upgrade, so the superuser bypass
-does not require re-saving the allowlist from the admin panel. Re-saving from
-the panel produces an equivalent policy.
+Managed policy bodies stored in the database are executable authorization text.
+Migration `0015_rerender_dingtalk_allowlist_policies` was a no-op in released
+trees and did not update already stored policy bodies. Current upgrades use the
+later forward reconciliation migration plus the audit command below to make the
+postcondition explicit:
+
+```bash
+ak reconcile_dingtalk --check
+```
+
+If the command reports policy drift after code changes that alter the generated
+policy body, apply the current renderer explicitly:
+
+```bash
+ak reconcile_dingtalk --apply-policies
+ak reconcile_dingtalk --check
+```
+
+Re-saving from the panel should produce an equivalent policy body, but it is not
+the upgrade mechanism and should not be the only evidence that a deployment was
+reconciled.
 
 Bind the managed policy only to applications that require DingTalk organization
 membership, such as the EasyAuth Portal application. Do not bind it globally to
@@ -233,12 +257,20 @@ the policy to every entry point for that resource.
 
 For the local EasyAuth deployment, the current runtime protection path is:
 
-- re-render the managed DingTalk allowlist policy after deploying code that
-  changes the generated policy body;
+- run `ak reconcile_dingtalk --check` after deploying code that changes the
+  generated policy body, and apply policy reconciliation if it reports drift;
 - bind that managed policy to the `EasyAuth Portal` `Application`;
 - remove obsolete OAuth source-level allowlist bindings so user settings and
   source listing views are not filtered by OAuth callback-only state;
 - keep authentication and enrollment flow bindings enabled for DingTalk login.
+
+Before claiming a local image is the code under review, confirm the image
+revision label matches the expected commit:
+
+```bash
+docker image inspect authentik-dingtalk:local \
+  --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+```
 
 Refresh-token behavior is intentionally not fail-closed on the browser session
 marker. OAuth2 refresh requests often arrive without the browser session, and

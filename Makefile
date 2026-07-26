@@ -321,7 +321,7 @@ docs-api-clean: ## Clean generated API documentation
 #########################
 
 docker:  ## Build a docker image of the current source tree
-	DOCKER_BUILDKIT=1 docker build . -f lifecycle/container/Dockerfile --progress plain --tag ${DOCKER_IMAGE}
+	DOCKER_BUILDKIT=1 docker build . -f lifecycle/container/Dockerfile --build-arg VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo local) --build-arg GIT_BUILD_HASH=$$(git rev-parse HEAD 2>/dev/null || echo unknown)$$(test -z "$$(git status --porcelain 2>/dev/null)" || echo -dirty) --progress plain --tag ${DOCKER_IMAGE}
 
 test-docker:
 	BUILD=true ${PWD}/scripts/test_docker.sh

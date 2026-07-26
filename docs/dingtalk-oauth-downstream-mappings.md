@@ -6,9 +6,9 @@ claims for downstream applications. Instead, expose only the DingTalk values a
 specific downstream application needs by assigning per-application OIDC
 `ScopeMapping` objects or SAML `SAMLPropertyMapping` objects.
 
-For the full project customization overview, including DingTalk login,
-localization, icon, OpenAPI permissions, and deployment notes, see
-`docs/jiefa-authentik-customizations.md`.
+For the DingTalk login allowlist, deployment, and downstream organization data
+contracts, see `docs/dingtalk-allowlist-runbook.md` and
+`docs/dingtalk-directory-org-service.md`.
 
 ## Implementation Phases
 
