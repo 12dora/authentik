@@ -5100,46 +5100,16 @@ msgid "State check failed."
 msgstr "状态校验失败。"
 
 #: authentik/sources/oauth/types/dingtalk.py
-msgid "DingTalk login failed: unable to determine your company. Sign in with DingTalk again."
-msgstr "钉钉登录失败：无法确定您的企业信息，请重新通过钉钉登录。"
+msgid "DingTalk access rules were updated. Sign in with DingTalk again."
+msgstr "钉钉访问规则已更新，请重新通过钉钉登录。"
 
 #: authentik/sources/oauth/types/dingtalk.py
-msgid "DingTalk login failed: the allowlist changed. Sign in with DingTalk again."
-msgstr "钉钉登录失败：当前白名单状态已更新，请重新通过钉钉登录。"
+msgid "You do not have permission to continue. Contact your administrator."
+msgstr "您没有继续操作的权限，请联系管理员。"
 
 #: authentik/sources/oauth/types/dingtalk.py
-msgid "DingTalk login failed: unable to verify your company. Contact your administrator."
-msgstr "钉钉登录失败：无法确认企业信息，请联系管理员。"
-
-#: authentik/sources/oauth/types/dingtalk.py
-msgid "DingTalk login failed: your company is not allowed. Contact your administrator."
-msgstr "钉钉登录失败：当前企业未被允许，请联系管理员。"
-
-#: authentik/sources/oauth/types/dingtalk.py
-msgid "DingTalk login failed: unable to verify your department. Contact your administrator."
-msgstr "钉钉登录失败：无法确认部门信息，请联系管理员。"
-
-#: authentik/sources/oauth/types/dingtalk.py
-msgid "DingTalk login failed: your department is not allowed. Contact your administrator."
-msgstr "钉钉登录失败：当前部门未被允许，请联系管理员。"
-
-#: authentik/sources/oauth/views/callback.py
-msgid "DingTalk login failed: the company allowlist is invalid. Contact your administrator."
-msgstr "钉钉登录失败：企业白名单配置异常，请联系管理员。"
-
-#: authentik/sources/oauth/views/callback.py
-msgid "DingTalk login failed: no company allowlist is configured. Contact your administrator."
-msgstr "钉钉登录失败：管理员尚未配置企业白名单，请联系管理员。"
-
-#: authentik/sources/oauth/views/callback.py
-msgid "DingTalk login failed: your company or department is not allowed. Contact your administrator."
-msgstr "钉钉登录失败：当前企业或部门未被允许，请联系管理员。"
-
-#: authentik/sources/oauth/views/callback.py
-msgid ""
-"DingTalk login failed: your DingTalk user information is temporarily unavailable. "
-"Try again later or contact your administrator."
-msgstr "钉钉登录失败：暂时无法获取您的钉钉用户信息，请稍后重试或联系管理员。"
+msgid "We are temporarily unable to verify your DingTalk access. Try again later."
+msgstr "暂时无法验证您的钉钉访问权限，请稍后重试。"
 
 #: authentik/sources/oauth/models.py
 msgid "DingTalk OAuth Source"

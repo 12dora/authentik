@@ -4,7 +4,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from json import dumps
-from re import sub
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -16,6 +15,7 @@ from structlog.stdlib import get_logger
 
 from authentik.sources.oauth.dingtalk.client import DingTalkDirectoryClient
 from authentik.sources.oauth.dingtalk.config import normalize_dingtalk_id_list
+from authentik.sources.oauth.dingtalk.redaction import redact_dingtalk_detail
 from authentik.sources.oauth.models import (
     DingTalkDirectoryDepartment,
     DingTalkDirectoryDepartmentStage,
@@ -98,15 +98,7 @@ def _sync_concurrency_lease():
 
 
 def _redacted_error_detail(exc: Exception) -> str:
-    message = str(exc)
-    message = sub(
-        r"(?i)(access_token|appsecret|consumer_secret|x-acs-dingtalk-access-token)"
-        r"([=:]\s*)[^&\s,;]+",
-        r"\1\2[redacted]",
-        message,
-    )
-    message = sub(r"(?i)(https?://[^?\s]+)\?[^\s]+", r"\1?[redacted]", message)
-    return message[:500] or "DingTalk directory sync failed."
+    return redact_dingtalk_detail(exc) or "DingTalk directory sync failed."
 
 
 def _bounded_error_params(params: dict[str, Any] | None) -> dict[str, Any]:

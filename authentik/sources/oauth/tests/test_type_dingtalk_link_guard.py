@@ -1,5 +1,7 @@
 """DingTalk source-link guard tests."""
 
+from urllib.parse import parse_qs, urlparse
+
 from django.test import TestCase
 from django.urls import reverse
 from requests_mock import Mocker
@@ -19,6 +21,8 @@ from authentik.sources.oauth.types.dingtalk import (
     DINGTALK_ALLOWLIST_PLAN_CONTEXT,
     DINGTALK_ALLOWLIST_SESSION_KEY,
     DINGTALK_APP_ACCESS_TOKEN_URL,
+    DINGTALK_DENY_NO_PERMISSION,
+    DINGTALK_DENY_TEMPORARILY_UNABLE,
     DINGTALK_GET_BY_UNION_ID_URL,
     DINGTALK_PROFILE_URL,
     DINGTALK_USER_DETAIL_URL,
@@ -71,7 +75,14 @@ class TestDingTalkSourceLinkGuard(TestCase):
             )
         )
         self.assertEqual(response.status_code, 302)
-        return self.client.session["oauth-client-DingTalk Test-request-state"]
+        session = self.client.session
+        session_key = "oauth-client-DingTalk Test-request-state"
+        if session_key in session:
+            return session[session_key]
+        state = parse_qs(urlparse(response.url).query)["state"][0]
+        session[session_key] = state
+        session.save()
+        return state
 
     def mock_dingtalk_callback(self, mocker, *, corp_id="CORP_FAKE", depts=None):
         """Mock DingTalk token/profile/directory endpoints."""
@@ -120,6 +131,19 @@ class TestDingTalkSourceLinkGuard(TestCase):
             {"authCode": "AUTH_CODE", "state": state},
         )
 
+    def assert_public_denial(self, response, expected_message: str):
+        content = response.content.decode()
+        self.assertIn(expected_message, content)
+        for precise in [
+            "company allowlist is invalid",
+            "no company allowlist is configured",
+            "company or department is not allowed",
+            "company is not allowed",
+            "department is not allowed",
+            "sign in through the required DingTalk source",
+        ]:
+            self.assertNotIn(precise, content)
+
     def test_authenticated_link_allows_matching_department(self):
         """Allowed corp and department creates a user source connection."""
         self.bind_allowlist([{"corp_id": "CORP_FAKE", "dept_ids": [10]}])
@@ -141,13 +165,17 @@ class TestDingTalkSourceLinkGuard(TestCase):
         self.bind_allowlist([{"corp_id": "CORP_ALLOWED", "allow_all": True}])
         state = self.start_login()
 
-        with Mocker() as mocker:
+        with Mocker() as mocker, self.assertLogs("managed-dingtalk", level="WARNING") as logs:
             self.mock_dingtalk_callback(mocker, corp_id="CORP_DENIED", depts=[10])
             response = self.callback(state)
 
         self.assertEqual(response.status_code, 200)
+        self.assert_public_denial(response, DINGTALK_DENY_NO_PERMISSION)
         self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())
         self.assertNotIn(DINGTALK_ALLOWLIST_SESSION_KEY, self.client.session)
+        log_output = "\n".join(logs.output)
+        self.assertIn("corp_not_allowed", log_output)
+        self.assertIn("no_permission", log_output)
 
     def test_authenticated_link_denies_rejected_department_before_save(self):
         """Rejected department does not create a user source connection."""
@@ -159,6 +187,7 @@ class TestDingTalkSourceLinkGuard(TestCase):
             response = self.callback(state)
 
         self.assertEqual(response.status_code, 200)
+        self.assert_public_denial(response, DINGTALK_DENY_NO_PERMISSION)
         self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())
 
     def test_user_settings_lists_dingtalk_source_when_source_allowlist_has_no_oauth_userinfo(self):
@@ -177,12 +206,16 @@ class TestDingTalkSourceLinkGuard(TestCase):
         )
         state = self.start_login()
 
-        with Mocker() as mocker:
+        with Mocker() as mocker, self.assertLogs("managed-dingtalk", level="WARNING") as logs:
             self.mock_dingtalk_callback(mocker, depts=[30])
             response = self.callback(state)
 
         self.assertEqual(response.status_code, 200)
+        self.assert_public_denial(response, DINGTALK_DENY_NO_PERMISSION)
         self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())
+        log_output = "\n".join(logs.output)
+        self.assertIn("department_not_allowed", log_output)
+        self.assertIn("no_permission", log_output)
 
     def test_authenticated_link_denies_when_allowlist_bound_to_authentication_flow(self):
         """Source-link guard finds the UI-managed policy on the authentication flow."""
@@ -421,6 +454,7 @@ class TestDingTalkSourceLinkGuard(TestCase):
             response = self.callback(state)
 
         self.assertEqual(response.status_code, 200)
+        self.assert_public_denial(response, DINGTALK_DENY_NO_PERMISSION)
         self.assertEqual(User.objects.count(), user_count)
         self.assertEqual(UserOAuthSourceConnection.objects.count(), connection_count)
 
@@ -446,8 +480,16 @@ class TestDingTalkSourceLinkGuard(TestCase):
             response = self.callback(state)
 
         self.assertEqual(response.status_code, 200)
+        self.assert_public_denial(response, DINGTALK_DENY_TEMPORARILY_UNABLE)
         self.assertEqual(User.objects.count(), user_count)
         self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())
+        self.assertTrue(
+            Event.objects.filter(
+                action=EventAction.CONFIGURATION_ERROR,
+                context__reason="missing_user_id",
+                context__public_category="temporarily_unable_to_verify",
+            ).exists()
+        )
 
     def test_unparseable_managed_allowlist_fails_closed(self):
         """B5: a managed allowlist whose config cannot be parsed denies login, not fail-open."""
@@ -474,11 +516,14 @@ class TestDingTalkSourceLinkGuard(TestCase):
             response = self.callback(state)
 
         self.assertEqual(response.status_code, 200)
+        self.assert_public_denial(response, DINGTALK_DENY_TEMPORARILY_UNABLE)
         self.assertFalse(UserOAuthSourceConnection.objects.filter(source=self.source).exists())
         self.assertTrue(
             Event.objects.filter(
                 action=EventAction.CONFIGURATION_ERROR,
-                context__message__icontains="No enabled DingTalk allowlist",
+                context__message="DingTalk allowlist denied access.",
+                context__reason="allowlist_missing",
+                context__public_category="temporarily_unable_to_verify",
             ).exists()
         )
 

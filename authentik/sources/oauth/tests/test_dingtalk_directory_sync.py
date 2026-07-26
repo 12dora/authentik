@@ -8,6 +8,7 @@ from django.test.utils import CaptureQueriesContext
 from django.utils.timezone import now
 from requests import HTTPError, Response
 from requests.exceptions import RequestException
+from structlog.testing import capture_logs
 
 from authentik.core.tests.utils import create_test_user
 from authentik.sources.oauth.dingtalk.selectors import get_dingtalk_org_context
@@ -18,6 +19,8 @@ from authentik.sources.oauth.dingtalk.sync import (
     DINGTALK_SYNC_ERROR_SOURCE_DISABLED,
     _publish_snapshot,
     _start_sync_run,
+    finalize_dingtalk_directory_sync_error,
+    queue_dingtalk_directory_sync,
     safe_dingtalk_sync_error,
     sync_dingtalk_directory,
 )
@@ -291,6 +294,56 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertNotIn("SECRET_TOKEN", detail)
         self.assertNotIn("access_token", detail)
 
+    def test_sync_error_log_redacts_dingtalk_secret_detail(self):
+        run_id, _enqueued = queue_dingtalk_directory_sync(self.source, "CORP")
+        exc = ValueError(
+            "provider prose "
+            "access_token=SNAKE_ACCESS accessToken=CAMEL_ACCESS "
+            "refresh_token=SNAKE_REFRESH refreshToken=CAMEL_REFRESH "
+            "client_secret=SNAKE_CLIENT clientSecret=CAMEL_CLIENT "
+            "appsecret=APP_SECRET consumerSecret=CONSUMER_SECRET "
+            "x-acs-dingtalk-access-token=HEADER_ACCESS "
+            "xAcsDingtalkRefreshToken=HEADER_REFRESH "
+            "Authorization: Bearer AUTH_SECRET "
+            "{'clientSecret': 'DICT_CLIENT', 'refreshToken': 'DICT_REFRESH'} "
+            "https://api.example.invalid/path?accessToken=QUERY_ACCESS&"
+            "refreshToken=QUERY_REFRESH&corpId=CORP"
+        )
+
+        with capture_logs() as logs:
+            finalized = finalize_dingtalk_directory_sync_error(
+                source=self.source,
+                corp_id="CORP",
+                run_id=run_id,
+                exc=exc,
+            )
+
+        self.assertTrue(finalized)
+        event = next(log for log in logs if log["event"] == "dingtalk_directory_sync_failed")
+        self.assertEqual(event["error_code"], DINGTALK_SYNC_ERROR_INVALID_RESPONSE)
+        self.assertEqual(event["corp_id"], "CORP")
+        self.assertEqual(event["run_id"], str(run_id))
+        self.assertTrue(event["error_correlation_id"])
+        self.assertIn("[redacted]", event["error_detail"])
+        for secret in (
+            "SNAKE_ACCESS",
+            "CAMEL_ACCESS",
+            "SNAKE_REFRESH",
+            "CAMEL_REFRESH",
+            "SNAKE_CLIENT",
+            "CAMEL_CLIENT",
+            "APP_SECRET",
+            "CONSUMER_SECRET",
+            "HEADER_ACCESS",
+            "HEADER_REFRESH",
+            "AUTH_SECRET",
+            "DICT_CLIENT",
+            "DICT_REFRESH",
+            "QUERY_ACCESS",
+            "QUERY_REFRESH",
+        ):
+            self.assertNotIn(secret, str(event))
+
     @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
     def test_empty_sync_soft_deletes_previously_cached_entries(self, client_cls):
         seen = now()
@@ -489,8 +542,6 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertFalse(DingTalkDirectoryDepartment.objects.filter(corp_id="CORP").exists())
 
     def test_queue_single_flight_reuses_active_run(self):
-        from authentik.sources.oauth.dingtalk.sync import queue_dingtalk_directory_sync
-
         first_run, first_enqueued = queue_dingtalk_directory_sync(self.source, "CORP")
         second_run, second_enqueued = queue_dingtalk_directory_sync(self.source, "CORP")
 
@@ -501,8 +552,6 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.QUEUED)
 
     def test_queued_run_marks_error_when_source_disabled_before_worker_starts(self):
-        from authentik.sources.oauth.dingtalk.sync import queue_dingtalk_directory_sync
-
         run_id, _enqueued = queue_dingtalk_directory_sync(self.source, "CORP")
         self.source.enabled = False
         self.source.save(update_fields=["enabled"])

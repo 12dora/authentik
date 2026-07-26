@@ -5,21 +5,27 @@ from urllib.parse import parse_qs, urlparse
 
 from django.test import RequestFactory, SimpleTestCase, TestCase
 from django.urls import reverse
+from django.utils.translation import gettext, override
 from requests_mock import Mocker
 
 from authentik.core.models import UserTypes
 from authentik.core.sources.stage import PLAN_CONTEXT_SOURCES_CONNECTION
 from authentik.core.tests.utils import create_test_admin_user, create_test_flow, create_test_user
+from authentik.flows.exceptions import FlowNonApplicableException
 from authentik.flows.views.executor import SESSION_KEY_PLAN
 from authentik.lib.generators import generate_id
 from authentik.lib.utils.reflection import all_subclasses
 from authentik.policies.expression.models import ExpressionPolicy
 from authentik.policies.models import PolicyBinding
+from authentik.policies.types import PolicyResult
 from authentik.sources.oauth.api.dingtalk_allowlist import render_dingtalk_allowlist_policy
 from authentik.sources.oauth.models import DingTalkOAuthSource, OAuthSource
 from authentik.sources.oauth.types.dingtalk import (
     DINGTALK_ACCESS_TOKEN_URL,
     DINGTALK_APP_ACCESS_TOKEN_URL,
+    DINGTALK_DENY_NO_PERMISSION,
+    DINGTALK_DENY_RULES_UPDATED,
+    DINGTALK_DENY_TEMPORARILY_UNABLE,
     DINGTALK_GET_BY_UNION_ID_URL,
     DINGTALK_PROFILE_URL,
     DINGTALK_USER_DETAIL_URL,
@@ -106,6 +112,38 @@ class TestDingTalkRedaction(SimpleTestCase):
         self.assertIn("xAcsDingtalkRefreshToken=[redacted]", redacted)
         self.assertIn("Authorization: [redacted]", redacted)
         self.assertIn("?accessToken=[redacted]&refreshToken=[redacted]&corpId=CORP_ID", redacted)
+
+
+class TestDingTalkDenialTranslations(SimpleTestCase):
+    """DingTalk public denial gettext tests."""
+
+    def test_zh_hans_translates_generic_public_denials(self):
+        with override("zh-Hans"):
+            self.assertEqual(
+                gettext(DINGTALK_DENY_RULES_UPDATED),
+                "钉钉访问规则已更新，请重新通过钉钉登录。",
+            )
+            self.assertEqual(
+                gettext(DINGTALK_DENY_NO_PERMISSION),
+                "您没有继续操作的权限，请联系管理员。",
+            )
+            self.assertEqual(
+                gettext(DINGTALK_DENY_TEMPORARILY_UNABLE),
+                "暂时无法验证您的钉钉访问权限，请稍后重试。",
+            )
+
+    def test_source_policy_denial_messages_are_concrete_translated_strings(self):
+        with override("zh-Hans"):
+            result = DingTalkType().oauth_source_policy_result(
+                Mock(),
+                PolicyResult(False, DINGTALK_DENY_NO_PERMISSION),
+            )
+
+            self.assertIsInstance(result.messages[0], str)
+            self.assertEqual(
+                FlowNonApplicableException(result).messages,
+                "您没有继续操作的权限，请联系管理员。",
+            )
 
 
 class TestTypeDingTalk(TestCase):

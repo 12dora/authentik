@@ -28,6 +28,7 @@ from authentik.sources.oauth.models import OAuthSource, UserOAuthSourceConnectio
 from authentik.sources.oauth.types.dingtalk import (
     DINGTALK_ACCESS_TOKEN_URL,
     DINGTALK_APP_ACCESS_TOKEN_URL,
+    DINGTALK_DENY_NO_PERMISSION,
     DINGTALK_DEPARTMENT_LIST_URL,
     DINGTALK_ORG_AUTH_INFO_URL,
     DINGTALK_PROFILE_URL,
@@ -123,19 +124,19 @@ class TestDingTalkAllowlistPolicyHelpers(TestCase):
         denied_corp = policy.passes(request)
 
         self.assertFalse(denied_corp.passing)
-        self.assertEqual(
-            denied_corp.messages,
-            ("DingTalk login failed: your company is not allowed. Contact your administrator.",),
-        )
+        self.assertEqual(denied_corp.messages, (DINGTALK_DENY_NO_PERMISSION,))
 
         request.context["oauth_userinfo"] = {"corpId": "CORP_ALLOWED", "dept_id_list": [30]}
         denied_dept = policy.passes(request)
 
         self.assertFalse(denied_dept.passing)
-        self.assertEqual(
-            denied_dept.messages,
-            ("DingTalk login failed: your department is not allowed. Contact your administrator.",),
-        )
+        self.assertEqual(denied_dept.messages, (DINGTALK_DENY_NO_PERMISSION,))
+        for precise in ["company is not allowed", "department is not allowed"]:
+            self.assertNotIn(precise, body)
+        self.assertIn("ak_logger.warning", body)
+        self.assertIn('"corp_not_allowed"', body)
+        self.assertIn('"department_not_allowed"', body)
+        self.assertIn('"no_permission"', body)
 
     def test_authorization_version_ignores_display_label(self):
         """Renaming a company does not invalidate otherwise-identical sessions."""

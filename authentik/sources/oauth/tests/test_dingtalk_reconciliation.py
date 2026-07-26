@@ -17,17 +17,13 @@ from authentik.policies.expression.models import ExpressionPolicy
 from authentik.sources.oauth.models import OAuthSource, UserOAuthSourceConnection
 from authentik.sources.oauth.types.dingtalk import (
     DINGTALK_ALLOWLIST_MARKER,
+    DINGTALK_DENY_NO_PERMISSION,
     render_dingtalk_allowlist_policy,
 )
 
 policy_migration = import_module(
-    "authentik.sources.oauth.migrations.0020_reconcile_dingtalk_allowlist_policies"
+    "authentik.sources.oauth.migrations.0023_reconcile_dingtalk_allowlist_denial_messages"
 )
-
-FAIL_CLOSED_MARKER_MESSAGE = (
-    'ak_message("DingTalk login failed: sign in through DingTalk before accessing this app.")'
-)
-
 
 def legacy_policy_body(source_slug: str | None = None, source_pk: str | None = None) -> str:
     """Return a marked but stale policy expression that keeps an old executable body."""
@@ -61,12 +57,14 @@ class TestDingTalkAllowlistPolicyReconciliation(TestCase):
         self.assertIn('# source_pk: "source-pk"', policy.expression)
         self.assertIn('"dept_ids":["10","20"]', policy.expression)
         self.assertNotIn("other means are not blocked", policy.expression)
-        self.assertIn(FAIL_CLOSED_MARKER_MESSAGE, policy.expression)
+        self.assertIn(DINGTALK_DENY_NO_PERMISSION, policy.expression)
+        self.assertIn('"missing_session_marker"', policy.expression)
         self.assertIn(
             'request.context.get("authentik/sources/oauth/dingtalk/allowlist")', policy.expression
         )
         self.assertIn("expected_source_pk = 'source-pk'", policy.expression)
         self.assertIn('marker.get("config_hash") == "', policy.expression)
+        self.assertNotIn("sign in through DingTalk before accessing this app", policy.expression)
 
     def test_forward_migration_is_idempotent_and_skips_unparseable_policy(self):
         current = ExpressionPolicy.objects.create(
@@ -146,7 +144,8 @@ class TestDingTalkAllowlistPolicyReconciliation(TestCase):
         self.assertEqual(data["policies"]["updated"][0]["pk"], str(policy.pk))
         policy.refresh_from_db()
         self.assertNotIn("other means are not blocked", policy.expression)
-        self.assertIn(FAIL_CLOSED_MARKER_MESSAGE, policy.expression)
+        self.assertIn(DINGTALK_DENY_NO_PERMISSION, policy.expression)
+        self.assertIn('"missing_session_marker"', policy.expression)
         self.assertIn("expected_source_pk = ''", policy.expression)
         self.assertNotIn("expected_source_pk = 'None'", policy.expression)
 

@@ -4,7 +4,6 @@ from copy import deepcopy
 from hashlib import sha256
 from http import HTTPStatus
 from json import dumps, loads
-from re import sub
 from secrets import token_urlsafe
 from time import sleep
 from typing import Any
@@ -36,6 +35,7 @@ from authentik.sources.oauth.dingtalk.config import (
     DINGTALK_MAX_DEPARTMENTS,
     normalize_dingtalk_id_list,
 )
+from authentik.sources.oauth.dingtalk.redaction import redact_dingtalk_detail
 from authentik.sources.oauth.models import OAuthSource
 from authentik.sources.oauth.types.registry import SourceType, registry
 from authentik.sources.oauth.views.callback import OAuthCallback
@@ -56,6 +56,15 @@ DINGTALK_ALLOWLIST_MARKER = "# authentik-managed-dingtalk-allowlist"
 DINGTALK_ALLOWLIST_SESSION_KEY = "authentik/sources/oauth/dingtalk/allowlist"
 DINGTALK_ALLOWLIST_PLAN_CONTEXT = "authentik/sources/oauth/dingtalk/allowlist/pending"
 DINGTALK_ALLOWLIST_STATE_SALT = "authentik.sources.oauth.dingtalk.allowlist"
+DINGTALK_DENY_RULES_UPDATED = (
+    "DingTalk access rules were updated. Sign in with DingTalk again."
+)
+DINGTALK_DENY_NO_PERMISSION = (
+    "You do not have permission to continue. Contact your administrator."
+)
+DINGTALK_DENY_TEMPORARILY_UNABLE = (
+    "We are temporarily unable to verify your DingTalk access. Try again later."
+)
 DINGTALK_INVALID_TOKEN_CODES = {40014, 42001}
 # DingTalk app tokens are valid for 7200s; refresh slightly early to avoid edge expiry.
 DINGTALK_APP_TOKEN_CACHE_TTL = 7000
@@ -105,30 +114,7 @@ def _legacy_error(data: dict[str, Any]) -> str:
 
 
 def _redact_dingtalk_detail(value: Any) -> str:
-    message = str(value)
-    message = sub(
-        r"(?i)(access_token|accessToken|refresh_token|refreshToken|id_token|idToken|"
-        r"appsecret|app_secret|appSecret|client_secret|clientSecret|consumer_secret|"
-        r"consumerSecret|x-acs-dingtalk-access-token|xAcsDingtalkAccessToken|"
-        r"x-acs-dingtalk-refresh-token|xAcsDingtalkRefreshToken)([=:]\s*)[^&\s,;]+",
-        r"\1\2[redacted]",
-        message,
-    )
-    message = sub(
-        r"(?i)(authorization[=:]\s*)(?:Bearer\s+)?[^&\s,;]+",
-        r"\1[redacted]",
-        message,
-    )
-    message = sub(
-        r"(?i)([?&](?:access_token|accessToken|refresh_token|refreshToken|id_token|"
-        r"idToken|appsecret|app_secret|appSecret|client_secret|clientSecret|"
-        r"consumer_secret|consumerSecret|x-acs-dingtalk-access-token|"
-        r"xAcsDingtalkAccessToken|x-acs-dingtalk-refresh-token|"
-        r"xAcsDingtalkRefreshToken|authorization)=)[^&\s]+",
-        r"\1[redacted]",
-        message,
-    )
-    return message[:500]
+    return redact_dingtalk_detail(value)
 
 
 def _normalize_id_list(value: Any) -> list[str]:
@@ -434,6 +420,32 @@ def finalize_dingtalk_allowlist_session(sender, request, user, stage_view, **kwa
     request.session.modified = True
 
 
+def _dingtalk_public_denial_message(category: str):
+    if category == "rules_updated":
+        return _(DINGTALK_DENY_RULES_UPDATED)
+    if category == "temporarily_unable_to_verify":
+        return _(DINGTALK_DENY_TEMPORARILY_UNABLE)
+    return _(DINGTALK_DENY_NO_PERMISSION)
+
+
+def _record_dingtalk_allowlist_denial(
+    manager,
+    reason: str,
+    category: str,
+    **metadata,
+) -> None:
+    Event.new(
+        EventAction.CONFIGURATION_ERROR
+        if category == "temporarily_unable_to_verify"
+        else EventAction.LOGIN_FAILED,
+        message="DingTalk allowlist denied access.",
+        reason=reason,
+        public_category=category,
+        source=manager.source,
+        **metadata,
+    ).from_http(manager.request)
+
+
 def render_dingtalk_allowlist_policy(
     config: dict[str, Any],
     source_slug: str | None = None,
@@ -464,16 +476,28 @@ if not isinstance(dept_values, (list, tuple, set)):
     dept_ids = []
 else:
     dept_ids = sorted({{str(item) for item in dept_values if item is not None}})
+def deny(public_message, reason, category):
+    ak_logger.warning(
+        "dingtalk_allowlist_denied",
+        reason=reason,
+        public_category=category,
+        source_slug=getattr(source, "slug", None),
+        corp_id=str(corp_id) if corp_id else "",
+        dept_ids=dept_ids,
+        request_object=request.obj.__class__.__name__ if request.obj else "",
+    )
+    ak_message(public_message)
+    return False
 if not corp_id:
     if userinfo and getattr(source, "provider_type", None) == "dingtalk":
         # A DingTalk source login attempt (userinfo present) that reached policy evaluation
         # without a company id must fail closed instead of silently allowing the login. The
         # ``userinfo`` guard keeps login-button rendering (no userinfo) unaffected.
-        ak_message(
-            "DingTalk login failed: unable to determine your company. "
-            "Sign in with DingTalk again."
+        return deny(
+            {DINGTALK_DENY_TEMPORARILY_UNABLE!r},
+            "missing_corp_id",
+            "temporarily_unable_to_verify",
         )
-        return False
     if request.obj.__class__.__name__ != "Application":
         # Another source passing through a shared flow: this allowlist does not apply.
         return True
@@ -481,23 +505,35 @@ if not corp_id:
         return True
     marker = request.context.get("{DINGTALK_ALLOWLIST_SESSION_KEY}") or {{}}
     if not marker:
-        ak_message("DingTalk login failed: sign in through DingTalk before accessing this app.")
-        return False
+        return deny(
+            {DINGTALK_DENY_NO_PERMISSION!r},
+            "missing_session_marker",
+            "no_permission",
+        )
     expected_source_pk = {source_pk_value!r}
     expected_source_slug = {source_slug!r}
     if expected_source_pk and str(marker.get("source_pk") or "") != expected_source_pk:
-        ak_message("DingTalk login failed: sign in through the required DingTalk source.")
-        return False
+        return deny(
+            {DINGTALK_DENY_NO_PERMISSION!r},
+            "source_pk_mismatch",
+            "no_permission",
+        )
     if expected_source_slug and marker.get("source_slug") != expected_source_slug:
-        ak_message("DingTalk login failed: sign in through the required DingTalk source.")
-        return False
+        return deny(
+            {DINGTALK_DENY_NO_PERMISSION!r},
+            "source_slug_mismatch",
+            "no_permission",
+        )
     marker_current = (
         marker.get("config_hash") == "{config_hash}"
         or marker.get("config_version") == {config_version!r}
     )
     if not marker_current:
-        ak_message("DingTalk login failed: the allowlist changed. Sign in with DingTalk again.")
-        return False
+        return deny(
+            {DINGTALK_DENY_RULES_UPDATED!r},
+            "config_version_mismatch",
+            "rules_updated",
+        )
     corp_id = marker.get("corp_id")
     dept_ids = marker.get("dept_ids") or []
     if not isinstance(dept_ids, (list, tuple, set)):
@@ -505,10 +541,11 @@ if not corp_id:
     else:
         dept_ids = sorted({{str(item) for item in dept_ids if item is not None}})
     if not corp_id:
-        ak_message(
-            "DingTalk login failed: your company is not allowed. Contact your administrator."
+        return deny(
+            {DINGTALK_DENY_TEMPORARILY_UNABLE!r},
+            "marker_missing_corp_id",
+            "temporarily_unable_to_verify",
         )
-        return False
 config = {config_python}
 corp_found = False
 for company in config.get("companies", []):
@@ -520,10 +557,16 @@ for company in config.get("companies", []):
     if set(dept_ids).intersection(company.get("dept_ids") or []):
         return True
 if not corp_found:
-    ak_message("DingTalk login failed: your company is not allowed. Contact your administrator.")
-    return False
-ak_message("DingTalk login failed: your department is not allowed. Contact your administrator.")
-return False
+    return deny(
+        {DINGTALK_DENY_NO_PERMISSION!r},
+        "corp_not_allowed",
+        "no_permission",
+    )
+return deny(
+    {DINGTALK_DENY_NO_PERMISSION!r},
+    "department_not_allowed",
+    "no_permission",
+)
 """
 
 
@@ -1146,38 +1189,25 @@ class DingTalkType(SourceType):
     urls_customizable = False
 
     def oauth_source_policy_result(self, manager, result: PolicyResult) -> PolicyResult:
-        return PolicyResult(False, *(_(message) for message in result.messages))
+        return PolicyResult(False, *(str(_(message)) for message in result.messages))
 
     def _source_link_denial(self, manager) -> str | None:
         """Return a deny message when the DingTalk allowlist rejects this login."""
         _binding, _policy, config = get_dingtalk_allowlist_binding(manager.source)
         if config is None:
             if dingtalk_allowlist_has_unparseable_binding(manager.source):
-                Event.new(
-                    EventAction.CONFIGURATION_ERROR,
-                    message=(
-                        "DingTalk allowlist policy exists but its config is unparseable; "
-                        "denying DingTalk source login until it is repaired."
-                    ),
-                    source=manager.source,
-                ).from_http(manager.request)
-                return _(
-                    "DingTalk login failed: the company allowlist is invalid. "
-                    "Contact your administrator."
+                _record_dingtalk_allowlist_denial(
+                    manager,
+                    reason="config_unparseable",
+                    category="temporarily_unable_to_verify",
                 )
-            Event.new(
-                EventAction.CONFIGURATION_ERROR,
-                message=(
-                    "No enabled DingTalk allowlist is configured for this source; "
-                    "denying the DingTalk login. Save an allowlist on the source's "
-                    "DingTalk Allowlist tab to permit sign-ins."
-                ),
-                source=manager.source,
-            ).from_http(manager.request)
-            return _(
-                "DingTalk login failed: no company allowlist is configured. "
-                "Contact your administrator."
+                return _dingtalk_public_denial_message("temporarily_unable_to_verify")
+            _record_dingtalk_allowlist_denial(
+                manager,
+                reason="allowlist_missing",
+                category="temporarily_unable_to_verify",
             )
+            return _dingtalk_public_denial_message("temporarily_unable_to_verify")
         userinfo = manager.policy_context.get("oauth_userinfo") or {}
         marker = build_dingtalk_allowlist_session_marker(
             config,
@@ -1187,10 +1217,16 @@ class DingTalkType(SourceType):
         )
         if not marker:
             manager.policy_context.pop(DINGTALK_ALLOWLIST_PLAN_CONTEXT, None)
-            return _(
-                "DingTalk login failed: your company or department is not allowed. "
-                "Contact your administrator."
+            _record_dingtalk_allowlist_denial(
+                manager,
+                reason="corp_or_department_not_allowed",
+                category="no_permission",
+                corp_id=str(userinfo.get("corpId") or userinfo.get("corp_id") or ""),
+                dept_ids=_normalize_id_list(
+                    userinfo.get("dept_id_list") or userinfo.get("deptIdList") or []
+                ),
             )
+            return _dingtalk_public_denial_message("no_permission")
         manager.policy_context[DINGTALK_ALLOWLIST_PLAN_CONTEXT] = marker
         return None
 
@@ -1233,13 +1269,13 @@ class DingTalkType(SourceType):
         userinfo = manager.policy_context.get("oauth_userinfo") or {}
         if userinfo.get("userid") or userinfo.get("userId"):
             return None
+        _record_dingtalk_allowlist_denial(
+            manager,
+            reason="missing_user_id",
+            category="temporarily_unable_to_verify",
+        )
         return manager.error_handler(
-            Exception(
-                _(
-                    "DingTalk login failed: your DingTalk user information is temporarily "
-                    "unavailable. Try again later or contact your administrator."
-                )
-            )
+            Exception(_dingtalk_public_denial_message("temporarily_unable_to_verify"))
         )
 
     def get_base_user_properties(
