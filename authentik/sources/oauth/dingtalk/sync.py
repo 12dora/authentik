@@ -46,6 +46,22 @@ DINGTALK_SYNC_ERROR_UNSUPPORTED_SOURCE = "dingtalk_directory_unsupported_source"
 DINGTALK_SYNC_ERROR_USER_LIMIT = "dingtalk_directory_user_limit"
 DINGTALK_SYNC_ERROR_USER_DETAIL_FAILED = "dingtalk_directory_user_detail_failed"
 DINGTALK_SYNC_ERROR_UNKNOWN = "dingtalk_directory_sync_failed"
+DINGTALK_SYNC_ERROR_CODES = frozenset(
+    {
+        DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE,
+        DINGTALK_SYNC_ERROR_CONCURRENCY_LIMIT,
+        DINGTALK_SYNC_ERROR_HTTP_REQUEST_FAILED,
+        DINGTALK_SYNC_ERROR_INVALID_RESPONSE,
+        DINGTALK_SYNC_ERROR_PAYLOAD_LIMIT,
+        DINGTALK_SYNC_ERROR_RUN_STALE,
+        DINGTALK_SYNC_ERROR_SOURCE_DISABLED,
+        DINGTALK_SYNC_ERROR_SOURCE_UNAVAILABLE,
+        DINGTALK_SYNC_ERROR_UNSUPPORTED_SOURCE,
+        DINGTALK_SYNC_ERROR_USER_LIMIT,
+        DINGTALK_SYNC_ERROR_USER_DETAIL_FAILED,
+        DINGTALK_SYNC_ERROR_UNKNOWN,
+    }
+)
 DINGTALK_SYNC_ERROR_MAX_PARAMS = 10
 
 
@@ -152,6 +168,9 @@ def finalize_dingtalk_directory_sync_error(
         error_code, classified_params = classify_dingtalk_sync_error(exc)
         error_params = {**classified_params, **(error_params or {})}
     error_code = error_code or DINGTALK_SYNC_ERROR_UNKNOWN
+    if error_code not in DINGTALK_SYNC_ERROR_CODES:
+        error_code = DINGTALK_SYNC_ERROR_UNKNOWN
+        error_params = {"legacy_error": "redacted", **(error_params or {})}
     error_params = _bounded_error_params(error_params)
     correlation_id = uuid4()
     lookup = {"corp_id": str(corp_id), "active_run_id": parsed_run_id}

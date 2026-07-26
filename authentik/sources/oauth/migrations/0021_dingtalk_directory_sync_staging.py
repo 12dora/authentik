@@ -35,7 +35,7 @@ class Migration(migrations.Migration):
                 "indexes": [
                     models.Index(
                         fields=["source", "corp_id", "run_id"],
-                        name="authentik_s_source__d7d16d_idx",
+                        name="authentik_s_source__567bac_idx",
                     ),
                 ],
                 "unique_together": {("source", "corp_id", "run_id", "dept_id")},
@@ -77,7 +77,7 @@ class Migration(migrations.Migration):
                 "indexes": [
                     models.Index(
                         fields=["source", "corp_id", "run_id"],
-                        name="authentik_s_source__ecf160_idx",
+                        name="authentik_s_source__98729b_idx",
                     ),
                 ],
                 "unique_together": {("source", "corp_id", "run_id", "user_id")},

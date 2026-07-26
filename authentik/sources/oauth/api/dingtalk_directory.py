@@ -22,6 +22,8 @@ from authentik.sources.oauth.dingtalk.selectors import (
 )
 from authentik.sources.oauth.dingtalk.sync import (
     DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE,
+    DINGTALK_SYNC_ERROR_CODES,
+    DINGTALK_SYNC_ERROR_UNKNOWN,
     finalize_dingtalk_directory_sync_error,
     queue_dingtalk_directory_sync,
 )
@@ -104,6 +106,9 @@ class CanViewDingTalkDirectoryUser(CanViewDingTalkDirectory):
 
 class DingTalkDirectorySyncStatusSerializer(serializers.ModelSerializer):
     status = serializers.ChoiceField(choices=DingTalkDirectorySyncStatusChoices.choices)
+    error = serializers.SerializerMethodField()
+    error_code = serializers.SerializerMethodField()
+    error_params = serializers.SerializerMethodField()
     counters = serializers.DictField()
 
     class Meta:
@@ -122,6 +127,25 @@ class DingTalkDirectorySyncStatusSerializer(serializers.ModelSerializer):
             "error_correlation_id",
             "counters",
         ]
+
+    def get_error(self, obj: DingTalkDirectorySyncStatus) -> str:
+        return self.get_error_code(obj)
+
+    def get_error_code(self, obj: DingTalkDirectorySyncStatus) -> str:
+        if obj.error_code in DINGTALK_SYNC_ERROR_CODES:
+            return obj.error_code
+        if obj.status == DingTalkDirectorySyncStatusChoices.ERROR and obj.error:
+            if obj.error in DINGTALK_SYNC_ERROR_CODES:
+                return obj.error
+            return DINGTALK_SYNC_ERROR_UNKNOWN
+        return ""
+
+    def get_error_params(self, obj: DingTalkDirectorySyncStatus) -> dict[str, str]:
+        if obj.error_code in DINGTALK_SYNC_ERROR_CODES:
+            return obj.error_params if isinstance(obj.error_params, dict) else {}
+        if obj.status == DingTalkDirectorySyncStatusChoices.ERROR and obj.error:
+            return {"legacy_error": "redacted"}
+        return {}
 
 
 class DingTalkDirectoryStatusSerializer(serializers.Serializer):

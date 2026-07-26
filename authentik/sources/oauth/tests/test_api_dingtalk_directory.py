@@ -7,7 +7,11 @@ from django.utils.timezone import now
 from rest_framework.test import APIClient, APITestCase
 
 from authentik.core.tests.utils import create_test_admin_user, create_test_user
-from authentik.sources.oauth.dingtalk.sync import DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE
+from authentik.sources.oauth.dingtalk.sync import (
+    DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE,
+    DINGTALK_SYNC_ERROR_HTTP_REQUEST_FAILED,
+    DINGTALK_SYNC_ERROR_UNKNOWN,
+)
 from authentik.sources.oauth.models import (
     DingTalkDirectoryDepartment,
     DingTalkDirectorySyncStatus,
@@ -92,6 +96,28 @@ class TestDingTalkDirectoryAPI(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["sync"][0]["generation"], 9)
+
+    def test_status_hides_legacy_raw_error_text(self):
+        DingTalkDirectorySyncStatus.objects.create(
+            source=self.source,
+            corp_id="CORP",
+            status=DingTalkDirectorySyncStatusChoices.ERROR,
+            error=f"{DINGTALK_SYNC_ERROR_HTTP_REQUEST_FAILED} access_token=SECRET_TOKEN",
+            finished_at=now(),
+        )
+        self.authenticate(create_test_admin_user())
+
+        response = self.client.get(
+            reverse("authentik_api:dingtalk-directory-status", kwargs={"source_slug": "dingtalk"})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        sync = response.json()["sync"][0]
+        self.assertEqual(sync["error"], DINGTALK_SYNC_ERROR_UNKNOWN)
+        self.assertEqual(sync["error_code"], DINGTALK_SYNC_ERROR_UNKNOWN)
+        self.assertEqual(sync["error_params"], {"legacy_error": "redacted"})
+        self.assertNotIn("SECRET_TOKEN", response.content.decode())
+        self.assertNotIn("access_token", response.content.decode())
 
     def test_status_reports_view_only_user_cannot_change(self):
         user = create_test_user("directory-status-viewer")
