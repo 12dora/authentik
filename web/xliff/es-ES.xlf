@@ -11205,6 +11205,465 @@ Las vinculaciones a grupos/usuarios se verifican en función del usuario del eve
 <trans-unit id="common.actions.retry">
   <source>Retry</source>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.departments.label">
+  <source>Last department fetch</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.not-run">
+  <source>Not run</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.source-link.label">
+  <source>Source-link guard</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.unknown">
+  <source>Unknown</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.failed">
+  <source>DingTalk discovery failed.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.missing-corp-id">
+  <source>DingTalk discovery did not return a company ID.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.success">
+  <source>Discovered DingTalk company <x id="0" equiv-text="${result.corpId}"/>. Select the departments allowed to sign in, or enable full-company access.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.endpoint-unavailable">
+  <source>Discovery status endpoint unavailable</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.refresh-failed">
+  <source>Some DingTalk status checks failed. See the details below.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.good.ok">
+  <source>OK</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.source-link.good">
+  <source>Installed or disabled</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.source-link.review">
+  <source>Needs review</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.validation.department-id-invalid">
+  <source><x id="0" equiv-text="${result.invalidDepartmentId}"/> is not a valid DingTalk department ID.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.popup-blocked">
+  <source>The DingTalk discovery popup was blocked. Allow popups for this site and try again.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.good.loaded">
+  <source>Loaded</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.loaded">
+  <source><x id="0" equiv-text="${departments.length}"/> departments loaded for <x id="1" equiv-text="${corpId}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.picker.headline">
+  <source>Allowed departments for <x id="0" equiv-text="${company.label || company.corpId}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.policy.unmanaged-existing-policy">
+  <source>A policy with the managed DingTalk allowlist name exists but does not contain the managed marker.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.binding.auth.label">
+  <source>Authentication flow binding</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.binding.enrollment.label">
+  <source>Enrollment flow binding</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.save.partial">
+  <source>DingTalk allowlist saved with binding warnings.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.save.success">
+  <source>DingTalk allowlist saved and applied.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.binding.flow-not-configured">
+  <source>Flow is not configured on this source.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.unauthorized-corp">
+  <source>DingTalk departments can only be loaded for a company authorized by this DingTalk application. Edit the company label manually, or bind/authorize this company in the DingTalk developer console before loading departments.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.unknown-error">
+  <source>An unknown error occurred.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.source-enabled">
+  <source>Source enabled</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.good.enabled">
+  <source>Enabled</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.policy-exists">
+  <source>Managed policy exists</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.good.present">
+  <source>Present</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.expression-validates">
+  <source>Expression validates</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.good.valid">
+  <source>Valid</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.auth-binding">
+  <source>Authentication flow binding</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.good.bound">
+  <source>Bound</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.no-flow">
+  <source>No flow configured</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.enrollment-binding">
+  <source>Enrollment flow binding</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.no-enrollment-flow">
+  <source>No flow configured</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.company.corp-id">
+  <source>Company corpId</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.company.label">
+  <source>Label</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.company.add">
+  <source>Add company</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.empty.title">
+  <source>No DingTalk companies configured</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.empty.body">
+  <source>Discover a company or add one manually to build the allowlist.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.table.company">
+  <source>Company</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.table.mode">
+  <source>Mode</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.table.departments">
+  <source>Department IDs</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.table.actions">
+  <source>Actions</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.company.label.aria-label">
+  <source>Company label</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.company.allow-all">
+  <source>Allow full company</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.company.allow-all.warning">
+  <source>Grants sign-in access to everyone in this company. Restrict to departments unless org-wide access is intended.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.company.departments-ignored">
+  <source>Ignored while full company is allowed</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.company.departments-required.warning">
+  <source>Restricted mode needs at least one department. Add a department or enable full company access before saving.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.input.aria-label">
+  <source>Allowed department IDs for <x id="0" equiv-text="${company.label || company.corpId}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.placeholder">
+  <source>IDs separated by commas or spaces</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.add">
+  <source>Add departments</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.select">
+  <source>Select departments…</source>
+</trans-unit>
+<trans-unit id="common.actions.remove">
+  <source>Remove</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.last">
+  <source>Last discovery: <x id="0" equiv-text="${this.lastDiscovery.corpId}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.user-id">
+  <source>User ID <x id="0" equiv-text="${this.lastDiscovery.userId}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.unsaved.title">
+  <source>You have unsaved allowlist changes. Use Save and apply to persist them.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.fail-closed.unconfigured">
+  <source>No allowlist is configured. All DingTalk logins are denied until an allowlist is saved and applied.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.detected.title">
+  <source>Companies detected on a shared flow</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.detected.body">
+  <source>These companies come from another DingTalk source that shares this flow. They are not part of this source's allowlist and will not be saved unless you adopt them.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.detected.adopt">
+  <source>Adopt detected companies</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.partial-failures.title">
+  <source>Some DingTalk status checks failed.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.remove.success">
+  <source>DingTalk allowlist policy and bindings removed.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.remove.error">
+  <source>Failed to remove the DingTalk allowlist policy.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.remove.action">
+  <source>Remove allowlist</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.remove.header">
+  <source>Remove DingTalk allowlist</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.remove.body">
+  <source>This deletes the managed allowlist policy and all of its flow bindings. All DingTalk logins will then be denied until a new allowlist is saved and applied.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.title">
+  <source>DingTalk Allowlist</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.start">
+  <source>Discover company</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.save.apply">
+  <source>Save and apply</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.refresh">
+  <source>Refresh status</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.status.loading">
+  <source>Loading DingTalk allowlist status…</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.validation.company-required">
+  <source>Add at least one DingTalk company.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.validation.corp-id-required">
+  <source>Company corpId is required.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.validation.duplicate-corp-id">
+  <source>Duplicate company corpId: <x id="0" equiv-text="${corpId}"/>.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.validation.departments-required">
+  <source>Company <x id="0" equiv-text="${corpId}"/> must allow all users or include at least one department.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.picker.selected-count">
+  <source>Selected department IDs: <x id="0" equiv-text="${selectedCount}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.picker.apply">
+  <source>Apply selection</source>
+</trans-unit>
+<trans-unit id="common.actions.cancel">
+  <source>Cancel</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.page.prev">
+  <source>Previous</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.page.range">
+  <source>Showing <x id="0" equiv-text="${pageWindow.start + 1}"/>–<x id="1" equiv-text="${pageWindow.end}"/> of <x id="2" equiv-text="${pageWindow.total}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.page.next">
+  <source>Next</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.picker.empty">
+  <source>No departments were loaded for this company.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.filter.aria-label">
+  <source>Filter departments by ID or name</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.filter.placeholder">
+  <source>Filter departments</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.select-all">
+  <source>Select all</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.invert">
+  <source>Invert selection</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.department.allowed">
+  <source>Allowed</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.department.id">
+  <source>Department ID</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.department.name">
+  <source>Name</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.department.parent-id">
+  <source>Parent ID</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.filter.empty">
+  <source>No departments match the filter.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.department.checkbox.aria-label">
+  <source>Allow <x id="0" equiv-text="${row.department.name}"/> (<x id="1" equiv-text="${row.department.deptId}"/>)</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.error.load">
+  <source>Failed to load DingTalk directory status.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.poll.paused">
+  <source>DingTalk directory sync is still running, so automatic refresh paused. Use Refresh to check again.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync.corp-id-required">
+  <source>Corp ID is required to queue a DingTalk directory sync.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync.queued">
+  <source>Queued DingTalk directory sync for <x id="0" equiv-text="${response.corpId}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync.not-queued">
+  <source>This corp's directory sync is already running or was not queued.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync.completed">
+  <source>DingTalk directory sync completed for <x id="0" equiv-text="${event.corpId}"/>.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync.warning">
+  <source>DingTalk directory sync completed with warnings for <x id="0" equiv-text="${event.corpId}"/>.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync.failed">
+  <source>DingTalk directory sync failed for <x id="0" equiv-text="${event.corpId}"/>: <x id="1" equiv-text="${event.detail}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.status.success">
+  <source>Success</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.status.error">
+  <source>Error</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.status.running">
+  <source>Running</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.status.unknown">
+  <source>Unknown</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.departments">
+  <source>Departments</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.users">
+  <source>Users</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.warnings">
+  <source>Warnings</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.empty">
+  <source>-</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.nested-omitted">
+  <source>Nested details omitted</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.more-omitted">
+  <source><x id="0" equiv-text="${value.length - visibleItems.length}"/> more omitted</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.summary.loading">
+  <source>Loading DingTalk directory status.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.summary.unavailable">
+  <source>DingTalk directory status is unavailable.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.summary.total.label">
+  <source>Corp sync records</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.summary.success.label">
+  <source>Successful</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.summary.error.label">
+  <source>Failed</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.summary.running.label">
+  <source>Running</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.summary.unknown.label">
+  <source>Unknown</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.summary.stale">
+  <source>Previous directory status is shown because refresh failed.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.summary.poll-paused">
+  <source>Automatic refresh paused while the sync is still running.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.summary.last-refreshed">
+  <source>Last refreshed</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.refresh">
+  <source>Refresh</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.corp-id">
+  <source>Corp ID</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-now">
+  <source>Sync now</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.running-disabled">
+  <source>Cannot delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/> while sync is running</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.aria-label">
+  <source>Delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete">
+  <source>Delete</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.success">
+  <source>Deleted DingTalk directory sync record for <x id="0" equiv-text="${status.corpId}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.error">
+  <source>Failed to delete DingTalk directory data.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.header">
+  <source>Delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.body">
+  <source>This deletes the sync record and all cached departments and users for <x id="0" equiv-text="${status.corpId}"/>. Lookups that rely on the cached directory will return no data until the next sync completes.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.error.retry">
+  <source>Use Refresh to try again.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.empty.title">
+  <source>No DingTalk directory sync status yet.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.empty.body">
+  <source>Enter a corp ID and start a manual sync to populate directory status.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.table.caption">
+  <source>DingTalk directory sync status by corp</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.table.corp-id">
+  <source>Corp ID</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.table.status">
+  <source>Status</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.table.started">
+  <source>Started</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.table.finished">
+  <source>Finished</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.table.counters">
+  <source>Counters</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.table.error">
+  <source>Error</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.table.actions">
+  <source>Actions</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.error.empty">
+  <source>-</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.title">
+  <source>DingTalk directory sync</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.schedules.title">
+  <source>Schedules</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.tab">
+  <source>DingTalk Allowlist</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.tab">
+  <source>DingTalk Directory</source>
+</trans-unit>
+<trans-unit id="scc2e420c54dc8089">
+  <source>Bind existing stage</source>
+</trans-unit>
+<trans-unit id="s5386dae4609f411c">
+  <source>Allow Show Password</source>
+</trans-unit>
+<trans-unit id="s01167737884b54a2">
+  <source>unread</source>
+</trans-unit>
+<trans-unit id="s49e763aed00877a8">
+  <source>Main</source>
+</trans-unit>
+<trans-unit id="flow.identification.email-or-username">
+  <source>Email or username</source>
+</trans-unit>
 </body>
 </file>
 </xliff>

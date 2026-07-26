@@ -3,6 +3,8 @@ import "weakmap-polyfill";
 import "core-js/actual/object/assign";
 import "@webcomponents/template";
 
+import { fallbackMessageForLanguage, type FallbackMessageKey } from "./fallbackLocale.ts";
+
 import {
     type AccessDeniedChallenge,
     type AuthenticatorValidationChallenge,
@@ -188,78 +190,16 @@ const IS_INVALID = "is-invalid";
 // fallback table instead. `{0}`, `{1}`, ... placeholders are substituted with the
 // positional arguments passed to `fallbackMessage`. The `default` (English) values
 // must stay byte-for-byte identical to the previously hardcoded strings so that
-// non-zh users see no change; the `zh` values mirror authentik's own catalog.
-const FALLBACK_MESSAGES = {
-    identifier: {
-        default: "Email / Username",
-        zh: "邮箱或用户名",
-    },
-    password: {
-        default: "Password",
-        zh: "密码",
-    },
-    loading: {
-        default: "Loading...",
-        zh: "加载中...",
-    },
-    continue: {
-        default: "Continue",
-        zh: "继续",
-    },
-    loginPrelude: {
-        default: "Log in to continue to {0}.",
-        zh: "登录以继续访问 {0}。",
-    },
-    welcome: {
-        default: "Welcome, {0}.",
-        zh: "欢迎，{0}。",
-    },
-    selectAuthMethod: {
-        default: "Select an authentication method.",
-        zh: "选择身份验证方法。",
-    },
-    noCompatibleAuthMethod: {
-        default: "No compatible authentication method available",
-        zh: "没有可用的兼容身份验证方法",
-    },
-    recoveryKeys: {
-        default: "Recovery keys",
-        zh: "恢复密钥",
-    },
-    traditionalAuthenticator: {
-        default: "Traditional authenticator",
-        zh: "传统身份验证器",
-    },
-    securityKey: {
-        default: "Security key",
-        zh: "安全密钥",
-    },
-    enterCode: {
-        default: "Please enter your code",
-        zh: "请输入您的代码",
-    },
-    accessDenied: {
-        default: "Access denied.",
-        zh: "访问被拒绝。",
-    },
-    unsupportedStage: {
-        default: "Unsupported stage: {0}",
-        zh: "不支持的阶段：{0}",
-    },
-};
-
-function fallbackMessage(key: keyof typeof FALLBACK_MESSAGES, ...args: string[]): string {
+// non-zh and Traditional Chinese users see no change; the `zhHans` values mirror authentik's
+// Simplified Chinese catalog.
+function fallbackMessage(key: FallbackMessageKey, ...args: string[]): string {
     const language = (
         window.navigator.languages?.[0] ||
         window.navigator.language ||
         ""
     ).toLowerCase();
 
-    const template = language.startsWith("zh")
-        ? FALLBACK_MESSAGES[key].zh
-        : FALLBACK_MESSAGES[key].default;
-
-    return template.replace(/\{(\d+)\}/g, (_match, index: string) => args[Number(index)] ?? "");
+    return fallbackMessageForLanguage(language, key, ...args);
 }
 
 class IdentificationStage extends Stage<IdentificationChallenge> {

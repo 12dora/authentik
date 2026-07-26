@@ -11876,8 +11876,8 @@ Bindings to groups/users are checked against the user of the event.</source>
   <target>未能为该企业加载到任何部门。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.departments.loaded">
-  <source><x id="0" equiv-text="${response.departments.length}"/> departments loaded for <x id="1" equiv-text="${corpId}"/></source>
-  <target>已为 <x id="1" equiv-text="${corpId}"/> 加载 <x id="0" equiv-text="${response.departments.length}"/> 个部门</target>
+  <source><x id="0" equiv-text="${departments.length}"/> departments loaded for <x id="1" equiv-text="${corpId}"/></source>
+  <target>已为 <x id="1" equiv-text="${corpId}"/> 加载 <x id="0" equiv-text="${departments.length}"/> 个部门</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.departments.placeholder">
   <source>IDs separated by commas or spaces</source>
@@ -11898,10 +11898,6 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-allowlist.discovery.last">
   <source>Last discovery: <x id="0" equiv-text="${this.lastDiscovery.corpId}"/></source>
   <target>上次发现：<x id="0" equiv-text="${this.lastDiscovery.corpId}"/></target>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.missing-start-url">
-  <source>DingTalk discovery did not return a start URL.</source>
-  <target>钉钉发现未返回启动 URL。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.discovery.failed">
   <source>DingTalk discovery failed.</source>
@@ -12020,7 +12016,7 @@ Bindings to groups/users are checked against the user of the event.</source>
   <target>表达式校验通过</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.status.no-enrollment-flow">
-  <source>No enrollment flow configured</source>
+  <source>No flow configured</source>
   <target>未配置注册流程</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.status.no-flow">
@@ -12046,10 +12042,6 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-allowlist.status.refresh-failed">
   <source>Some DingTalk status checks failed. See the details below.</source>
   <target>部分钉钉状态检查失败。请查看下方详情。</target>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.status.single-visible-entry">
-  <source>One visible DingTalk login entry is expected</source>
-  <target>应只有一个可见的钉钉登录入口</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.status.good.bound">
   <source>Bound</source>
@@ -12140,8 +12132,8 @@ Bindings to groups/users are checked against the user of the event.</source>
   <target>需要 Corp ID 才能将钉钉目录同步加入队列。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.sync.queued">
-  <source>Queued DingTalk directory sync for <x id="0" equiv-text="${response.corp_id}"/></source>
-  <target>已将 <x id="0" equiv-text="${response.corp_id}"/> 的钉钉目录同步加入队列</target>
+  <source>Queued DingTalk directory sync for <x id="0" equiv-text="${response.corpId}"/></source>
+  <target>已将 <x id="0" equiv-text="${response.corpId}"/> 的钉钉目录同步加入队列</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.sync.not-queued">
   <source>This corp's directory sync is already running or was not queued.</source>
@@ -12163,10 +12155,6 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>Unknown</source>
   <target>未知</target>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.timestamp.empty">
-  <source>-</source>
-  <target>-</target>
-</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.counters.empty">
   <source>-</source>
   <target>-</target>
@@ -12182,26 +12170,6 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-directory.counters.warnings">
   <source>Warnings</source>
   <target>警告</target>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.summary.total">
-  <source><x id="0" equiv-text="${summary.total}"/> corp sync records</source>
-  <target><x id="0" equiv-text="${summary.total}"/> 条企业同步记录</target>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.summary.success">
-  <source><x id="0" equiv-text="${summary.success}"/> successful</source>
-  <target><x id="0" equiv-text="${summary.success}"/> 条成功</target>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.summary.error">
-  <source><x id="0" equiv-text="${summary.error}"/> failed</source>
-  <target><x id="0" equiv-text="${summary.error}"/> 条失败</target>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.summary.running">
-  <source><x id="0" equiv-text="${summary.running}"/> running</source>
-  <target><x id="0" equiv-text="${summary.running}"/> 条运行中</target>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.summary.unknown">
-  <source><x id="0" equiv-text="${summary.unknown}"/> unknown</source>
-  <target><x id="0" equiv-text="${summary.unknown}"/> 条未知</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.summary.total.label">
   <source>Corp sync records</source>
@@ -12288,8 +12256,8 @@ Bindings to groups/users are checked against the user of the event.</source>
   <target>删除钉钉目录数据失败。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.delete.header">
-  <source>Delete DingTalk directory data</source>
-  <target>删除钉钉目录数据</target>
+  <source>Delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/></source>
+  <target>删除 <x id="0" equiv-text="${status.corpId}"/> 的钉钉目录数据</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.delete.body">
   <source>This deletes the sync record and all cached departments and users for <x id="0" equiv-text="${status.corpId}"/>. Lookups that rely on the cached directory will return no data until the next sync completes.</source>
@@ -12306,10 +12274,6 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-directory.title">
   <source>DingTalk directory sync</source>
   <target>钉钉目录同步</target>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.docs">
-  <source>Open DingTalk source documentation</source>
-  <target>打开钉钉源文档</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.schedules.title">
   <source>Schedules</source>
@@ -12398,16 +12362,19 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="captcha.public-key.description">
   <source>The public key is used by authentik to render the CAPTCHA widget.</source>
   <target>公钥由 authentik 用于渲染 CAPTCHA 小部件。</target>
+  <note from="lit-localize">Description for CAPTCHA public key field.</note>
 </trans-unit>
 <trans-unit id="captcha.secret-key.description">
   <source>The secret key allows communication between authentik and the CAPTCHA provider to validate user responses.</source>
   <target>私钥用于 authentik 与 CAPTCHA 提供商之间的通信，以验证用户响应。</target>
+  <note from="lit-localize">Description for CAPTCHA secret key field.</note>
 </trans-unit>
 <trans-unit id="captcha.provider-link">
   <source>API keys can be obtained from the
                         <x id="0" equiv-text="${html `&lt;a target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot; href=${keyURL}&#10;                                &gt;${formatAPISource()}&lt;/a&#10;                            &gt;.`}"/></source>
   <target>API 密钥可从
                         <x id="0" equiv-text="${html `&lt;a target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot; href=${keyURL}&#10;                                &gt;${formatAPISource()}&lt;/a&#10;                            &gt;.`}"/> 获取</target>
+  <note from="lit-localize">Supplementary help text with link to provider dashboard.</note>
 </trans-unit>
 <trans-unit id="s87f858ca3c8e5579">
   <source>Filename can only contain letters, numbers, dots, hyphens, underscores, slashes, and the placeholder %(theme)s</source>
@@ -13154,22 +13121,27 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="command-palette-trigger-label">
   <source>Open Command Palette</source>
   <target>打开命令面板</target>
+  <note from="lit-localize">Label for the button that opens the command palette</note>
 </trans-unit>
 <trans-unit id="command-palette-placeholder">
   <source>Type a command...</source>
   <target>输入命令…</target>
+  <note from="lit-localize">Label for the command palette input</note>
 </trans-unit>
 <trans-unit id="command-palette-placeholder-extended">
   <source>What are you looking for?</source>
   <target>您在查找什么？</target>
+  <note from="lit-localize">Placeholder for the command palette input</note>
 </trans-unit>
 <trans-unit id="command-palette-placeholder-user-search">
   <source>Type a username or email address...</source>
   <target>输入用户名或电子邮件地址…</target>
+  <note from="lit-localize">Placeholder for the user search command in the admin interface</note>
 </trans-unit>
 <trans-unit id="command-palette-trigger-tooltip">
   <source>Open Command Palette</source>
   <target>打开命令面板</target>
+  <note from="lit-localize">Tooltip for the button that opens the command palette</note>
 </trans-unit>
 <trans-unit id="sca1fb5dc2d7901fc">
   <source>Configure WS-Federation Provider</source>
@@ -13986,18 +13958,22 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="wizard.ariaLabel.default">
   <source>Wizard</source>
   <target>向导</target>
+  <note from="lit-localize">ARIA label for the creation wizard when no entity singular is provided.</note>
 </trans-unit>
 <trans-unit id="wizard.ariaLabel.entity-singular">
   <source>New <x id="0" equiv-text="${verboseName}"/> Wizard</source>
   <target>新建 <x id="0" equiv-text="${verboseName}"/> 向导</target>
+  <note from="lit-localize">ARIA label for the creation wizard, where the entity singular is interpolated.</note>
 </trans-unit>
 <trans-unit id="wizard.header.default">
   <source>Create New Entity</source>
   <target>创建新实体</target>
+  <note from="lit-localize">Header for the creation wizard when no entity singular is provided.</note>
 </trans-unit>
 <trans-unit id="wizard.header.entity-singular">
   <source>Create New <x id="0" equiv-text="${verboseName}"/></source>
   <target>创建新的 <x id="0" equiv-text="${verboseName}"/></target>
+  <note from="lit-localize">Header for the creation wizard, where the entity singular is interpolated.</note>
 </trans-unit>
 <trans-unit id="sc74b7675f65c3e23">
   <source>Query</source>
@@ -14206,26 +14182,32 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="used-by.consequence.cascade">
   <source><x id="0" equiv-text="${relationName}"/> will be deleted</source>
   <target><x id="0" equiv-text="${relationName}"/> 将被删除</target>
+  <note from="lit-localize">Consequence of deletion, when the related object will also be deleted. The name of the related object will be included, in the format 'Related object will be deleted'.</note>
 </trans-unit>
 <trans-unit id="user.display.unknownUser">
   <source>Unknown user</source>
   <target>未知用户</target>
+  <note from="lit-localize">Placeholder for an unknown user, in the format 'Unknown user'.</note>
 </trans-unit>
 <trans-unit id="usedBy.count.other">
   <source><x id="0" equiv-text="${verboseName}"/> is associated with <x id="1" equiv-text="${usedByList.length}"/> objects.</source>
   <target><x id="0" equiv-text="${verboseName}"/> 与 <x id="1" equiv-text="${usedByList.length}"/> 个对象关联。</target>
+  <note from="lit-localize">Plural: N objects use this entity.</note>
 </trans-unit>
 <trans-unit id="usedBy.count.one">
   <source><x id="0" equiv-text="${verboseName}"/> is associated with one object.</source>
   <target><x id="0" equiv-text="${verboseName}"/> 与一个对象关联。</target>
+  <note from="lit-localize">Singular: exactly one object uses this entity.</note>
 </trans-unit>
 <trans-unit id="table.empty">
   <source>No <x id="0" equiv-text="${verboseNamePlural.toLocaleLowerCase(this.activeLanguageTag)}"/> found.</source>
   <target>未找到 <x id="0" equiv-text="${verboseNamePlural.toLocaleLowerCase(this.activeLanguageTag)}"/>。</target>
+  <note from="lit-localize">The message to show when a table has no content. The placeholder {0} is replaced with the pluralized name of the type of entity being shown in the table.</note>
 </trans-unit>
 <trans-unit id="usedBy.count.zero">
   <source><x id="0" equiv-text="${verboseName}"/> is not associated with any objects.</source>
   <target><x id="0" equiv-text="${verboseName}"/> 未与任何对象关联。</target>
+  <note from="lit-localize">Zero: no objects use this entity.</note>
 </trans-unit>
 <trans-unit id="s78a13f8f08d3a317">
   <source>Authorization Code</source>
@@ -14726,14 +14708,17 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="wizard.step.choose-type.generic">
   <source>Choose type</source>
   <target>选择类型</target>
+  <note from="lit-localize">Generic label for the initial step in the creation wizard where the type of the entity being created is selected, used when no singular entity name is provided.</note>
 </trans-unit>
 <trans-unit id="wizard.step.choose-type">
   <source>Choose <x id="0" equiv-text="${this.verboseName}"/> Type</source>
   <target>选择 <x id="0" equiv-text="${this.verboseName}"/> 类型</target>
+  <note from="lit-localize">Label for the initial step in the creation wizard where the type of the entity being created is selected. The placeholder {entity} is replaced with the singular name of the entity, for example 'Choose User Type' or 'Choose Group Type'.</note>
 </trans-unit>
 <trans-unit id="wizard.step.details">
   <source><x id="0" equiv-text="${entityLabel}"/> Details</source>
   <target><x id="0" equiv-text="${entityLabel}"/> 详情</target>
+  <note from="lit-localize">Label for the step in the creation wizard where the details of the entity being created are filled in. The placeholder {entity} is replaced with the name of the entity type, for example 'User Details' or 'Group Details'.</note>
 </trans-unit>
 <trans-unit id="sd1b98c71ea0d603b">
   <source>Flags allow you to enable new functionality and behavior in authentik early.</source>
@@ -14750,6 +14735,48 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="common.actions.retry">
   <source>Retry</source>
   <target>重试</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.poll.paused">
+  <source>DingTalk directory sync is still running, so automatic refresh paused. Use Refresh to check again.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync.completed">
+  <source>DingTalk directory sync completed for <x id="0" equiv-text="${event.corpId}"/>.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync.warning">
+  <source>DingTalk directory sync completed with warnings for <x id="0" equiv-text="${event.corpId}"/>.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync.failed">
+  <source>DingTalk directory sync failed for <x id="0" equiv-text="${event.corpId}"/>: <x id="1" equiv-text="${event.detail}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.nested-omitted">
+  <source>Nested details omitted</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.more-omitted">
+  <source><x id="0" equiv-text="${value.length - visibleItems.length}"/> more omitted</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.summary.loading">
+  <source>Loading DingTalk directory status.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.summary.unavailable">
+  <source>DingTalk directory status is unavailable.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.summary.stale">
+  <source>Previous directory status is shown because refresh failed.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.summary.poll-paused">
+  <source>Automatic refresh paused while the sync is still running.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.summary.last-refreshed">
+  <source>Last refreshed</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.running-disabled">
+  <source>Cannot delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/> while sync is running</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.aria-label">
+  <source>Delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.table.caption">
+  <source>DingTalk directory sync status by corp</source>
 </trans-unit>
 </body>
 </file>
