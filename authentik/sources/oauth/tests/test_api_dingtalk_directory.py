@@ -1,19 +1,23 @@
 """DingTalk directory API tests."""
 
-from django.test import TestCase
+from unittest.mock import patch
+
 from django.urls import reverse
 from django.utils.timezone import now
+from rest_framework.test import APIClient, APITestCase
 
 from authentik.core.tests.utils import create_test_admin_user, create_test_user
 from authentik.sources.oauth.models import (
     DingTalkDirectoryDepartment,
     DingTalkDirectorySyncStatus,
+    DingTalkDirectorySyncStatusChoices,
     DingTalkDirectoryUser,
     OAuthSource,
+    UserOAuthSourceConnection,
 )
 
 
-class TestDingTalkDirectoryAPI(TestCase):
+class TestDingTalkDirectoryAPI(APITestCase):
     def setUp(self):
         self.source = OAuthSource.objects.create(
             name="DingTalk",
@@ -37,8 +41,12 @@ class TestDingTalkDirectoryAPI(TestCase):
             last_seen_at=now(),
         )
 
+    def authenticate(self, user):
+        self.client.force_login(user)
+        self.client.force_authenticate(user=user)
+
     def test_user_list_requires_directory_permissions(self):
-        self.client.force_login(create_test_user("regular"))
+        self.authenticate(create_test_user("regular"))
         response = self.client.get(
             reverse("authentik_api:dingtalk-directory-users", kwargs={"source_slug": "dingtalk"})
         )
@@ -46,7 +54,7 @@ class TestDingTalkDirectoryAPI(TestCase):
 
         source_reader = create_test_user("source-reader")
         source_reader.assign_perms_to_managed_role("authentik_sources_oauth.view_oauthsource")
-        self.client.force_login(source_reader)
+        self.authenticate(source_reader)
         response = self.client.get(
             reverse("authentik_api:dingtalk-directory-users", kwargs={"source_slug": "dingtalk"})
         )
@@ -58,7 +66,7 @@ class TestDingTalkDirectoryAPI(TestCase):
         directory_reader.assign_perms_to_managed_role(
             "authentik_sources_oauth.view_dingtalkdirectoryuser"
         )
-        self.client.force_login(directory_reader)
+        self.authenticate(directory_reader)
 
         response = self.client.get(
             reverse("authentik_api:dingtalk-directory-users", kwargs={"source_slug": "dingtalk"})
@@ -75,7 +83,7 @@ class TestDingTalkDirectoryAPI(TestCase):
             finished_at=now(),
             counters={"users": 1, "departments": 0},
         )
-        self.client.force_login(create_test_admin_user())
+        self.authenticate(create_test_admin_user())
 
         response = self.client.get(
             reverse("authentik_api:dingtalk-directory-status", kwargs={"source_slug": "dingtalk"})
@@ -85,7 +93,7 @@ class TestDingTalkDirectoryAPI(TestCase):
         self.assertEqual(response.json()["sync"][0]["generation"], 9)
 
     def test_user_list_returns_contact_fields_without_private_identifiers(self):
-        self.client.force_login(create_test_admin_user())
+        self.authenticate(create_test_admin_user())
         response = self.client.get(
             reverse("authentik_api:dingtalk-directory-users", kwargs={"source_slug": "dingtalk"})
         )
@@ -109,7 +117,7 @@ class TestDingTalkDirectoryAPI(TestCase):
             last_seen_at=now(),
         )
 
-        self.client.force_login(create_test_admin_user())
+        self.authenticate(create_test_admin_user())
         response = self.client.get(
             reverse("authentik_api:dingtalk-directory-users", kwargs={"source_slug": "dingtalk"})
         )
@@ -134,7 +142,7 @@ class TestDingTalkDirectoryAPI(TestCase):
             last_seen_at=now(),
         )
 
-        self.client.force_login(create_test_admin_user())
+        self.authenticate(create_test_admin_user())
         response = self.client.get(
             reverse(
                 "authentik_api:dingtalk-directory-departments",
@@ -145,11 +153,51 @@ class TestDingTalkDirectoryAPI(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual([item["dept_id"] for item in response.json()["results"]], ["1"])
 
-    def test_sync_delete_clears_corp_cache_and_status(self):
+    @patch("authentik.sources.oauth.api.dingtalk_directory.dingtalk_directory_sync.send")
+    def test_sync_post_creates_durable_queued_status(self, send_mock):
+        self.authenticate(create_test_admin_user())
+        response = self.client.post(
+            reverse("authentik_api:dingtalk-directory-sync", kwargs={"source_slug": "dingtalk"}),
+            data={"corp_id": "CORP"},
+            content_type="application/json",
+        )
+        duplicate = self.client.post(
+            reverse("authentik_api:dingtalk-directory-sync", kwargs={"source_slug": "dingtalk"}),
+            data={"corp_id": "CORP"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["queued"])
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertFalse(duplicate.json()["queued"])
+        self.assertEqual(send_mock.call_count, 1)
+        status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
+        self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.QUEUED)
+        self.assertIsNotNone(status.active_run_id)
+
+    @patch("authentik.sources.oauth.api.dingtalk_directory.dingtalk_directory_sync.send")
+    def test_sync_post_marks_error_when_broker_rejects(self, send_mock):
+        send_mock.side_effect = RuntimeError("broker unavailable")
+        self.authenticate(create_test_admin_user())
+
+        response = self.client.post(
+            reverse("authentik_api:dingtalk-directory-sync", kwargs={"source_slug": "dingtalk"}),
+            data={"corp_id": "CORP"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
+        self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.ERROR)
+        self.assertIsNone(status.active_run_id)
+        self.assertEqual(status.error, "DingTalk directory sync could not be queued.")
+
+    def test_sync_delete_clears_corp_cache_and_marks_status_deleted(self):
         DingTalkDirectorySyncStatus.objects.create(
             source=self.source,
             corp_id="CORP",
-            status="success",
+            status=DingTalkDirectorySyncStatusChoices.SUCCESS,
             finished_at=now(),
         )
         DingTalkDirectoryDepartment.objects.create(
@@ -160,7 +208,7 @@ class TestDingTalkDirectoryAPI(TestCase):
             last_seen_at=now(),
         )
 
-        self.client.force_login(create_test_admin_user())
+        self.authenticate(create_test_admin_user())
         response = self.client.delete(
             reverse("authentik_api:dingtalk-directory-sync", kwargs={"source_slug": "dingtalk"}),
             data={"corp_id": "CORP"},
@@ -169,6 +217,91 @@ class TestDingTalkDirectoryAPI(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"deleted": True, "corp_id": "CORP"})
-        self.assertFalse(DingTalkDirectorySyncStatus.objects.filter(corp_id="CORP").exists())
+        status = DingTalkDirectorySyncStatus.objects.get(corp_id="CORP")
+        self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.DELETED)
+        self.assertIsNone(status.active_run_id)
         self.assertFalse(DingTalkDirectoryDepartment.objects.filter(corp_id="CORP").exists())
         self.assertFalse(DingTalkDirectoryUser.objects.filter(corp_id="CORP").exists())
+
+    def test_org_context_self_access_uses_source_scoped_identity(self):
+        other_source = OAuthSource.objects.create(
+            name="Other DingTalk",
+            slug="dingtalk-other",
+            provider_type="dingtalk",
+            consumer_key="OTHER_CLIENT_ID",
+            consumer_secret="OTHER_CLIENT_SECRET",
+        )
+        seen = now()
+        for source, corp_id, user_id, union_id in (
+            (self.source, "CORP_A", "USER_A", "UNION_A"),
+            (other_source, "CORP_B", "USER_B", "UNION_B"),
+        ):
+            DingTalkDirectorySyncStatus.objects.create(
+                source=source,
+                corp_id=corp_id,
+                status="success",
+                finished_at=seen,
+                last_success_at=seen,
+            )
+            DingTalkDirectoryUser.objects.create(
+                source=source,
+                corp_id=corp_id,
+                user_id=user_id,
+                union_id=union_id,
+                name=user_id,
+                dept_id_list=[],
+                last_seen_at=seen,
+            )
+        user = create_test_user("source-scoped")
+        user.assign_perms_to_managed_role("authentik_sources_oauth.view_oauthsource")
+        user.assign_perms_to_managed_role("authentik_sources_oauth.view_oauthsource", self.source)
+        user.attributes = {
+            "dingtalk": {"corp_id": "CORP_B", "user_id": "USER_B"},
+            "dingtalk_sources": {
+                str(self.source.pk): {
+                    "source_pk": str(self.source.pk),
+                    "source_slug": self.source.slug,
+                    "corp_id": "CORP_A",
+                    "user_id": "USER_A",
+                },
+                str(other_source.pk): {
+                    "source_pk": str(other_source.pk),
+                    "source_slug": other_source.slug,
+                    "corp_id": "CORP_B",
+                    "user_id": "USER_B",
+                },
+            },
+        }
+        user.save()
+        UserOAuthSourceConnection.objects.create(
+            user=user,
+            source=self.source,
+            identifier="UNION_A",
+        )
+        client = APIClient()
+        client.force_authenticate(user=user)
+
+        own_response = client.get(
+            reverse(
+                "authentik_api:dingtalk-directory-user-org",
+                kwargs={
+                    "source_slug": "dingtalk",
+                    "corp_id": "CORP_A",
+                    "user_id": "USER_A",
+                },
+            )
+        )
+        other_response = client.get(
+            reverse(
+                "authentik_api:dingtalk-directory-user-org",
+                kwargs={
+                    "source_slug": "dingtalk",
+                    "corp_id": "CORP_B",
+                    "user_id": "USER_B",
+                },
+            )
+        )
+
+        self.assertEqual(own_response.status_code, 200)
+        self.assertEqual(own_response.json()["corp_id"], "CORP_A")
+        self.assertEqual(other_response.status_code, 403)

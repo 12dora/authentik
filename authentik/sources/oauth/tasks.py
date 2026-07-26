@@ -2,6 +2,7 @@
 
 from json import dumps
 
+from django.db import DatabaseError
 from django.utils.translation import gettext_lazy as _
 from dramatiq.actor import actor
 from requests import RequestException
@@ -77,7 +78,7 @@ def update_well_known_jwks():
 
 
 @actor(description=_("Sync DingTalk directory cache."))
-def dingtalk_directory_sync(source_pk: str, corp_id: str):
+def dingtalk_directory_sync(source_pk: str, corp_id: str, run_id: str | None = None):
     source = OAuthSource.objects.filter(
         pk=source_pk, enabled=True, provider_type="dingtalk"
     ).first()
@@ -85,31 +86,40 @@ def dingtalk_directory_sync(source_pk: str, corp_id: str):
         return None
     from authentik.sources.oauth.dingtalk.sync import sync_dingtalk_directory
 
-    return sync_dingtalk_directory(source, corp_id)
+    return sync_dingtalk_directory(source, corp_id, queued_run_id=run_id)
 
 
 @actor(description=_("Sync all DingTalk directory caches."))
 def dingtalk_directory_sync_all():
+    from authentik.sources.oauth.dingtalk.selectors import source_scoped_dingtalk_identity
+    from authentik.sources.oauth.dingtalk.sync import queue_dingtalk_directory_sync
     from authentik.sources.oauth.types.dingtalk import get_dingtalk_allowlist_binding
 
     for source in OAuthSource.objects.filter(enabled=True, provider_type="dingtalk"):
         corp_ids: set[str] = set()
         # Corps derived from users who have already logged in via this source.
-        for corp_id in (
-            UserOAuthSourceConnection.objects.filter(
-                source=source,
-                user__attributes__has_key="dingtalk",
-            )
-            .values_list("user__attributes__dingtalk__corp_id", flat=True)
-            .distinct()
+        for connection in UserOAuthSourceConnection.objects.filter(source=source).select_related(
+            "user"
         ):
-            if corp_id:
-                corp_ids.add(str(corp_id))
-        # C8: also seed corps configured in the allowlist so an allowed company with no logins
+            identity = source_scoped_dingtalk_identity(connection.user, source)
+            if identity:
+                corp_id, _user_id = identity
+                corp_ids.add(corp_id)
+        # Also seed corps configured in the allowlist so an allowed company with no logins
         # yet is pre-synced, instead of returning empty/stale until someone logs in.
         _, _, config = get_dingtalk_allowlist_binding(source, enabled_only=False)
         for company in (config or {}).get("companies", []):
             if company.get("corp_id"):
                 corp_ids.add(str(company["corp_id"]))
         for corp_id in corp_ids:
-            dingtalk_directory_sync.send(str(source.pk), corp_id)
+            try:
+                run_id, should_enqueue = queue_dingtalk_directory_sync(source, corp_id)
+                if should_enqueue:
+                    dingtalk_directory_sync.send(str(source.pk), corp_id, str(run_id))
+            except (DatabaseError, RuntimeError, ValueError) as exc:
+                LOGGER.warning(
+                    "dingtalk_directory_sync_all_corp_failed",
+                    source_slug=source.slug,
+                    corp_id=corp_id,
+                    exc=exc,
+                )

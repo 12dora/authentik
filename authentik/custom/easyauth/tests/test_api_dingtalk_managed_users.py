@@ -3,6 +3,7 @@
 from unittest.mock import patch
 
 from django.test import TestCase
+from rest_framework.test import APIClient
 
 from authentik.core.tests.utils import create_test_user
 from authentik.sources.oauth.dingtalk.managed_users import (
@@ -41,6 +42,7 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
             consumer_secret="CLIENT_SECRET",
         )
         self.user = create_test_user("api-reader")
+        self.client = APIClient()
         self.url = (
             "/api/v3/sources/oauth/dingtalk-directory/"
             "dingtalk/managed-users/by-manager/CORP/MANAGER/"
@@ -49,9 +51,12 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
     def _login_with_directory_access(self):
         self.user.assign_perms_to_managed_role("authentik_sources_oauth.view_oauthsource")
         self.user.assign_perms_to_managed_role(
+            "authentik_sources_oauth.view_oauthsource", self.source
+        )
+        self.user.assign_perms_to_managed_role(
             "authentik_sources_oauth.view_dingtalkdirectoryuser"
         )
-        self.client.force_login(self.user)
+        self.client.force_authenticate(user=self.user)
 
     def test_success_returns_service_response(self):
         self._login_with_directory_access()
@@ -63,6 +68,14 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
             "resolved_at": "2026-07-02T03:04:05+00:00",
             "stale": False,
             "last_synced_at": "2026-07-02T02:00:00+00:00",
+            "pagination": {
+                "next": 0,
+                "previous": 0,
+                "count": 1,
+                "current": 1,
+                "total_pages": 1,
+                "page_size": 100,
+            },
             "diagnostics": {
                 "manager_chain_depth": 2,
                 "raw": {"cursor": "SECRET_RAW_CONTEXT"},
@@ -98,6 +111,14 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
             "resolved_at": "2026-07-02T03:04:05+00:00",
             "stale": False,
             "last_synced_at": "2026-07-02T02:00:00+00:00",
+            "pagination": {
+                "next": 0,
+                "previous": 0,
+                "count": 1,
+                "current": 1,
+                "total_pages": 1,
+                "page_size": 100,
+            },
             "diagnostics": {
                 "manager_chain_depth": 2,
             },
@@ -128,7 +149,14 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), expected_response)
         assert_sensitive_keys_absent(self, response.json())
-        get_managed_users.assert_called_once_with(self.source, "CORP", "MANAGER")
+        get_managed_users.assert_called_once_with(
+            self.source,
+            "CORP",
+            "MANAGER",
+            page=1,
+            page_size=100,
+            max_results=1000,
+        )
 
     def test_manager_missing_returns_404_code(self):
         self._login_with_directory_access()
@@ -169,9 +197,21 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
 
         self.assertEqual(response.status_code, 409)
 
+    def test_invalid_pagination_returns_400(self):
+        self._login_with_directory_access()
+
+        with patch(
+            "authentik.custom.easyauth.api.dingtalk_managed_users."
+            "get_dingtalk_managed_users",
+        ) as get_managed_users:
+            response = self.client.get(f"{self.url}?page_size=101")
+
+        self.assertEqual(response.status_code, 400)
+        get_managed_users.assert_not_called()
+
     def test_without_directory_permission_returns_403(self):
         self.user.assign_perms_to_managed_role("authentik_sources_oauth.view_oauthsource")
-        self.client.force_login(self.user)
+        self.client.force_authenticate(user=self.user)
 
         response = self.client.get(self.url)
 
@@ -184,6 +224,18 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
             "corp_id": "CORP",
             "manager_user_id": "MANAGER",
             "resolver": "dingtalk_manager_chain",
+            "resolved_at": "2026-07-02T03:04:05+00:00",
+            "stale": False,
+            "last_synced_at": None,
+            "diagnostics": {},
+            "pagination": {
+                "next": 0,
+                "previous": 0,
+                "count": 0,
+                "current": 1,
+                "total_pages": 1,
+                "page_size": 100,
+            },
             "users": [],
         }
 

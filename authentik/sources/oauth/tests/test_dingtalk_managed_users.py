@@ -36,6 +36,7 @@ class TestDingTalkManagedUsers(TestCase):
             corp_id="CORP",
             status="success",
             finished_at=self.seen,
+            last_success_at=self.seen,
         )
         self._directory_user("MANAGER", manager_user_id="")
 
@@ -92,8 +93,12 @@ class TestDingTalkManagedUsers(TestCase):
                 "recursion_cycle_detected": False,
                 "max_depth_exceeded": False,
                 "max_depth_omitted": 0,
+                "result_limit_exceeded": False,
+                "result_limit": 1000,
             },
         )
+        self.assertEqual(result["pagination"]["count"], 3)
+        self.assertEqual(result["pagination"]["current"], 1)
         self.assertEqual(
             [item["source_user_id"] for item in result["users"]],
             ["EMP1", "EMP3", "EMP2"],
@@ -126,6 +131,8 @@ class TestDingTalkManagedUsers(TestCase):
                 "recursion_cycle_detected": False,
                 "max_depth_exceeded": False,
                 "max_depth_omitted": 0,
+                "result_limit_exceeded": False,
+                "result_limit": 1000,
             },
         )
 
@@ -159,6 +166,48 @@ class TestDingTalkManagedUsers(TestCase):
         self.assertEqual(len(result["users"]), MAX_MANAGER_CHAIN_DEPTH)
         self.assertTrue(result["diagnostics"]["max_depth_exceeded"])
         self.assertFalse(result["diagnostics"]["recursion_cycle_detected"])
+
+    def test_paginates_and_caps_response_budget(self):
+        for index in range(6):
+            self._directory_user(f"EMP{index}")
+
+        result = get_dingtalk_managed_users(
+            self.source,
+            "CORP",
+            "MANAGER",
+            page=2,
+            page_size=2,
+            max_results=5,
+        )
+
+        self.assertEqual([item["source_user_id"] for item in result["users"]], ["EMP2", "EMP3"])
+        self.assertEqual(
+            result["pagination"],
+            {
+                "next": 3,
+                "previous": 1,
+                "count": 5,
+                "current": 2,
+                "total_pages": 3,
+                "page_size": 2,
+            },
+        )
+        self.assertTrue(result["diagnostics"]["result_limit_exceeded"])
+
+    def test_resolution_uses_bounded_queries_for_wide_results(self):
+        for index in range(10):
+            self._directory_user(f"EMP{index}")
+
+        with self.assertNumQueries(5):
+            result = get_dingtalk_managed_users(
+                self.source,
+                "CORP",
+                "MANAGER",
+                page=1,
+                page_size=5,
+            )
+
+        self.assertEqual(len(result["users"]), 5)
 
     def test_missing_manager_is_not_treated_as_empty_scope(self):
         with self.assertRaises(DingTalkManagerNotFound):

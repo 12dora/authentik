@@ -2,30 +2,46 @@
 
 from types import SimpleNamespace
 
+from django.db import transaction
 from django.http import Http404
 from django.shortcuts import get_object_or_404
-from django.utils.translation import gettext_lazy as _
+from django.utils.timezone import now
+from django.utils.translation import gettext_lazy
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import generics, serializers
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from authentik.api.pagination import Pagination
-from authentik.sources.oauth.dingtalk.selectors import get_dingtalk_org_context
+from authentik.sources.oauth.dingtalk.selectors import (
+    get_dingtalk_org_context,
+    source_scoped_dingtalk_identity,
+)
+from authentik.sources.oauth.dingtalk.sync import queue_dingtalk_directory_sync
 from authentik.sources.oauth.models import (
     DingTalkDirectoryDepartment,
     DingTalkDirectorySyncStatus,
+    DingTalkDirectorySyncStatusChoices,
     DingTalkDirectoryUser,
     OAuthSource,
 )
 from authentik.sources.oauth.tasks import dingtalk_directory_sync
 
 
-def get_dingtalk_source(source_slug: str) -> OAuthSource:
-    return get_object_or_404(OAuthSource, slug=source_slug, provider_type="dingtalk")
+class DingTalkDirectoryConflict(APIException):
+    status_code = 409
+    default_code = "dingtalk_directory_conflict"
+    default_detail = gettext_lazy("DingTalk directory operation cannot be started for this source.")
+
+
+def get_dingtalk_source(source_slug: str, *, enabled_only: bool = False) -> OAuthSource:
+    queryset = OAuthSource.objects.filter(provider_type="dingtalk")
+    if enabled_only:
+        queryset = queryset.filter(enabled=True)
+    return get_object_or_404(queryset, slug=source_slug)
 
 
 class CanViewDingTalkDirectory(BasePermission):
@@ -37,7 +53,7 @@ class CanViewDingTalkDirectory(BasePermission):
         try:
             source = get_dingtalk_source(view.kwargs["source_slug"])
         except Http404:
-            # B10: do not reveal whether a DingTalk source slug exists to callers who lack
+            # Do not reveal whether a DingTalk source slug exists to callers who lack
             # access; return 403 uniformly for both missing and existing-but-forbidden slugs.
             return False
         view.dingtalk_source = source
@@ -79,6 +95,9 @@ class CanViewDingTalkDirectoryUser(CanViewDingTalkDirectory):
 
 
 class DingTalkDirectorySyncStatusSerializer(serializers.ModelSerializer):
+    status = serializers.ChoiceField(choices=DingTalkDirectorySyncStatusChoices.choices)
+    counters = serializers.DictField()
+
     class Meta:
         model = DingTalkDirectorySyncStatus
         fields = [
@@ -87,6 +106,8 @@ class DingTalkDirectorySyncStatusSerializer(serializers.ModelSerializer):
             "generation",
             "started_at",
             "finished_at",
+            "last_attempt_at",
+            "last_success_at",
             "error",
             "counters",
         ]
@@ -104,6 +125,7 @@ class DingTalkDirectorySyncRequestSerializer(serializers.Serializer):
 class DingTalkDirectorySyncQueuedSerializer(serializers.Serializer):
     queued = serializers.BooleanField()
     corp_id = serializers.CharField()
+    run_id = serializers.CharField(allow_null=True)
 
 
 class DingTalkDirectorySyncDeletedSerializer(serializers.Serializer):
@@ -165,18 +187,7 @@ class DingTalkDirectoryStatusView(APIView):
         return Response(
             {
                 "source_slug": source.slug,
-                "sync": [
-                    {
-                        "corp_id": item.corp_id,
-                        "status": item.status,
-                        "generation": item.generation,
-                        "started_at": item.started_at,
-                        "finished_at": item.finished_at,
-                        "error": item.error,
-                        "counters": item.counters,
-                    }
-                    for item in statuses
-                ],
+                "sync": DingTalkDirectorySyncStatusSerializer(statuses, many=True).data,
             }
         )
 
@@ -190,11 +201,29 @@ class DingTalkDirectorySyncView(APIView):
     )
     def post(self, request: Request, source_slug: str) -> Response:
         source = self.dingtalk_source
+        if not source.enabled:
+            raise DingTalkDirectoryConflict(gettext_lazy("DingTalk source is disabled."))
         corp_id = request.data.get("corp_id") or request.data.get("corpId")
         if not corp_id:
-            raise ValidationError({"corp_id": _("This field is required.")})
-        dingtalk_directory_sync.send(str(source.pk), str(corp_id))
-        return Response({"queued": True, "corp_id": str(corp_id)})
+            raise ValidationError({"corp_id": gettext_lazy("This field is required.")})
+        run_id, should_enqueue = queue_dingtalk_directory_sync(source, str(corp_id))
+        if should_enqueue:
+            try:
+                dingtalk_directory_sync.send(str(source.pk), str(corp_id), str(run_id))
+            except RuntimeError as exc:
+                status = DingTalkDirectorySyncStatus.objects.filter(
+                    source=source, corp_id=str(corp_id), active_run_id=run_id
+                ).first()
+                if status:
+                    status.status = DingTalkDirectorySyncStatusChoices.ERROR
+                    status.error = str(
+                        gettext_lazy("DingTalk directory sync could not be queued.")
+                    )
+                    status.finished_at = now()
+                    status.active_run_id = None
+                    status.save()
+                raise DingTalkDirectoryConflict(str(exc)) from exc
+        return Response({"queued": should_enqueue, "corp_id": str(corp_id), "run_id": str(run_id)})
 
     @extend_schema(
         parameters=[
@@ -218,11 +247,25 @@ class DingTalkDirectorySyncView(APIView):
             or request.data.get("corpId")
         )
         if not corp_id:
-            raise ValidationError({"corp_id": _("This field is required.")})
+            raise ValidationError({"corp_id": gettext_lazy("This field is required.")})
         corp_id = str(corp_id)
-        DingTalkDirectorySyncStatus.objects.filter(source=source, corp_id=corp_id).delete()
-        DingTalkDirectoryDepartment.objects.filter(source=source, corp_id=corp_id).delete()
-        DingTalkDirectoryUser.objects.filter(source=source, corp_id=corp_id).delete()
+        with transaction.atomic():
+            status, _created = (
+                DingTalkDirectorySyncStatus.objects.select_for_update().get_or_create(
+                    source=source, corp_id=corp_id
+                )
+            )
+            status.run_sequence += 1
+            status.active_run_id = None
+            status.status = DingTalkDirectorySyncStatusChoices.DELETED
+            status.started_at = None
+            status.finished_at = now()
+            status.last_attempt_at = status.finished_at
+            status.error = ""
+            status.counters = {}
+            status.save()
+            DingTalkDirectoryDepartment.objects.filter(source=source, corp_id=corp_id).delete()
+            DingTalkDirectoryUser.objects.filter(source=source, corp_id=corp_id).delete()
         return Response({"deleted": True, "corp_id": corp_id})
 
 
@@ -261,14 +304,13 @@ class DingTalkDirectoryUserOrgView(APIView):
 
     @extend_schema(responses={200: DingTalkDirectoryOrgContextSerializer})
     def get(self, request: Request, source_slug: str, corp_id: str, user_id: str) -> Response:
-        dingtalk = (request.user.attributes or {}).get("dingtalk") or {}
-        own_corp_id = dingtalk.get("corp_id") or dingtalk.get("corpId")
-        own_user_id = dingtalk.get("user_id") or dingtalk.get("userid") or dingtalk.get("userId")
-        is_own_context = str(own_corp_id) == str(corp_id) and str(own_user_id) == str(user_id)
+        source = self.dingtalk_source
+        own_identity = source_scoped_dingtalk_identity(request.user, source)
+        is_own_context = own_identity == (str(corp_id), str(user_id))
         can_view_users = request.user.has_perm("authentik_sources_oauth.view_dingtalkdirectoryuser")
         if not is_own_context and not can_view_users:
             raise PermissionDenied(
-                _("Reading other DingTalk users requires directory user access.")
+                gettext_lazy("Reading other DingTalk users requires directory user access.")
             )
         context_user = (
             request.user

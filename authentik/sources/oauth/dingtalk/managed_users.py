@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from django.core.paginator import EmptyPage, Paginator
 from django.utils.timezone import now
 from structlog.stdlib import get_logger
 
@@ -15,6 +16,9 @@ from authentik.sources.oauth.models import (
 
 LOGGER = get_logger()
 RESOLVER = "dingtalk_manager_chain"
+DEFAULT_MANAGED_USERS_PAGE_SIZE = 100
+MAX_MANAGED_USERS_PAGE_SIZE = 100
+MAX_MANAGED_USERS_RESULTS = 1000
 
 
 class DingTalkManagerNotFound(ValueError):
@@ -49,44 +53,65 @@ def _descendants(
     source: OAuthSource,
     corp_id: str,
     manager_user_id: str,
-) -> tuple[list[DingTalkDirectoryUser], dict[str, bool]]:
-    users_by_manager: dict[str, list[DingTalkDirectoryUser]] = {}
-    for user in DingTalkDirectoryUser.objects.filter(
-        source=source,
-        corp_id=corp_id,
-        is_deleted=False,
-    ).order_by("user_id"):
-        users_by_manager.setdefault(user.manager_user_id, []).append(user)
-
+    *,
+    max_results: int = MAX_MANAGED_USERS_RESULTS,
+) -> tuple[list[DingTalkDirectoryUser], dict[str, Any]]:
     result: list[DingTalkDirectoryUser] = []
     seen = {manager_user_id}
     diagnostics = {
         "recursion_cycle_detected": False,
         "max_depth_exceeded": False,
         "max_depth_omitted": 0,
+        "result_limit_exceeded": False,
+        "result_limit": max_results,
     }
+    users_by_manager: dict[str, list[DingTalkDirectoryUser]] = {}
 
-    def visit(parent_user_id: str, depth: int) -> None:
-        children = users_by_manager.get(parent_user_id, [])
+    current_manager_ids = [manager_user_id]
+    for depth in range(MAX_MANAGER_CHAIN_DEPTH + 1):
+        if not current_manager_ids:
+            break
+        children = list(
+            DingTalkDirectoryUser.objects.filter(
+                source=source,
+                corp_id=corp_id,
+                manager_user_id__in=current_manager_ids,
+                is_deleted=False,
+            ).order_by("manager_user_id", "user_id")
+        )
         if depth >= MAX_MANAGER_CHAIN_DEPTH:
-            if children:
+            omitted = sum(1 for child in children if child.user_id not in seen)
+            if omitted:
                 diagnostics["max_depth_exceeded"] = True
-                # Report how many not-yet-seen direct reports were dropped at the depth
-                # boundary so callers know the result is truncated (their subordinates are
-                # dropped too) rather than silently getting a short list — C7.
-                diagnostics["max_depth_omitted"] += sum(
-                    1 for child in children if child.user_id not in seen
-                )
-            return
-        for user in children:
-            if user.user_id in seen:
+                diagnostics["max_depth_omitted"] += omitted
+            break
+
+        next_manager_ids = []
+        for child in children:
+            if child.user_id in seen:
                 diagnostics["recursion_cycle_detected"] = True
                 continue
-            seen.add(user.user_id)
-            result.append(user)
-            visit(user.user_id, depth + 1)
+            if len(seen) - 1 >= max_results:
+                diagnostics["result_limit_exceeded"] = True
+                break
+            seen.add(child.user_id)
+            users_by_manager.setdefault(child.manager_user_id, []).append(child)
+            next_manager_ids.append(child.user_id)
+        if diagnostics["result_limit_exceeded"]:
+            break
+        current_manager_ids = next_manager_ids
 
-    visit(manager_user_id, 0)
+    seen = {manager_user_id}
+    stack = list(reversed(users_by_manager.get(manager_user_id, [])))
+    while stack:
+        child = stack.pop()
+        if child.user_id in seen:
+            diagnostics["recursion_cycle_detected"] = True
+            continue
+        seen.add(child.user_id)
+        result.append(child)
+        stack.extend(reversed(users_by_manager.get(child.user_id, [])))
+
     return result, diagnostics
 
 
@@ -159,6 +184,10 @@ def get_dingtalk_managed_users(
     source: OAuthSource,
     corp_id: str,
     manager_user_id: str,
+    *,
+    page: int = 1,
+    page_size: int = DEFAULT_MANAGED_USERS_PAGE_SIZE,
+    max_results: int = MAX_MANAGED_USERS_RESULTS,
 ) -> dict[str, Any]:
     """Return cached DingTalk users recursively managed by the given manager."""
     corp_id = str(corp_id)
@@ -179,8 +208,13 @@ def get_dingtalk_managed_users(
             f"DingTalk manager {manager_user_id!r} was not found for {source.slug}:{corp_id}"
         )
 
+    page = max(int(page), 1)
+    page_size = max(1, min(int(page_size), MAX_MANAGED_USERS_PAGE_SIZE))
+    max_results = max(1, min(int(max_results), MAX_MANAGED_USERS_RESULTS))
     users = []
-    descendants, diagnostics = _descendants(source, corp_id, manager.user_id)
+    descendants, diagnostics = _descendants(
+        source, corp_id, manager.user_id, max_results=max_results
+    )
     if diagnostics["recursion_cycle_detected"] or diagnostics["max_depth_exceeded"]:
         LOGGER.warning(
             "dingtalk_managed_users_recursion_diagnostics",
@@ -191,11 +225,16 @@ def get_dingtalk_managed_users(
             max_depth_exceeded=diagnostics["max_depth_exceeded"],
             max_depth_omitted=diagnostics["max_depth_omitted"],
         )
-    # C6: resolve every subordinate's OAuth connection in a single query keyed by unionId.
+    paginator = Paginator(descendants, page_size)
+    try:
+        page_obj = paginator.page(page)
+    except EmptyPage:
+        page_obj = paginator.page(paginator.num_pages or 1)
+    page_descendants = list(page_obj.object_list)
     bindings_by_identity = _bindings_by_identity(
-        source, [directory_user.union_id for directory_user in descendants]
+        source, [directory_user.union_id for directory_user in page_descendants]
     )
-    for directory_user in descendants:
+    for directory_user in page_descendants:
         source_identifier = f"{corp_id}:{directory_user.user_id}"
         users.append(
             {
@@ -232,5 +271,13 @@ def get_dingtalk_managed_users(
         if status and status.finished_at
         else None,
         "diagnostics": diagnostics,
+        "pagination": {
+            "next": page_obj.next_page_number() if page_obj.has_next() else 0,
+            "previous": page_obj.previous_page_number() if page_obj.has_previous() else 0,
+            "count": paginator.count,
+            "current": page_obj.number,
+            "total_pages": paginator.num_pages,
+            "page_size": page_size,
+        },
         "users": users,
     }
