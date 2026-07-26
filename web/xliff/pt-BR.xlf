@@ -11475,16 +11475,13 @@ por exemplo: <x id="0" equiv-text="&lt;code&gt;"/>oci://registry.domain.tld/path
   <source><x id="0" equiv-text="${departments.length}"/> departments loaded for <x id="1" equiv-text="${corpId}"/></source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.picker.headline">
-  <source>Allowed departments for <x id="0" equiv-text="${company.label || company.corpId}"/></source>
+  <source>Allowed departments for <x id="0" equiv-text="${company.label || company.corpId}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.save.success">
   <source>DingTalk allowlist saved and applied.</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.departments.unauthorized-corp">
   <source>DingTalk departments can only be loaded for a company authorized by this DingTalk application. Edit the company label manually, or bind/authorize this company in the DingTalk developer console before loading departments.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.departments.unknown-error">
-  <source>An unknown error occurred.</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.status.source-enabled">
   <source>Source enabled</source>
@@ -11541,7 +11538,7 @@ por exemplo: <x id="0" equiv-text="&lt;code&gt;"/>oci://registry.domain.tld/path
   <source>Actions</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.company.label.aria-label">
-  <source>Company label</source>
+  <source>Company label for <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.company.allow-all">
   <source>Allow full company</source>
@@ -11556,7 +11553,7 @@ por exemplo: <x id="0" equiv-text="&lt;code&gt;"/>oci://registry.domain.tld/path
   <source>Restricted mode needs at least one department. Add a department or enable full company access before saving.</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.departments.input.aria-label">
-  <source>Allowed department IDs for <x id="0" equiv-text="${company.label || company.corpId}"/></source>
+  <source>Allowed department IDs for <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.departments.placeholder">
   <source>IDs separated by commas or spaces</source>
@@ -11878,6 +11875,45 @@ por exemplo: <x id="0" equiv-text="&lt;code&gt;"/>oci://registry.domain.tld/path
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.read-only">
   <source>You can view DingTalk directory status, but you need permission to change this OAuth source before syncing or deleting directory data.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.load-failed">
+  <source>Could not fetch DingTalk departments. Try again later.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.response-invalid">
+  <source>DingTalk returned an invalid department response. Try again later.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.state-invalid">
+  <source>DingTalk discovery expired or could not be verified. Try again.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.missing-code">
+  <source>DingTalk discovery did not return an authorization code. Try again.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.load-failed">
+  <source>DingTalk discovery failed. Try again later.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.response-invalid">
+  <source>DingTalk returned an invalid discovery response. Try again.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.company.allow-all.aria-label">
+  <source>Allow full company access for <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.add.aria-label">
+  <source>Add departments for <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.select.aria-label">
+  <source>Select departments for <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.company.remove.aria-label">
+  <source>Remove <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.state-expired">
+  <source>DingTalk discovery expired. Start discovery again.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.state-replayed">
+  <source>This DingTalk discovery result was already used. Start discovery again.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.state-source-mismatch">
+  <source>This DingTalk discovery result belongs to a different source. Start discovery again.</source>
 </trans-unit>
 </body>
 </file>

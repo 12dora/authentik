@@ -11780,8 +11780,12 @@ Bindings to groups/users are checked against the user of the event.</source>
   <target>标签</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.company.label.aria-label">
-  <source>Company label</source>
-  <target>企业标签</target>
+  <source>Company label for <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
+  <target><x id="0" equiv-text="${companyName}"/>（<x id="1" equiv-text="${company.corpId}"/>）的企业标签</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.company.allow-all.aria-label">
+  <source>Allow full company access for <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
+  <target>允许 <x id="0" equiv-text="${companyName}"/>（<x id="1" equiv-text="${company.corpId}"/>）整企业访问</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.department.allowed">
   <source>Allowed</source>
@@ -11807,6 +11811,10 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>Add departments</source>
   <target>应用部门</target>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.add.aria-label">
+  <source>Add departments for <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
+  <target>为 <x id="0" equiv-text="${companyName}"/>（<x id="1" equiv-text="${company.corpId}"/>）应用部门</target>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.departments.filter.aria-label">
   <source>Filter departments by ID or name</source>
   <target>按 ID 或名称筛选部门</target>
@@ -11820,8 +11828,8 @@ Bindings to groups/users are checked against the user of the event.</source>
   <target>筛选部门</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.departments.input.aria-label">
-  <source>Allowed department IDs for <x id="0" equiv-text="${company.label || company.corpId}"/></source>
-  <target>允许 <x id="0" equiv-text="${company.label || company.corpId}"/> 登录的部门 ID</target>
+  <source>Allowed department IDs for <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
+  <target>允许 <x id="0" equiv-text="${companyName}"/>（<x id="1" equiv-text="${company.corpId}"/>）登录的部门 ID</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.departments.page.next">
   <source>Next</source>
@@ -11843,13 +11851,17 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>Select departments…</source>
   <target>选择部门…</target>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.select.aria-label">
+  <source>Select departments for <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
+  <target>为 <x id="0" equiv-text="${companyName}"/>（<x id="1" equiv-text="${company.corpId}"/>）选择部门</target>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.fail-closed.unconfigured">
   <source>No allowlist is configured. All DingTalk logins are denied until an allowlist is saved and applied.</source>
   <target>尚未配置企业白名单。在保存并应用白名单之前，所有钉钉登录都会被拒绝。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.picker.headline">
-  <source>Allowed departments for <x id="0" equiv-text="${company.label || company.corpId}"/></source>
-  <target><x id="0" equiv-text="${company.label || company.corpId}"/> 的允许部门</target>
+  <source>Allowed departments for <x id="0" equiv-text="${company.label || company.corpId}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
+  <target><x id="0" equiv-text="${company.label || company.corpId}"/>（<x id="1" equiv-text="${company.corpId}"/>）的允许部门</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.picker.apply">
   <source>Apply selection</source>
@@ -11879,9 +11891,13 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>DingTalk departments can only be loaded for a company authorized by this DingTalk application. Edit the company label manually, or bind/authorize this company in the DingTalk developer console before loading departments.</source>
   <target>只能为已授权给当前钉钉应用的企业加载部门。请手工编辑企业标签，或先在钉钉开发者后台绑定/授权该企业后再加载部门。</target>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.departments.unknown-error">
-  <source>An unknown error occurred.</source>
-  <target>发生未知错误。</target>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.load-failed">
+  <source>Could not fetch DingTalk departments. Try again later.</source>
+  <target>无法获取钉钉部门。请稍后重试。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.response-invalid">
+  <source>DingTalk returned an invalid department response. Try again later.</source>
+  <target>钉钉返回了无效的部门响应。请稍后重试。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.discovery.last">
   <source>Last discovery: <x id="0" equiv-text="${this.lastDiscovery.corpId}"/></source>
@@ -11891,6 +11907,18 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>DingTalk discovery failed.</source>
   <target>钉钉发现流程失败。</target>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.load-failed">
+  <source>DingTalk discovery failed. Try again later.</source>
+  <target>钉钉发现流程失败。请稍后重试。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.response-invalid">
+  <source>DingTalk returned an invalid discovery response. Try again.</source>
+  <target>钉钉返回了无效的发现响应。请重试。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.missing-code">
+  <source>DingTalk discovery did not return an authorization code. Try again.</source>
+  <target>钉钉发现流程未返回授权码。请重试。</target>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.discovery.missing-corp-id">
   <source>DingTalk discovery did not return a company ID.</source>
   <target>钉钉发现流程未返回企业 ID。</target>
@@ -11899,9 +11927,29 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>The DingTalk discovery popup was blocked. Allow popups for this site and try again.</source>
   <target>钉钉发现弹窗被浏览器拦截。请允许此站点弹窗后重试。</target>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.state-invalid">
+  <source>DingTalk discovery expired or could not be verified. Try again.</source>
+  <target>钉钉发现流程已过期或无法验证。请重试。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.state-expired">
+  <source>DingTalk discovery expired. Start discovery again.</source>
+  <target>钉钉发现流程已过期。请重新开始发现流程。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.state-replayed">
+  <source>This DingTalk discovery result was already used. Start discovery again.</source>
+  <target>此钉钉发现结果已被使用。请重新开始发现流程。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.state-source-mismatch">
+  <source>This DingTalk discovery result belongs to a different source. Start discovery again.</source>
+  <target>此钉钉发现结果属于另一个源。请重新开始发现流程。</target>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.remove.action">
   <source>Remove allowlist</source>
   <target>移除白名单</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.company.remove.aria-label">
+  <source>Remove <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
+  <target>移除 <x id="0" equiv-text="${companyName}"/>（<x id="1" equiv-text="${company.corpId}"/>）</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.remove.header">
   <source>Remove DingTalk allowlist</source>
