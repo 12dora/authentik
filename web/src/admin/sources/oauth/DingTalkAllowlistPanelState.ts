@@ -1,10 +1,11 @@
 import {
     type DingTalkAllowlistModel,
-    renderDingTalkAllowlistPolicy,
     validateDingTalkAllowlistModel,
 } from "#admin/sources/oauth/DingTalkAllowlistPolicy";
 
 import type { TemplateResult } from "lit";
+
+const DINGTALK_DISCOVERY_ALLOWED_HOSTS = new Set(["login.dingtalk.com", "oapi.dingtalk.com"]);
 
 export type StatusState = "good" | "warning" | "danger" | "unknown";
 
@@ -33,84 +34,39 @@ export interface DingTalkDepartmentTreeRow<TDepartment extends DingTalkDepartmen
     selection: DingTalkDepartmentSelection;
 }
 
-export interface SaveDingTalkAllowlistConfigurationOptions<TPolicy, TSource, TFlow> {
+export interface SaveDingTalkAllowlistConfigurationOptions<TStatus> {
     model: DingTalkAllowlistModel;
     sourceSlug?: string;
-    createOrUpdatePolicy: (expression: string) => Promise<TPolicy>;
-    retrieveSource: (sourceSlug: string) => Promise<TSource>;
-    getAuthenticationFlowPk: (source: TSource) => string | null | undefined;
-    getEnrollmentFlowPk: (source: TSource) => string | null | undefined;
-    resolveFlow: (flowPk: string | null | undefined) => Promise<TFlow | undefined>;
-    ensureBinding: (flow: TFlow | undefined, policy: TPolicy) => Promise<void>;
-    refreshStatus: () => Promise<void>;
-    bindingFailureLabel: (kind: DingTalkFlowBindingKind) => string;
-    errorMessage: (error: unknown) => string;
+    expectedRevision?: string | null;
+    applyConfiguration: (
+        model: DingTalkAllowlistModel,
+        expectedRevision: string | null | undefined,
+    ) => Promise<TStatus>;
+    applyStatus: (status: TStatus) => void | Promise<void>;
     onValidatedModel?: (model: DingTalkAllowlistModel) => void;
-    onPolicySaved?: (policy: TPolicy) => void;
-    onSourceRefreshed?: (source: TSource) => void;
-    onFlowsResolved?: (authFlow: TFlow | undefined, enrollmentFlow: TFlow | undefined) => void;
 }
 
-export interface SaveDingTalkAllowlistConfigurationResult<TPolicy, TSource, TFlow> {
+export interface SaveDingTalkAllowlistConfigurationResult<TStatus> {
     model: DingTalkAllowlistModel;
-    policy: TPolicy;
-    source: TSource;
-    authFlow: TFlow | undefined;
-    enrollmentFlow: TFlow | undefined;
-    failures: string[];
+    status: TStatus;
 }
 
-export async function saveDingTalkAllowlistConfiguration<TPolicy, TSource, TFlow>(
-    options: SaveDingTalkAllowlistConfigurationOptions<TPolicy, TSource, TFlow>,
-): Promise<SaveDingTalkAllowlistConfigurationResult<TPolicy, TSource, TFlow> | undefined> {
+export async function saveDingTalkAllowlistConfiguration<TStatus>(
+    options: SaveDingTalkAllowlistConfigurationOptions<TStatus>,
+): Promise<SaveDingTalkAllowlistConfigurationResult<TStatus> | undefined> {
     if (!options.sourceSlug) {
         return undefined;
     }
 
-    const failures: string[] = [];
     const model = validateDingTalkAllowlistModel(options.model);
-    const expression = renderDingTalkAllowlistPolicy(model, options.sourceSlug);
     options.onValidatedModel?.(model);
 
-    const policy = await options.createOrUpdatePolicy(expression);
-    options.onPolicySaved?.(policy);
-
-    const source = await options.retrieveSource(options.sourceSlug);
-    options.onSourceRefreshed?.(source);
-
-    const authFlowPk = options.getAuthenticationFlowPk(source);
-    const enrollmentFlowPk = options.getEnrollmentFlowPk(source);
-    const sameFlow = Boolean(authFlowPk) && authFlowPk === enrollmentFlowPk;
-
-    const authFlow = await options.resolveFlow(authFlowPk);
-    const enrollmentFlow = sameFlow ? authFlow : await options.resolveFlow(enrollmentFlowPk);
-    options.onFlowsResolved?.(authFlow, enrollmentFlow);
-
-    // Bindings are ensured sequentially: concurrent list-then-create calls against the
-    // same flow race each other into duplicate PolicyBinding creates. When both flows
-    // are the same flow, a single binding covers both.
-    await options.ensureBinding(authFlow, policy).catch((error: unknown) => {
-        failures.push(
-            `${options.bindingFailureLabel("authentication")}: ${options.errorMessage(error)}`,
-        );
-    });
-    if (!sameFlow) {
-        await options.ensureBinding(enrollmentFlow, policy).catch((error: unknown) => {
-            failures.push(
-                `${options.bindingFailureLabel("enrollment")}: ${options.errorMessage(error)}`,
-            );
-        });
-    }
-
-    await options.refreshStatus();
+    const status = await options.applyConfiguration(model, options.expectedRevision);
+    await options.applyStatus(status);
 
     return {
         model,
-        policy,
-        source,
-        authFlow,
-        enrollmentFlow,
-        failures,
+        status,
     };
 }
 
@@ -134,6 +90,22 @@ export function splitDingTalkDepartmentIds(value: string): string[] {
                 .filter((deptId) => deptId.length > 0),
         ),
     );
+}
+
+export function validatedDingTalkDiscoveryUrl(value: unknown): string | null {
+    const url = typeof value === "string" ? value.trim() : "";
+    if (!url) {
+        return null;
+    }
+    try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== "https:" || !DINGTALK_DISCOVERY_ALLOWED_HOSTS.has(parsed.host)) {
+            return null;
+        }
+        return parsed.toString();
+    } catch {
+        return null;
+    }
 }
 
 function invalidDingTalkDepartmentId(deptIds: string[]): string | undefined {
@@ -341,57 +313,52 @@ function sortDingTalkDepartments<TDepartment extends DingTalkDepartmentNode>(
     );
 }
 
-function dingtalkDepartmentChildrenByParent<TDepartment extends DingTalkDepartmentNode>(
+interface DingTalkDepartmentTreeIndex<TDepartment extends DingTalkDepartmentNode> {
+    childrenByParent: Map<string, TDepartment[]>;
+    departmentById: Map<string, TDepartment>;
+}
+
+function buildDingTalkDepartmentTreeIndex<TDepartment extends DingTalkDepartmentNode>(
     departments: TDepartment[],
-): Map<string, TDepartment[]> {
-    const departmentIds = new Set(departments.map((department) => department.deptId));
-    const childrenByParent = new Map<string, TDepartment[]>();
+): DingTalkDepartmentTreeIndex<TDepartment> {
+    const departmentById = new Map<string, TDepartment>();
     for (const department of departments) {
+        if (!departmentById.has(department.deptId)) {
+            departmentById.set(department.deptId, department);
+        }
+    }
+
+    const childrenByParent = new Map<string, TDepartment[]>();
+    for (const department of departmentById.values()) {
         // A department that names itself as parent (self-reference) is treated as a root
         // rather than its own child, so it cannot seed an infinite descent below.
         const parentId =
             department.parentId &&
             department.parentId !== department.deptId &&
-            departmentIds.has(department.parentId)
+            departmentById.has(department.parentId)
                 ? department.parentId
                 : "";
-        childrenByParent.set(parentId, [...(childrenByParent.get(parentId) || []), department]);
+        let children = childrenByParent.get(parentId);
+        if (!children) {
+            children = [];
+            childrenByParent.set(parentId, children);
+        }
+        children.push(department);
     }
     for (const [parentId, children] of childrenByParent) {
         childrenByParent.set(parentId, sortDingTalkDepartments(children));
     }
-    return childrenByParent;
-}
-
-function collectDingTalkDepartmentSubtreeIds(
-    childrenByParent: Map<string, DingTalkDepartmentNode[]>,
-    deptId: string,
-    // Guards against cycles in malformed external (DingTalk) data — e.g. duplicate
-    // department entries whose conflicting parentIds form a loop — that would
-    // otherwise recurse until the stack overflows.
-    visited: Set<string> = new Set(),
-): string[] {
-    if (visited.has(deptId)) {
-        return [];
-    }
-    visited.add(deptId);
-    return [
-        deptId,
-        ...(childrenByParent.get(deptId) || []).flatMap((child) =>
-            collectDingTalkDepartmentSubtreeIds(childrenByParent, child.deptId, visited),
-        ),
-    ];
+    return { childrenByParent, departmentById };
 }
 
 function dingtalkDepartmentSelectionState(
-    subtreeIds: string[],
-    selectedDeptIds: Set<string>,
+    selectedCount: number,
+    subtreeSize: number,
 ): DingTalkDepartmentSelection {
-    const selectedCount = subtreeIds.filter((deptId) => selectedDeptIds.has(deptId)).length;
     if (selectedCount === 0) {
         return "unchecked";
     }
-    if (selectedCount === subtreeIds.length) {
+    if (selectedCount === subtreeSize) {
         return "checked";
     }
     return "indeterminate";
@@ -401,32 +368,71 @@ export function buildDingTalkDepartmentTreeRows<TDepartment extends DingTalkDepa
     departments: TDepartment[],
     selectedDeptIds: Set<string>,
 ): DingTalkDepartmentTreeRow<TDepartment>[] {
-    const childrenByParent = dingtalkDepartmentChildrenByParent(departments);
+    const { childrenByParent, departmentById } = buildDingTalkDepartmentTreeIndex(departments);
     const rows: DingTalkDepartmentTreeRow<TDepartment>[] = [];
-    // Each department is rendered at most once; without this a cyclic children map
-    // (malformed external data) would recurse until the stack overflows.
+    const rowByDeptId = new Map<string, DingTalkDepartmentTreeRow<TDepartment>>();
+    const subtreeSizes = new Map<string, number>();
+    const selectedCounts = new Map<string, number>();
     const visited = new Set<string>();
 
-    const visit = (department: TDepartment, level: number): void => {
-        if (visited.has(department.deptId)) {
-            return;
-        }
-        visited.add(department.deptId);
-        rows.push({
-            department,
-            level,
-            selection: dingtalkDepartmentSelectionState(
-                collectDingTalkDepartmentSubtreeIds(childrenByParent, department.deptId),
-                selectedDeptIds,
-            ),
-        });
-        for (const child of childrenByParent.get(department.deptId) || []) {
-            visit(child as TDepartment, level + 1);
+    const visitFrom = (roots: TDepartment[]): void => {
+        const stack = roots
+            .map((department) => ({ department, level: 0, expanded: false }))
+            .reverse();
+
+        while (stack.length > 0) {
+            const frame = stack.pop();
+            if (!frame) {
+                continue;
+            }
+            const { department, level, expanded } = frame;
+            if (expanded) {
+                let subtreeSize = 1;
+                let selectedCount = selectedDeptIds.has(department.deptId) ? 1 : 0;
+                for (const child of childrenByParent.get(department.deptId) || []) {
+                    subtreeSize += subtreeSizes.get(child.deptId) ?? 0;
+                    selectedCount += selectedCounts.get(child.deptId) ?? 0;
+                }
+                subtreeSizes.set(department.deptId, subtreeSize);
+                selectedCounts.set(department.deptId, selectedCount);
+                const row = rowByDeptId.get(department.deptId);
+                if (row) {
+                    row.selection = dingtalkDepartmentSelectionState(selectedCount, subtreeSize);
+                }
+                continue;
+            }
+            if (visited.has(department.deptId)) {
+                continue;
+            }
+            visited.add(department.deptId);
+            const row = {
+                department,
+                level,
+                selection: "unchecked" as DingTalkDepartmentSelection,
+            };
+            rows.push(row);
+            rowByDeptId.set(department.deptId, row);
+            stack.push({ department, level, expanded: true });
+            const children = childrenByParent.get(department.deptId) || [];
+            for (let index = children.length - 1; index >= 0; index -= 1) {
+                const child = children[index];
+                if (child) {
+                    stack.push({ department: child, level: level + 1, expanded: false });
+                }
+            }
         }
     };
 
-    for (const root of childrenByParent.get("") || []) {
-        visit(root, 0);
+    visitFrom(childrenByParent.get("") || []);
+    visitFrom(
+        Array.from(departmentById.values()).filter((department) => !visited.has(department.deptId)),
+    );
+
+    for (const row of rows) {
+        row.selection = dingtalkDepartmentSelectionState(
+            selectedCounts.get(row.department.deptId) ?? 0,
+            subtreeSizes.get(row.department.deptId) ?? 1,
+        );
     }
 
     return rows;
@@ -479,13 +485,26 @@ export function toggleDingTalkDepartmentTreeInput(
     deptId: string,
     selected: boolean,
 ): string {
-    const childrenByParent = dingtalkDepartmentChildrenByParent(departments);
+    const { childrenByParent, departmentById } = buildDingTalkDepartmentTreeIndex(departments);
     const deptIds = new Set(splitDingTalkDepartmentIds(currentInput));
-    for (const subtreeDeptId of collectDingTalkDepartmentSubtreeIds(childrenByParent, deptId)) {
+    if (!departmentById.has(deptId)) {
+        return renderDingTalkDepartmentInput(Array.from(deptIds));
+    }
+    const visited = new Set<string>();
+    const stack = [deptId];
+    while (stack.length > 0) {
+        const subtreeDeptId = stack.pop();
+        if (!subtreeDeptId || visited.has(subtreeDeptId)) {
+            continue;
+        }
+        visited.add(subtreeDeptId);
         if (selected) {
             deptIds.add(subtreeDeptId);
         } else {
             deptIds.delete(subtreeDeptId);
+        }
+        for (const child of childrenByParent.get(subtreeDeptId) || []) {
+            stack.push(child.deptId);
         }
     }
     return renderDingTalkDepartmentInput(Array.from(deptIds));

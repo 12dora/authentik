@@ -74,7 +74,7 @@ export const OR_LIST_FORMATTERS: Intl.ListFormat = new Intl.ListFormat("default"
  * translations — see `AGENTS.md` ("do not do bulk renames"). Any future rename
  * must go through `extract-locales` + re-translation, not an id edit alone.
  */
-const identificationFieldLabel = (fields: UserFieldsEnum[]): string => {
+export const identificationFieldLabel = (fields: UserFieldsEnum[]): string => {
     if (
         fields.length === 2 &&
         fields.includes(UserFieldsEnum.Email) &&

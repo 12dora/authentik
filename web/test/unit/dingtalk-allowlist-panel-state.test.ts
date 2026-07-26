@@ -15,10 +15,11 @@ import {
     toggleDingTalkDepartmentTreeInput,
     updateDingTalkCompany,
     upsertDingTalkCompany,
+    validatedDingTalkDiscoveryUrl,
 } from "#admin/sources/oauth/DingTalkAllowlistPanelState";
 import type { DingTalkAllowlistModel } from "#admin/sources/oauth/DingTalkAllowlistPolicy";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 describe("DingTalkAllowlistPanelState", () => {
     it("uses ak-status-label type for warning states instead of an unknown warning attribute", () => {
@@ -143,6 +144,19 @@ describe("DingTalkAllowlistPanelState", () => {
         expect(splitDingTalkDepartmentIds("10, 20，30 20\n40")).toEqual(["10", "20", "30", "40"]);
     });
 
+    it("accepts only HTTPS DingTalk discovery URLs", () => {
+        expect(validatedDingTalkDiscoveryUrl("https://login.dingtalk.com/oauth2/auth")).toBe(
+            "https://login.dingtalk.com/oauth2/auth",
+        );
+        expect(validatedDingTalkDiscoveryUrl("https://oapi.dingtalk.com/connect/oauth2")).toBe(
+            "https://oapi.dingtalk.com/connect/oauth2",
+        );
+        expect(validatedDingTalkDiscoveryUrl("http://login.dingtalk.com/oauth2/auth")).toBeNull();
+        expect(validatedDingTalkDiscoveryUrl("mailto:admin@example.com")).toBeNull();
+        expect(validatedDingTalkDiscoveryUrl("https://example.com/oauth2/auth")).toBeNull();
+        expect(validatedDingTalkDiscoveryUrl(undefined)).toBeNull();
+    });
+
     it("rejects unsupported department input without mutating the model", () => {
         const model: DingTalkAllowlistModel = {
             companies: [
@@ -261,6 +275,52 @@ describe("DingTalkAllowlistPanelState", () => {
         expect(rows.map((row) => row.department.deptId)).toEqual(["10", "20"]);
     });
 
+    it("renders a closed department cycle as malformed roots instead of dropping every row", () => {
+        const rows = buildDingTalkDepartmentTreeRows(
+            [
+                { deptId: "10", name: "Loop A", parentId: "20" },
+                { deptId: "20", name: "Loop B", parentId: "10" },
+            ],
+            new Set(["20"]),
+        );
+
+        expect(
+            rows.map((row) => ({
+                deptId: row.department.deptId,
+                level: row.level,
+                selection: row.selection,
+            })),
+        ).toEqual([
+            { deptId: "10", level: 0, selection: "indeterminate" },
+            { deptId: "20", level: 1, selection: "checked" },
+        ]);
+    });
+
+    it("renders orphan departments as roots", () => {
+        const rows = buildDingTalkDepartmentTreeRows(
+            [{ deptId: "20", name: "Orphan", parentId: "missing-parent" }],
+            new Set(),
+        );
+
+        expect(rows.map((row) => ({ deptId: row.department.deptId, level: row.level }))).toEqual([
+            { deptId: "20", level: 0 },
+        ]);
+    });
+
+    it("uses the first department when duplicate IDs are present", () => {
+        const rows = buildDingTalkDepartmentTreeRows(
+            [
+                { deptId: "10", name: "Original", parentId: null },
+                { deptId: "10", name: "Duplicate", parentId: null },
+            ],
+            new Set(["10"]),
+        );
+
+        expect(rows).toHaveLength(1);
+        expect(rows[0]?.department.name).toBe("Original");
+        expect(rows[0]?.selection).toBe("checked");
+    });
+
     it("treats a self-referencing department as a root instead of its own child", () => {
         const rows = buildDingTalkDepartmentTreeRows(
             [{ deptId: "10", name: "Self", parentId: "10" }],
@@ -291,6 +351,57 @@ describe("DingTalkAllowlistPanelState", () => {
         expect(
             toggleDingTalkDepartmentTreeInput("manual-1 10 20 30", departments, "10", false),
         ).toEqual("30 manual-1");
+    });
+
+    it("toggles a closed department cycle once per department", () => {
+        const departments = [
+            { deptId: "10", name: "Loop A", parentId: "20" },
+            { deptId: "20", name: "Loop B", parentId: "10" },
+        ];
+
+        expect(toggleDingTalkDepartmentTreeInput("", departments, "10", true)).toEqual("10 20");
+        expect(toggleDingTalkDepartmentTreeInput("10 20 30", departments, "10", false)).toEqual(
+            "30",
+        );
+    });
+
+    it("builds a 10k-wide department tree within a linear access budget", () => {
+        let reads = 0;
+        const departments = Array.from({ length: 10_000 }, (_, index) => {
+            const deptId = String(index + 1).padStart(5, "0");
+            return {
+                get deptId() {
+                    reads += 1;
+                    return deptId;
+                },
+                name: `Department ${deptId}`,
+                parentId: null,
+            };
+        });
+
+        const rows = buildDingTalkDepartmentTreeRows(departments, new Set(["00001", "10000"]));
+
+        expect(rows).toHaveLength(10_000);
+        expect(rows[0]?.selection).toBe("checked");
+        expect(rows.at(-1)?.selection).toBe("checked");
+        expect(reads).toBeLessThan(700_000);
+    });
+
+    it("builds and toggles a 10k-deep chain without recursive stack growth", () => {
+        const departments = Array.from({ length: 10_000 }, (_, index) => ({
+            deptId: String(index + 1),
+            name: `Department ${index + 1}`,
+            parentId: index === 0 ? null : String(index),
+        }));
+
+        const rows = buildDingTalkDepartmentTreeRows(departments, new Set(["10000"]));
+
+        expect(rows).toHaveLength(10_000);
+        expect(rows[0]).toMatchObject({ level: 0, selection: "indeterminate" });
+        expect(rows.at(-1)).toMatchObject({ level: 9_999, selection: "checked" });
+        expect(
+            toggleDingTalkDepartmentTreeInput("", departments, "1", true).split(" "),
+        ).toHaveLength(10_000);
     });
 
     it("filters department tree rows by id, name, or parent id case-insensitively", () => {
@@ -374,17 +485,9 @@ describe("DingTalkAllowlistPanelState", () => {
         );
     });
 
-    it("saves and applies through policy, source, flows, bindings, and refresh in order", async () => {
+    it("validates and applies the allowlist through a single revisioned server call", async () => {
         const calls: string[] = [];
-        const policy = { pk: "policy-pk" };
-        const source = {
-            authenticationFlow: "auth-flow-pk",
-            enrollmentFlow: "enrollment-flow-pk",
-        };
-        const flows = {
-            "auth-flow-pk": { policybindingmodelPtrId: "auth-binding-target" },
-            "enrollment-flow-pk": { policybindingmodelPtrId: "enrollment-binding-target" },
-        };
+        const status = { revision: "rev-2" };
 
         const result = await saveDingTalkAllowlistConfiguration({
             model: {
@@ -398,32 +501,26 @@ describe("DingTalkAllowlistPanelState", () => {
                 ],
             },
             sourceSlug: "dingtalk",
-            createOrUpdatePolicy: async (expression) => {
-                calls.push("policy");
-                expect(expression).toContain("authentik-managed-dingtalk-allowlist");
-                return policy;
+            expectedRevision: "rev-1",
+            applyConfiguration: async (model, expectedRevision) => {
+                calls.push("apply");
+                expect(expectedRevision).toBe("rev-1");
+                expect(model).toEqual({
+                    companies: [
+                        {
+                            corpId: "corp-a",
+                            label: "Alpha",
+                            allowAll: false,
+                            deptIds: ["10"],
+                        },
+                    ],
+                });
+                return status;
             },
-            retrieveSource: async () => {
-                calls.push("source");
-                return source;
+            applyStatus: async (nextStatus) => {
+                calls.push("status");
+                expect(nextStatus).toBe(status);
             },
-            getAuthenticationFlowPk: (refreshedSource) => refreshedSource.authenticationFlow,
-            getEnrollmentFlowPk: (refreshedSource) => refreshedSource.enrollmentFlow,
-            resolveFlow: async (flowPk) => {
-                calls.push(`flow:${flowPk}`);
-                return flows[flowPk as keyof typeof flows];
-            },
-            ensureBinding: async (flow) => {
-                calls.push(`binding:${flow?.policybindingmodelPtrId}`);
-            },
-            refreshStatus: async () => {
-                calls.push("refresh");
-            },
-            bindingFailureLabel: (kind) =>
-                kind === "authentication"
-                    ? "Authentication flow binding"
-                    : "Enrollment flow binding",
-            errorMessage: (error) => (error instanceof Error ? error.message : String(error)),
         });
 
         expect(result).toEqual({
@@ -437,30 +534,12 @@ describe("DingTalkAllowlistPanelState", () => {
                     },
                 ],
             },
-            policy,
-            source,
-            authFlow: flows["auth-flow-pk"],
-            enrollmentFlow: flows["enrollment-flow-pk"],
-            failures: [],
+            status,
         });
-        expect(calls.indexOf("policy")).toBeLessThan(calls.indexOf("source"));
-        expect(calls.indexOf("source")).toBeLessThan(calls.indexOf("flow:auth-flow-pk"));
-        expect(calls.indexOf("source")).toBeLessThan(calls.indexOf("flow:enrollment-flow-pk"));
-        expect(calls.indexOf("flow:auth-flow-pk")).toBeLessThan(
-            calls.indexOf("binding:auth-binding-target"),
-        );
-        expect(calls.indexOf("flow:enrollment-flow-pk")).toBeLessThan(
-            calls.indexOf("binding:enrollment-binding-target"),
-        );
-        expect(calls.indexOf("binding:auth-binding-target")).toBeLessThan(calls.indexOf("refresh"));
-        expect(calls.indexOf("binding:enrollment-binding-target")).toBeLessThan(
-            calls.indexOf("refresh"),
-        );
+        expect(calls).toEqual(["apply", "status"]);
     });
 
-    it("keeps refreshing status when one flow binding fails", async () => {
-        const calls: string[] = [];
-
+    it("does not apply without a source slug", async () => {
         const result = await saveDingTalkAllowlistConfiguration({
             model: {
                 companies: [
@@ -472,74 +551,66 @@ describe("DingTalkAllowlistPanelState", () => {
                     },
                 ],
             },
-            sourceSlug: "dingtalk",
-            createOrUpdatePolicy: async () => ({ pk: "policy-pk" }),
-            retrieveSource: async () => ({
-                authenticationFlow: "auth-flow-pk",
-                enrollmentFlow: "enrollment-flow-pk",
-            }),
-            getAuthenticationFlowPk: (source) => source.authenticationFlow,
-            getEnrollmentFlowPk: (source) => source.enrollmentFlow,
-            resolveFlow: async (flowPk) => ({ flowPk }),
-            ensureBinding: async (flow) => {
-                calls.push(`binding:${flow?.flowPk}`);
-                if (flow?.flowPk === "enrollment-flow-pk") {
-                    throw new Error("missing stage");
-                }
+            applyConfiguration: async () => {
+                throw new Error("must not apply");
             },
-            refreshStatus: async () => {
-                calls.push("refresh");
+            applyStatus: async () => {
+                throw new Error("must not apply status");
             },
-            bindingFailureLabel: (kind) =>
-                kind === "authentication"
-                    ? "Authentication flow binding"
-                    : "Enrollment flow binding",
-            errorMessage: (error) => (error instanceof Error ? error.message : String(error)),
         });
 
-        expect(result?.failures).toEqual(["Enrollment flow binding: missing stage"]);
-        expect(calls).toContain("binding:auth-flow-pk");
-        expect(calls).toContain("binding:enrollment-flow-pk");
-        expect(calls.at(-1)).toBe("refresh");
+        expect(result).toBeUndefined();
     });
 
-    it("ensures the shared flow binding only once when both flows are the same flow", async () => {
-        const bindingCalls: string[] = [];
+    it("does not apply returned status when the revisioned apply call fails", async () => {
+        const applyStatus = vi.fn();
 
-        const result = await saveDingTalkAllowlistConfiguration({
-            model: {
-                companies: [
-                    {
-                        corpId: "corp-a",
-                        label: "Alpha",
-                        allowAll: true,
-                        deptIds: [],
-                    },
-                ],
-            },
-            sourceSlug: "dingtalk",
-            createOrUpdatePolicy: async () => ({ pk: "policy-pk" }),
-            retrieveSource: async () => ({
-                authenticationFlow: "shared-flow-pk",
-                enrollmentFlow: "shared-flow-pk",
+        await expect(
+            saveDingTalkAllowlistConfiguration({
+                model: {
+                    companies: [
+                        {
+                            corpId: "corp-a",
+                            label: "Alpha",
+                            allowAll: true,
+                            deptIds: [],
+                        },
+                    ],
+                },
+                sourceSlug: "dingtalk",
+                expectedRevision: "rev-1",
+                applyConfiguration: async () => {
+                    throw new Error("revision_conflict");
+                },
+                applyStatus,
             }),
-            getAuthenticationFlowPk: (source) => source.authenticationFlow,
-            getEnrollmentFlowPk: (source) => source.enrollmentFlow,
-            resolveFlow: async (flowPk) => ({ flowPk }),
-            ensureBinding: async (flow) => {
-                bindingCalls.push(`binding:${flow?.flowPk}`);
-            },
-            refreshStatus: async () => {},
-            bindingFailureLabel: (kind) =>
-                kind === "authentication"
-                    ? "Authentication flow binding"
-                    : "Enrollment flow binding",
-            errorMessage: (error) => (error instanceof Error ? error.message : String(error)),
-        });
+        ).rejects.toThrow("revision_conflict");
 
-        expect(bindingCalls).toEqual(["binding:shared-flow-pk"]);
-        expect(result?.failures).toEqual([]);
-        expect(result?.authFlow).toBe(result?.enrollmentFlow);
+        expect(applyStatus).not.toHaveBeenCalled();
+    });
+
+    it("validates before calling the revisioned apply endpoint", async () => {
+        const applyConfiguration = vi.fn();
+
+        await expect(
+            saveDingTalkAllowlistConfiguration({
+                model: {
+                    companies: [
+                        {
+                            corpId: "corp-a",
+                            label: "Alpha",
+                            allowAll: false,
+                            deptIds: [],
+                        },
+                    ],
+                },
+                sourceSlug: "dingtalk",
+                applyConfiguration,
+                applyStatus: async () => undefined,
+            }),
+        ).rejects.toThrow(/at least one department/);
+
+        expect(applyConfiguration).not.toHaveBeenCalled();
     });
 
     it("flags a restricted company with no departments as missing", () => {

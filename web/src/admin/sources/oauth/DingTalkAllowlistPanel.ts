@@ -1,8 +1,9 @@
 import "#components/ak-status-label";
 import "#elements/buttons/SpinnerButton/index";
-import "#elements/forms/ConfirmationForm";
 import "#elements/EmptyState";
 import "#elements/Alert";
+
+import { DingTalkAllowlistApi, type DingTalkAllowlistStatus } from "./DingTalkAllowlistApi";
 
 import { DEFAULT_CONFIG } from "#common/api/config";
 import { parseAPIResponseError, pluckErrorDetail } from "#common/errors/network";
@@ -27,25 +28,16 @@ import {
     saveDingTalkAllowlistConfiguration,
     updateDingTalkCompany,
     upsertDingTalkCompany,
+    validatedDingTalkDiscoveryUrl,
 } from "#admin/sources/oauth/DingTalkAllowlistPanelState";
 import {
     DingTalkAllowlistModel,
     dingTalkAllowlistModelFromStoredConfig,
-    hasDingTalkAllowlistPolicyMarker,
-    parseDingTalkAllowlistPolicy,
 } from "#admin/sources/oauth/DingTalkAllowlistPolicy";
 import { DingTalkDepartmentPickerModal } from "#admin/sources/oauth/DingTalkDepartmentPickerModal";
+import { confirmDingTalkDestructiveAction } from "#admin/sources/oauth/DingTalkDestructiveActionModal";
 
-import {
-    DingTalkAllowlistStatusResponse,
-    ExpressionPolicy,
-    Flow,
-    FlowsApi,
-    OAuthSource,
-    PoliciesApi,
-    PolicyBinding,
-    SourcesApi,
-} from "@goauthentik/api";
+import { OAuthSource, SourcesApi } from "@goauthentik/api";
 
 import { msg, str } from "@lit/localize";
 import { css, CSSResult, html, nothing, PropertyValues, TemplateResult } from "lit";
@@ -112,6 +104,16 @@ function normalizeDingTalkDepartments(value: unknown): DingTalkDepartment[] {
     });
 }
 
+function initialLastDepartmentFetchStatus(): StatusItem {
+    return {
+        label: msg("Last department fetch", {
+            id: "sources.oauth.dingtalk-allowlist.status.departments.label",
+        }),
+        state: "unknown",
+        detail: msg("Not run", { id: "sources.oauth.dingtalk-allowlist.status.not-run" }),
+    };
+}
+
 // Immutably drops a key from a per-corp state record so removing a company also
 // discards its cached inputs/departments instead of leaking them onto a later re-add.
 function omitRecordKey<T>(record: Record<string, T>, key: string): Record<string, T> {
@@ -132,19 +134,7 @@ export class DingTalkAllowlistPanel extends AKElement {
     private model: DingTalkAllowlistModel = { companies: [] };
 
     @state()
-    private policy?: ExpressionPolicy;
-
-    @state()
-    private authFlow?: Flow;
-
-    @state()
-    private enrollmentFlow?: Flow;
-
-    @state()
-    private authBinding?: PolicyBinding;
-
-    @state()
-    private enrollmentBinding?: PolicyBinding;
+    private status?: DingTalkAllowlistStatus;
 
     @state()
     private manualCorpId = "";
@@ -165,13 +155,7 @@ export class DingTalkAllowlistPanel extends AKElement {
     private lastDiscovery?: DingTalkDiscoveryResult;
 
     @state()
-    private lastDepartmentFetch: StatusItem = {
-        label: msg("Last department fetch", {
-            id: "sources.oauth.dingtalk-allowlist.status.departments.label",
-        }),
-        state: "unknown",
-        detail: msg("Not run", { id: "sources.oauth.dingtalk-allowlist.status.not-run" }),
-    };
+    private lastDepartmentFetch: StatusItem = initialLastDepartmentFetchStatus();
 
     @state()
     private sourceLinkGuard: StatusItem = {
@@ -213,9 +197,8 @@ export class DingTalkAllowlistPanel extends AKElement {
     // rewrite (and thus the `.value` write-back) that would break Chinese input.
     private composing = false;
 
-    private policiesApi = new PoliciesApi(DEFAULT_CONFIG);
-    private flowsApi = new FlowsApi(DEFAULT_CONFIG);
     private sourcesApi = new SourcesApi(DEFAULT_CONFIG);
+    private allowlistApi = new DingTalkAllowlistApi(DEFAULT_CONFIG);
 
     static styles: CSSResult[] = [
         PFButton,
@@ -318,24 +301,17 @@ export class DingTalkAllowlistPanel extends AKElement {
         this.refreshGeneration += 1;
         this.finishDiscovery();
         this.model = { companies: [] };
-        this.policy = undefined;
-        this.authFlow = undefined;
-        this.enrollmentFlow = undefined;
-        this.authBinding = undefined;
-        this.enrollmentBinding = undefined;
+        this.status = undefined;
         this.manualCorpId = "";
         this.manualLabel = "";
         this.departmentInputs = {};
         this.detectedSharedConfig = undefined;
         this.lastDiscovery = undefined;
+        this.lastDepartmentFetch = initialLastDepartmentFetchStatus();
         this.expressionValid = undefined;
         this.partialFailures = [];
         this.loaded = false;
         this.dirty = false;
-    }
-
-    private get policyName(): string {
-        return `dingtalk-allowlist-${this.source?.slug || ""}`;
     }
 
     private markDirty(): void {
@@ -477,29 +453,18 @@ export class DingTalkAllowlistPanel extends AKElement {
         const sourceSlug = this.source.slug;
         const generation = ++this.refreshGeneration;
         const failures: string[] = [];
-        let modelFromPolicy = false;
 
         try {
-            modelFromPolicy = await this.refreshManagedPolicy(generation, sourceSlug);
-        } catch (error) {
-            failures.push(await this.apiErrorMessage(error));
-        }
-
-        try {
-            await this.refreshFlowsAndBindings(generation, sourceSlug);
-        } catch (error) {
-            failures.push(await this.apiErrorMessage(error));
-        }
-
-        try {
-            const status = await this.sourcesApi.sourcesOauthDingtalkAllowlistStatusRetrieve({
+            const status = await this.allowlistApi.sourcesOauthDingtalkAllowlistStatusRetrieve({
                 sourceSlug,
             });
             if (generation === this.refreshGeneration && this.source?.slug === sourceSlug) {
-                this.applyBackendStatus(status, modelFromPolicy);
+                this.applyBackendStatus(status);
             }
         } catch (error) {
             if (generation === this.refreshGeneration && this.source?.slug === sourceSlug) {
+                this.status = undefined;
+                this.expressionValid = undefined;
                 this.sourceLinkGuard = {
                     label: this.sourceLinkGuard.label,
                     state: "unknown",
@@ -532,55 +497,9 @@ export class DingTalkAllowlistPanel extends AKElement {
         }
     }
 
-    private async refreshManagedPolicy(generation: number, sourceSlug: string): Promise<boolean> {
-        const policyName = `dingtalk-allowlist-${sourceSlug}`;
-        const response = await this.policiesApi.policiesExpressionList({
-            name: policyName,
-            pageSize: 1,
-        });
-        if (generation !== this.refreshGeneration || this.source?.slug !== sourceSlug) {
-            return false;
-        }
-        this.policy = response.results.find((policy) => policy.name === policyName);
-        if (!this.policy) {
-            this.expressionValid = undefined;
-            return false;
-        }
-        const parsed = parseDingTalkAllowlistPolicy(this.policy.expression);
-        if (!parsed) {
-            this.expressionValid = false;
-            return false;
-        }
-        this.expressionValid = true;
-        if (!this.dirty) {
-            this.model = parsed;
-            this.departmentInputs = dingtalkDepartmentInputsFromModel(parsed);
-        }
-        return true;
-    }
-
-    private async refreshFlowsAndBindings(generation: number, sourceSlug: string): Promise<void> {
-        const authFlow = await this.resolveFlow(this.source?.authenticationFlow);
-        const enrollmentFlow = await this.resolveFlow(this.source?.enrollmentFlow);
-
-        const [authBinding, enrollmentBinding] = await Promise.all([
-            this.findPolicyBinding(authFlow?.policybindingmodelPtrId, this.policy?.pk),
-            this.findPolicyBinding(enrollmentFlow?.policybindingmodelPtrId, this.policy?.pk),
-        ]);
-
-        if (generation !== this.refreshGeneration || this.source?.slug !== sourceSlug) {
-            return;
-        }
-        this.authFlow = authFlow;
-        this.enrollmentFlow = enrollmentFlow;
-        this.authBinding = authBinding;
-        this.enrollmentBinding = enrollmentBinding;
-    }
-
-    private applyBackendStatus(
-        status: DingTalkAllowlistStatusResponse,
-        modelFromPolicy: boolean,
-    ): void {
+    private applyBackendStatus(status: DingTalkAllowlistStatus): void {
+        this.status = status;
+        this.expressionValid = status.managedPolicy._exists ? true : undefined;
         // The status config is discovered by walking every binding on the shared
         // flows and can belong to another DingTalk source. It must NOT prefill this
         // source's editable model: doing so would silently show (and, on save, adopt)
@@ -589,7 +508,7 @@ export class DingTalkAllowlistPanel extends AKElement {
         // editable and saveable here.
         const config = status.config as { companies?: unknown } | null;
         if (
-            !modelFromPolicy &&
+            !status.managedPolicy._exists &&
             !this.dirty &&
             config &&
             Array.isArray(config.companies) &&
@@ -598,6 +517,15 @@ export class DingTalkAllowlistPanel extends AKElement {
             this.detectedSharedConfig = dingTalkAllowlistModelFromStoredConfig(config) ?? undefined;
         } else {
             this.detectedSharedConfig = undefined;
+        }
+        if (status.managedPolicy._exists && !this.dirty) {
+            const parsed = dingTalkAllowlistModelFromStoredConfig(status.config);
+            this.model = parsed ?? { companies: [] };
+            this.departmentInputs = parsed ? dingtalkDepartmentInputsFromModel(parsed) : {};
+        }
+        if (!status.managedPolicy._exists && !this.dirty) {
+            this.model = { companies: [] };
+            this.departmentInputs = {};
         }
 
         const enabled = status.sourceLinkGuard?.enabled ?? false;
@@ -630,53 +558,6 @@ export class DingTalkAllowlistPanel extends AKElement {
         this.markDirty();
     }
 
-    private async resolveFlow(flowPk?: string | null): Promise<Flow | undefined> {
-        if (!flowPk) {
-            return undefined;
-        }
-        const response = await this.flowsApi.flowsInstancesList({ flowUuid: flowPk, pageSize: 1 });
-        return response.results[0];
-    }
-
-    private async findPolicyBinding(
-        target?: string,
-        policyPk?: string,
-    ): Promise<PolicyBinding | undefined> {
-        if (!target || !policyPk) {
-            return undefined;
-        }
-        const response = await this.policiesApi.policiesBindingsList({
-            target,
-            policy: policyPk,
-            pageSize: 20,
-        });
-        return response.results.find((binding) => binding.policy === policyPk);
-    }
-
-    // Pages through every policy binding matching the filter. A flow can carry more
-    // than one page of bindings, so callers that create or delete must see the full
-    // set rather than only the first page.
-    private async listAllPolicyBindings(params: {
-        target?: string;
-        policy?: string;
-    }): Promise<PolicyBinding[]> {
-        const results: PolicyBinding[] = [];
-        let page = 1;
-        for (;;) {
-            const response = await this.policiesApi.policiesBindingsList({
-                ...params,
-                page,
-                pageSize: 100,
-            });
-            results.push(...response.results);
-            if (page >= response.pagination.totalPages) {
-                break;
-            }
-            page += 1;
-        }
-        return results;
-    }
-
     private upsertCompany(
         corpId: string,
         label: string,
@@ -705,7 +586,7 @@ export class DingTalkAllowlistPanel extends AKElement {
             });
             return;
         }
-        this.upsertCompany(corpId, normalizeOptionalString(this.manualLabel) || corpId, true, []);
+        this.upsertCompany(corpId, normalizeOptionalString(this.manualLabel) || corpId, false, []);
         this.manualCorpId = "";
         this.manualLabel = "";
     }
@@ -824,7 +705,15 @@ export class DingTalkAllowlistPanel extends AKElement {
                 this.finishDiscovery();
                 return;
             }
-            popup.location.assign(start.url);
+            const discoveryUrl = validatedDingTalkDiscoveryUrl(start.url);
+            if (!discoveryUrl) {
+                throw new Error(
+                    msg("DingTalk discovery failed.", {
+                        id: "sources.oauth.dingtalk-allowlist.discovery.failed",
+                    }),
+                );
+            }
+            popup.location.assign(discoveryUrl);
         } catch (error) {
             popup.close();
             this.finishDiscovery();
@@ -938,42 +827,19 @@ export class DingTalkAllowlistPanel extends AKElement {
         const result = await saveDingTalkAllowlistConfiguration({
             model: departmentInputResult.model,
             sourceSlug,
-            createOrUpdatePolicy: (expression) => this.createOrUpdatePolicy(expression, sourceSlug),
-            retrieveSource: (slug) =>
-                this.sourcesApi.sourcesOauthRetrieve({
-                    slug,
+            expectedRevision: this.status?.revision ?? null,
+            applyConfiguration: (model, expectedRevision) =>
+                this.allowlistApi.sourcesOauthDingtalkAllowlistApplyCreate(sourceSlug, {
+                    config: model,
+                    expectedRevision,
                 }),
-            getAuthenticationFlowPk: (source) => source.authenticationFlow,
-            getEnrollmentFlowPk: (source) => source.enrollmentFlow,
-            resolveFlow: (flowPk) => this.resolveFlow(flowPk),
-            ensureBinding: (flow, policy) => this.ensureBinding(flow, policy),
-            refreshStatus: () => this.refreshStatus(),
-            bindingFailureLabel: (kind) =>
-                kind === "authentication"
-                    ? msg("Authentication flow binding", {
-                          id: "sources.oauth.dingtalk-allowlist.binding.auth.label",
-                      })
-                    : msg("Enrollment flow binding", {
-                          id: "sources.oauth.dingtalk-allowlist.binding.enrollment.label",
-                      }),
-            errorMessage: (error) => this.errorMessage(error),
-            onValidatedModel: (model) => {
-                if (this.source?.slug === sourceSlug) this.model = model;
-            },
-            onPolicySaved: (policy) => {
+            applyStatus: (status) => {
                 if (this.source?.slug !== sourceSlug) return;
-                this.policy = policy;
-                this.expressionValid = true;
-                // The configured allowlist is persisted; refreshes may take over again.
+                this.applyBackendStatus(status);
                 this.dirty = false;
             },
-            onSourceRefreshed: (source) => {
-                if (this.source?.slug === sourceSlug) this.source = source;
-            },
-            onFlowsResolved: (authFlow, enrollmentFlow) => {
-                if (this.source?.slug !== sourceSlug) return;
-                this.authFlow = authFlow;
-                this.enrollmentFlow = enrollmentFlow;
+            onValidatedModel: (model) => {
+                if (this.source?.slug === sourceSlug) this.model = model;
             },
         });
 
@@ -981,131 +847,59 @@ export class DingTalkAllowlistPanel extends AKElement {
             return;
         }
 
-        this.partialFailures = [...result.failures, ...this.partialFailures];
-
         showMessage({
-            level: result.failures.length > 0 ? MessageLevel.warning : MessageLevel.success,
-            message:
-                result.failures.length > 0
-                    ? msg("DingTalk allowlist saved with binding warnings.", {
-                          id: "sources.oauth.dingtalk-allowlist.save.partial",
-                      })
-                    : msg("DingTalk allowlist saved and applied.", {
-                          id: "sources.oauth.dingtalk-allowlist.save.success",
-                      }),
+            level: MessageLevel.success,
+            message: msg("DingTalk allowlist saved and applied.", {
+                id: "sources.oauth.dingtalk-allowlist.save.success",
+            }),
         });
-    }
-
-    private async createOrUpdatePolicy(
-        expression: string,
-        sourceSlug: string,
-    ): Promise<ExpressionPolicy> {
-        const policyName = `dingtalk-allowlist-${sourceSlug}`;
-        const existing = await this.policiesApi.policiesExpressionList({
-            name: policyName,
-            pageSize: 1,
-        });
-        const policy = existing.results.find((candidate) => candidate.name === policyName);
-        if (!policy) {
-            return this.policiesApi.policiesExpressionCreate({
-                expressionPolicyRequest: {
-                    name: policyName,
-                    expression,
-                    executionLogging: false,
-                },
-            });
-        }
-        if (!hasDingTalkAllowlistPolicyMarker(policy.expression)) {
-            throw new Error(
-                msg(
-                    "A policy with the managed DingTalk allowlist name exists but does not contain the managed marker.",
-                    {
-                        id: "sources.oauth.dingtalk-allowlist.policy.unmanaged-existing-policy",
-                    },
-                ),
-            );
-        }
-        return this.policiesApi.policiesExpressionPartialUpdate({
-            policyUuid: policy.pk,
-            patchedExpressionPolicyRequest: {
-                expression,
-                executionLogging: policy.executionLogging ?? false,
-            },
-        });
-    }
-
-    private async ensureBinding(flow: Flow | undefined, policy: ExpressionPolicy): Promise<void> {
-        if (!flow?.policybindingmodelPtrId) {
-            throw new Error(
-                msg("Flow is not configured on this source.", {
-                    id: "sources.oauth.dingtalk-allowlist.binding.flow-not-configured",
-                }),
-            );
-        }
-
-        try {
-            // List every binding on the flow (not just this policy's, and across all
-            // pages) so an existing managed binding beyond page 1 is reused instead of
-            // duplicated, and a newly created binding gets an order after all others.
-            const existing = await this.listAllPolicyBindings({
-                target: flow.policybindingmodelPtrId,
-            });
-            const current = existing.find((binding) => binding.policy === policy.pk);
-            if (current) {
-                // Only re-enable a disabled binding; timeout, order, and failure
-                // handling stay whatever the admin configured.
-                if (!current.enabled) {
-                    await this.policiesApi.policiesBindingsPartialUpdate({
-                        policyBindingUuid: current.pk,
-                        patchedPolicyBindingRequest: {
-                            enabled: true,
-                        },
-                    });
-                }
-                return;
-            }
-
-            const nextOrder =
-                existing.reduce((order, binding) => Math.max(order, binding.order), 0) + 10;
-            await this.policiesApi.policiesBindingsCreate({
-                policyBindingRequest: {
-                    target: flow.policybindingmodelPtrId,
-                    policy: policy.pk,
-                    enabled: true,
-                    order: nextOrder,
-                    timeout: 30,
-                    failureResult: false,
-                },
-            });
-        } catch (error) {
-            throw new Error(await this.apiErrorMessage(error));
-        }
     }
 
     private async removeManagedConfiguration(): Promise<void> {
-        const policy = this.policy;
-        if (!policy) {
+        const sourceSlug = this.source?.slug;
+        if (!sourceSlug || !this.status?.managedPolicy._exists) {
             return;
         }
-        // Delete every binding referencing this policy across all pages; a residual
-        // binding on a later page would FK-block the policy delete below.
-        const bindings = await this.listAllPolicyBindings({ policy: policy.pk });
-        for (const binding of bindings) {
-            await this.policiesApi.policiesBindingsDestroy({
-                policyBindingUuid: binding.pk,
-            });
-        }
-        await this.policiesApi.policiesExpressionDestroy({
-            policyUuid: policy.pk,
-        });
-        this.policy = undefined;
-        this.authBinding = undefined;
-        this.enrollmentBinding = undefined;
+        const status = await this.allowlistApi.sourcesOauthDingtalkAllowlistRemoveCreate(
+            sourceSlug,
+            {
+                expectedRevision: this.status.revision,
+            },
+        );
+        this.applyBackendStatus(status);
         this.model = { companies: [] };
         this.departmentInputs = {};
         this.expressionValid = undefined;
         this.dirty = false;
-        await this.refreshStatus();
+    }
+
+    private async confirmRemoveManagedConfiguration(event: Event): Promise<void> {
+        await confirmDingTalkDestructiveAction(
+            {
+                headline: msg("Remove DingTalk allowlist", {
+                    id: "sources.oauth.dingtalk-allowlist.remove.header",
+                }),
+                body: html`<p>
+                    ${msg(
+                        "This deletes the managed allowlist policy and all of its flow bindings. All DingTalk logins will then be denied until a new allowlist is saved and applied.",
+                        {
+                            id: "sources.oauth.dingtalk-allowlist.remove.body",
+                        },
+                    )}
+                </p>`,
+                action: msg("Remove allowlist", {
+                    id: "sources.oauth.dingtalk-allowlist.remove.action",
+                }),
+                successMessage: msg("DingTalk allowlist policy and bindings removed.", {
+                    id: "sources.oauth.dingtalk-allowlist.remove.success",
+                }),
+                errorMessage: msg("Failed to remove the DingTalk allowlist policy.", {
+                    id: "sources.oauth.dingtalk-allowlist.remove.error",
+                }),
+                onConfirm: () => this.removeManagedConfiguration(),
+            },
+            event.currentTarget instanceof HTMLElement ? event.currentTarget : undefined,
+        );
     }
 
     private errorMessage(error: unknown): string {
@@ -1142,6 +936,20 @@ export class DingTalkAllowlistPanel extends AKElement {
     }
 
     private statusItems(): StatusItem[] {
+        const stale = this.partialFailures.length > 0;
+        const staleDetail = stale
+            ? msg("Some DingTalk status checks failed. See the details below.", {
+                  id: "sources.oauth.dingtalk-allowlist.status.refresh-failed",
+              })
+            : undefined;
+        const staleState = (state: StatusItem["state"]): StatusItem["state"] =>
+            stale && state === "good" ? "unknown" : state;
+        const managedPolicy = this.status?.managedPolicy;
+        const enabledPolicyBindings =
+            this.status?.policyBindings.filter((binding) => binding._exists && binding.enabled) ??
+            [];
+        const bindingState = enabledPolicyBindings.length > 0 ? "good" : "danger";
+
         return [
             {
                 label: msg("Source enabled", {
@@ -1156,30 +964,34 @@ export class DingTalkAllowlistPanel extends AKElement {
                 label: msg("Managed policy exists", {
                     id: "sources.oauth.dingtalk-allowlist.status.policy-exists",
                 }),
-                state: this.policy ? "good" : "danger",
+                state: staleState(managedPolicy?._exists ? "good" : "danger"),
                 goodLabel: msg("Present", {
                     id: "sources.oauth.dingtalk-allowlist.status.good.present",
                 }),
-                detail: this.policy
-                    ? html`<button
-                          class="pf-c-button pf-m-link pf-m-inline"
-                          type="button"
-                          ${modalInvoker(ExpressionPolicyForm, { instancePk: this.policy.pk })}
-                      >
-                          ${this.policy.name}
-                      </button>`
-                    : undefined,
+                detail: stale
+                    ? staleDetail
+                    : managedPolicy?._exists && managedPolicy.pk
+                      ? html`<button
+                            class="pf-c-button pf-m-link pf-m-inline"
+                            type="button"
+                            ${modalInvoker(ExpressionPolicyForm, { instancePk: managedPolicy.pk })}
+                        >
+                            ${managedPolicy.name}
+                        </button>`
+                      : undefined,
             },
             {
                 label: msg("Expression validates", {
                     id: "sources.oauth.dingtalk-allowlist.status.expression-validates",
                 }),
                 state:
-                    this.expressionValid === true
-                        ? "good"
-                        : this.expressionValid === false
-                          ? "danger"
-                          : "unknown",
+                    stale && this.expressionValid === true
+                        ? "unknown"
+                        : this.expressionValid === true
+                          ? "good"
+                          : this.expressionValid === false
+                            ? "danger"
+                            : "unknown",
                 goodLabel: msg("Valid", {
                     id: "sources.oauth.dingtalk-allowlist.status.good.valid",
                 }),
@@ -1188,33 +1000,21 @@ export class DingTalkAllowlistPanel extends AKElement {
                 label: msg("Authentication flow binding", {
                     id: "sources.oauth.dingtalk-allowlist.status.auth-binding",
                 }),
-                state: this.authBinding?.enabled ? "good" : "danger",
+                state: staleState(bindingState),
                 goodLabel: msg("Bound", {
                     id: "sources.oauth.dingtalk-allowlist.status.good.bound",
                 }),
-                detail: this.authFlow
-                    ? html`<a href=${`#/flow/flows/${this.authFlow.slug}`}
-                          >${this.authFlow.name}</a
-                      >`
-                    : msg("No flow configured", {
-                          id: "sources.oauth.dingtalk-allowlist.status.no-flow",
-                      }),
+                detail: stale ? staleDetail : undefined,
             },
             {
                 label: msg("Enrollment flow binding", {
                     id: "sources.oauth.dingtalk-allowlist.status.enrollment-binding",
                 }),
-                state: this.enrollmentBinding?.enabled ? "good" : "danger",
+                state: staleState(bindingState),
                 goodLabel: msg("Bound", {
                     id: "sources.oauth.dingtalk-allowlist.status.good.bound",
                 }),
-                detail: this.enrollmentFlow
-                    ? html`<a href=${`#/flow/flows/${this.enrollmentFlow.slug}`}
-                          >${this.enrollmentFlow.name}</a
-                      >`
-                    : msg("No flow configured", {
-                          id: "sources.oauth.dingtalk-allowlist.status.no-enrollment-flow",
-                      }),
+                detail: stale ? staleDetail : undefined,
             },
             this.sourceLinkGuard,
             this.lastDepartmentFetch,
@@ -1528,7 +1328,7 @@ export class DingTalkAllowlistPanel extends AKElement {
     // every DingTalk sign-in, so surface that state prominently instead of letting
     // an empty panel read as "no restrictions".
     private renderFailClosedNotice(): TemplateResult {
-        if (this.policy) {
+        if (this.status?.managedPolicy._exists) {
             return html``;
         }
         return html`<ak-alert class="ak-dingtalk-section" level="warning" icon="fa-ban">
@@ -1606,41 +1406,18 @@ export class DingTalkAllowlistPanel extends AKElement {
     }
 
     private renderRemoveConfiguration(): TemplateResult {
-        if (!this.policy) {
+        if (!this.status?.managedPolicy._exists) {
             return html``;
         }
-        return html`<ak-forms-confirm
-            successMessage=${msg("DingTalk allowlist policy and bindings removed.", {
-                id: "sources.oauth.dingtalk-allowlist.remove.success",
-            })}
-            errorMessage=${msg("Failed to remove the DingTalk allowlist policy.", {
-                id: "sources.oauth.dingtalk-allowlist.remove.error",
-            })}
-            action=${msg("Remove allowlist", {
+        return html`<button
+            class="pf-c-button pf-m-danger pf-m-secondary"
+            type="button"
+            @click=${(event: Event) => this.confirmRemoveManagedConfiguration(event)}
+        >
+            ${msg("Remove allowlist", {
                 id: "sources.oauth.dingtalk-allowlist.remove.action",
             })}
-            .onConfirm=${() => this.removeManagedConfiguration()}
-        >
-            <span slot="header"
-                >${msg("Remove DingTalk allowlist", {
-                    id: "sources.oauth.dingtalk-allowlist.remove.header",
-                })}</span
-            >
-            <p slot="body">
-                ${msg(
-                    "This deletes the managed allowlist policy and all of its flow bindings. All DingTalk logins will then be denied until a new allowlist is saved and applied.",
-                    {
-                        id: "sources.oauth.dingtalk-allowlist.remove.body",
-                    },
-                )}
-            </p>
-            <button slot="trigger" class="pf-c-button pf-m-danger pf-m-secondary" type="button">
-                ${msg("Remove allowlist", {
-                    id: "sources.oauth.dingtalk-allowlist.remove.action",
-                })}
-            </button>
-            <div slot="modal"></div>
-        </ak-forms-confirm>`;
+        </button>`;
     }
 
     render(): SlottedTemplateResult {

@@ -1,11 +1,23 @@
 import "#components/ak-status-label";
 import "#elements/EmptyState";
 import "#elements/buttons/SpinnerButton/index";
-import "#elements/forms/ConfirmationForm";
 import "#elements/tasks/ScheduleList";
 import "#elements/timestamp/ak-timestamp";
 
-import { DEFAULT_CONFIG } from "#common/api/config";
+import { confirmDingTalkDestructiveAction } from "./DingTalkDestructiveActionModal";
+import { DingTalkDirectoryClient, GeneratedDingTalkDirectoryClient } from "./DingTalkDirectoryApi";
+import {
+    canDeleteDingTalkDirectoryStatus,
+    dingtalkDirectoryStatusSummary,
+    DingTalkDirectoryStatusSummary,
+    dingtalkDirectorySummaryMetrics,
+    DingTalkDirectorySyncStatus,
+    dingtalkDirectoryTerminalEvents,
+    hasRunningDingTalkDirectorySync,
+    nextDingTalkDirectoryPollDelay,
+    summarizeDingTalkDirectoryError,
+} from "./DingTalkDirectoryPanelController";
+
 import { parseAPIResponseError, pluckErrorDetail } from "#common/errors/network";
 import { MessageLevel } from "#common/messages";
 
@@ -13,10 +25,10 @@ import { AKElement } from "#elements/Base";
 import { showMessage } from "#elements/messages/MessageContainer";
 import { SlottedTemplateResult } from "#elements/types";
 
-import { DingTalkDirectorySyncStatus, OAuthSource, SourcesApi } from "@goauthentik/api";
+import { OAuthSource } from "@goauthentik/api";
 
 import { msg, str } from "@lit/localize";
-import { css, CSSResult, html, PropertyValues, TemplateResult } from "lit";
+import { css, CSSResult, html, nothing, PropertyValues, TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
 import PFButton from "@patternfly/patternfly/components/Button/button.css";
@@ -24,138 +36,18 @@ import PFCard from "@patternfly/patternfly/components/Card/card.css";
 import PFContent from "@patternfly/patternfly/components/Content/content.css";
 import PFForm from "@patternfly/patternfly/components/Form/form.css";
 import PFFormControl from "@patternfly/patternfly/components/FormControl/form-control.css";
+import PFTableGrid from "@patternfly/patternfly/components/Table/table-grid.css";
 import PFTable from "@patternfly/patternfly/components/Table/table.css";
 import PFFlex from "@patternfly/patternfly/layouts/Flex/flex.css";
 
-export type { DingTalkDirectorySyncStatus };
-
-export interface DingTalkDirectoryStatusSummary {
-    total: number;
-    success: number;
-    error: number;
-    running: number;
-    unknown: number;
-}
-
-export interface DingTalkDirectorySummaryMetric {
-    key: keyof DingTalkDirectoryStatusSummary;
-    value: number;
-    label: string;
-}
-
-export function dingtalkDirectoryStatusSummary(
-    statuses: DingTalkDirectorySyncStatus[],
-): DingTalkDirectoryStatusSummary {
-    return statuses.reduce<DingTalkDirectoryStatusSummary>(
-        (summary, status) => {
-            summary.total += 1;
-            switch (status.status) {
-                case "success":
-                    summary.success += 1;
-                    break;
-                case "error":
-                    summary.error += 1;
-                    break;
-                case "running":
-                    summary.running += 1;
-                    break;
-                default:
-                    summary.unknown += 1;
-                    break;
-            }
-            return summary;
-        },
-        {
-            total: 0,
-            success: 0,
-            error: 0,
-            running: 0,
-            unknown: 0,
-        },
-    );
-}
-
-export function dingtalkDirectorySummaryMetrics(
-    statuses: DingTalkDirectorySyncStatus[],
-): DingTalkDirectorySummaryMetric[] {
-    const summary = dingtalkDirectoryStatusSummary(statuses);
-    const metrics: DingTalkDirectorySummaryMetric[] = [
-        {
-            key: "total",
-            value: summary.total,
-            label: msg("Corp sync records", {
-                id: "sources.oauth.dingtalk-directory.summary.total.label",
-            }),
-        },
-        {
-            key: "success",
-            value: summary.success,
-            label: msg("Successful", {
-                id: "sources.oauth.dingtalk-directory.summary.success.label",
-            }),
-        },
-        {
-            key: "error",
-            value: summary.error,
-            label: msg("Failed", {
-                id: "sources.oauth.dingtalk-directory.summary.error.label",
-            }),
-        },
-        {
-            key: "running",
-            value: summary.running,
-            label: msg("Running", {
-                id: "sources.oauth.dingtalk-directory.summary.running.label",
-            }),
-        },
-    ];
-
-    if (summary.unknown > 0) {
-        metrics.push({
-            key: "unknown",
-            value: summary.unknown,
-            label: msg("Unknown", {
-                id: "sources.oauth.dingtalk-directory.summary.unknown.label",
-            }),
-        });
-    }
-
-    return metrics;
-}
-
-// The vendored @goauthentik/api client generates create/status/departments/users
-// methods for this endpoint, but no destroy method for the
-// `DELETE /sources/oauth/dingtalk-directory/{source_slug}/sync/`
-// operation (OpenAPI operationId: sources_oauth_dingtalk_directory_sync_destroy).
-// Until the client is regenerated with that operation, the path lives here as a
-// single source of truth and the call still goes through the SourcesApi runtime
-// (`this.request`, the package's own transport with CSRF/auth middleware) rather
-// than a bare fetch/axios.
-const DINGTALK_DIRECTORY_SYNC_PATH = "/sources/oauth/dingtalk-directory/{source_slug}/sync/";
-
-class DingTalkDirectoryApi extends SourcesApi {
-    async sourcesOauthDingtalkDirectorySyncDestroy(
-        sourceSlug: string,
-        corpId: string,
-    ): Promise<void> {
-        // corp_id travels as a query parameter: request bodies on DELETE are
-        // stripped by some proxies.
-        await this.request({
-            path: DINGTALK_DIRECTORY_SYNC_PATH.replace(
-                "{source_slug}",
-                encodeURIComponent(sourceSlug),
-            ),
-            method: "DELETE",
-            headers: {},
-            query: { corp_id: corpId },
-        });
-    }
-}
+export { dingtalkDirectoryStatusSummary, dingtalkDirectorySummaryMetrics };
+export type { DingTalkDirectoryStatusSummary, DingTalkDirectorySyncStatus };
 
 // A directory sync runs as a backend task, so a freshly queued corp shows up as
 // `running`. Poll on a bounded cadence while any row is running so the table
 // reflects completion without the admin repeatedly clicking Refresh.
 const DINGTALK_DIRECTORY_SYNC_POLL_INTERVAL_MS = 5_000;
+const DINGTALK_DIRECTORY_SYNC_POLL_MAX_DELAY_MS = 60_000;
 const DINGTALK_DIRECTORY_SYNC_POLL_MAX_ATTEMPTS = 60;
 
 @customElement("ak-source-oauth-dingtalk-directory")
@@ -175,7 +67,19 @@ export class DingTalkDirectoryPanel extends AKElement {
     @state()
     private loadError?: string;
 
-    private api = new DingTalkDirectoryApi(DEFAULT_CONFIG);
+    @state()
+    private manualSyncPending = false;
+
+    @state()
+    private pollPaused = false;
+
+    @state()
+    private lastStatusLoadedAt?: Date;
+
+    @state()
+    private validationError?: string;
+
+    private api: DingTalkDirectoryClient = new GeneratedDingTalkDirectoryClient();
 
     // Incremented per refresh; a stale refresh that resolves after a newer one must
     // not overwrite the fresher status.
@@ -183,6 +87,9 @@ export class DingTalkDirectoryPanel extends AKElement {
 
     private syncPollTimer?: ReturnType<typeof setTimeout>;
     private syncPollAttempts = 0;
+    private manualSyncPromise?: Promise<void>;
+    private seenTerminalStatusKeys = new Set<string>();
+    private queuedCorpIds = new Set<string>();
 
     static styles: CSSResult[] = [
         PFButton,
@@ -191,15 +98,23 @@ export class DingTalkDirectoryPanel extends AKElement {
         PFForm,
         PFFormControl,
         PFTable,
+        PFTableGrid,
         PFFlex,
         css`
             .ak-dingtalk-directory-actions {
-                align-items: flex-end;
+                display: flex;
+                flex-wrap: wrap;
+                align-items: flex-start;
                 gap: var(--pf-global--spacer--sm);
             }
 
             .ak-dingtalk-directory-actions .pf-c-form__group {
-                min-width: 16rem;
+                flex: 1 1 16rem;
+                min-width: min(100%, 16rem);
+            }
+
+            .ak-dingtalk-directory-actions .pf-c-button {
+                margin-block-start: 1.6rem;
             }
 
             .ak-dingtalk-directory-summary {
@@ -245,12 +160,31 @@ export class DingTalkDirectoryPanel extends AKElement {
 
             .ak-dingtalk-directory-error {
                 color: var(--pf-global--danger-color--100);
+                overflow-wrap: anywhere;
             }
 
             .ak-dingtalk-directory-counters {
                 margin: 0;
                 padding: 0;
                 list-style: none;
+                overflow-wrap: anywhere;
+            }
+
+            .ak-dingtalk-directory-error pre {
+                max-width: 32rem;
+                margin-block-start: var(--pf-global--spacer--xs);
+                white-space: pre-wrap;
+                overflow-wrap: anywhere;
+            }
+
+            .ak-dingtalk-directory-poll-paused {
+                margin-block-start: var(--pf-global--spacer--sm);
+            }
+
+            .ak-dingtalk-directory-field-error {
+                margin-block-start: var(--pf-global--spacer--xs);
+                color: var(--pf-global--danger-color--100);
+                font-size: var(--pf-global--FontSize--sm);
             }
         `,
     ];
@@ -271,7 +205,7 @@ export class DingTalkDirectoryPanel extends AKElement {
                 this.resetSourceState();
             }
             if (this.source?.slug && previous?.slug !== this.source.slug) {
-                this.refreshStatus().catch(console.error);
+                this.refreshStatus({ silent: true }).catch(() => undefined);
             }
         }
     }
@@ -283,23 +217,30 @@ export class DingTalkDirectoryPanel extends AKElement {
         this.manualCorpId = "";
         this.loadError = undefined;
         this.loaded = false;
+        this.manualSyncPending = false;
+        this.pollPaused = false;
+        this.lastStatusLoadedAt = undefined;
+        this.validationError = undefined;
+        this.manualSyncPromise = undefined;
+        this.seenTerminalStatusKeys.clear();
+        this.queuedCorpIds.clear();
     }
 
-    private async refreshStatus(): Promise<void> {
+    private async refreshStatus(
+        options: { silent?: boolean; notifyTerminals?: boolean } = {},
+    ): Promise<void> {
         if (!this.source?.slug) {
             return;
         }
         const sourceSlug = this.source.slug;
         const generation = ++this.refreshGeneration;
         let statuses: DingTalkDirectorySyncStatus[] | undefined;
-        let loadError: string | undefined;
+        let parsedError: string | undefined;
         try {
-            const response = await this.api.sourcesOauthDingtalkDirectoryStatusRetrieve({
-                sourceSlug,
-            });
+            const response = await this.api.status(sourceSlug);
             statuses = response.sync;
         } catch (error) {
-            loadError = pluckErrorDetail(await parseAPIResponseError(error));
+            parsedError = pluckErrorDetail(await parseAPIResponseError(error));
         }
         // A newer refresh started while this one awaited; discard the stale result so
         // the later-returning response cannot overwrite fresher state.
@@ -309,16 +250,31 @@ export class DingTalkDirectoryPanel extends AKElement {
         if (statuses) {
             this.statuses = statuses;
             this.loadError = undefined;
+            this.pollPaused = false;
+            this.lastStatusLoadedAt = new Date();
+            this.clearObservedQueuedCorps(statuses);
+            if (options.notifyTerminals) {
+                this.notifyTerminalStatuses(sourceSlug, statuses);
+            }
         } else {
-            this.loadError = loadError;
+            this.loadError = parsedError;
         }
         this.loaded = true;
         this.scheduleSyncPoll();
+        if (!statuses && !options.silent) {
+            throw new Error(
+                parsedError ||
+                    msg("Failed to load DingTalk directory status.", {
+                        id: "sources.oauth.dingtalk-directory.error.load",
+                    }),
+            );
+        }
     }
 
     private scheduleSyncPoll(): void {
-        const running = this.statuses.some((status) => status.status === "running");
-        if (!running) {
+        const running = hasRunningDingTalkDirectorySync(this.statuses);
+        const hasQueuedGrace = this.queuedCorpIds.size > 0;
+        if (!running && !hasQueuedGrace) {
             this.stopSyncPoll();
             return;
         }
@@ -326,14 +282,33 @@ export class DingTalkDirectoryPanel extends AKElement {
         if (this.syncPollTimer !== undefined) {
             return;
         }
-        if (this.syncPollAttempts >= DINGTALK_DIRECTORY_SYNC_POLL_MAX_ATTEMPTS) {
+        const delay = nextDingTalkDirectoryPollDelay({
+            attempts: this.syncPollAttempts,
+            maxAttempts: DINGTALK_DIRECTORY_SYNC_POLL_MAX_ATTEMPTS,
+            baseDelayMs: DINGTALK_DIRECTORY_SYNC_POLL_INTERVAL_MS,
+            maxDelayMs: DINGTALK_DIRECTORY_SYNC_POLL_MAX_DELAY_MS,
+        });
+        if (delay === null) {
+            this.pollPaused = true;
+            showMessage(
+                {
+                    level: MessageLevel.warning,
+                    message: msg(
+                        "DingTalk directory sync is still running, so automatic refresh paused. Use Refresh to check again.",
+                        {
+                            id: "sources.oauth.dingtalk-directory.poll.paused",
+                        },
+                    ),
+                },
+                true,
+            );
             return;
         }
         this.syncPollTimer = setTimeout(() => {
             this.syncPollTimer = undefined;
             this.syncPollAttempts += 1;
-            this.refreshStatus().catch(console.error);
-        }, DINGTALK_DIRECTORY_SYNC_POLL_INTERVAL_MS);
+            this.refreshStatus({ silent: true, notifyTerminals: true }).catch(() => undefined);
+        }, delay);
     }
 
     private stopSyncPoll(): void {
@@ -350,7 +325,45 @@ export class DingTalkDirectoryPanel extends AKElement {
     // would leave the table frozen until the admin reloads the page.
     private async manualRefresh(): Promise<void> {
         this.syncPollAttempts = 0;
-        await this.refreshStatus();
+        this.pollPaused = false;
+        await this.refreshStatus({ notifyTerminals: true });
+    }
+
+    private validateManualCorpId(): string {
+        const corpId = this.manualCorpId.trim();
+        if (corpId) {
+            this.validationError = undefined;
+            return corpId;
+        }
+        const message = msg("Corp ID is required to queue a DingTalk directory sync.", {
+            id: "sources.oauth.dingtalk-directory.sync.corp-id-required",
+        });
+        this.validationError = message;
+        this.updateComplete.then(() => {
+            this.renderRoot.querySelector<HTMLInputElement>("#dingtalk-directory-corp-id")?.focus();
+        });
+        throw new Error(message);
+    }
+
+    private async submitManualSync(): Promise<void> {
+        if (this.manualSyncPromise) {
+            return this.manualSyncPromise;
+        }
+        this.manualSyncPending = true;
+        this.manualSyncPromise = this.triggerManualSync()
+            .catch(async (error: unknown) => {
+                const parsedError = await parseAPIResponseError(error);
+                showMessage({
+                    level: MessageLevel.error,
+                    message: pluckErrorDetail(parsedError),
+                });
+                throw error;
+            })
+            .finally(() => {
+                this.manualSyncPending = false;
+                this.manualSyncPromise = undefined;
+            });
+        return this.manualSyncPromise;
     }
 
     private async triggerManualSync(): Promise<void> {
@@ -358,19 +371,10 @@ export class DingTalkDirectoryPanel extends AKElement {
             return;
         }
         const sourceSlug = this.source.slug;
-        const corpId = this.manualCorpId.trim();
-        if (!corpId) {
-            throw new Error(
-                msg("Corp ID is required to queue a DingTalk directory sync.", {
-                    id: "sources.oauth.dingtalk-directory.sync.corp-id-required",
-                }),
-            );
-        }
-        const response = await this.api.sourcesOauthDingtalkDirectorySyncCreate({
-            sourceSlug,
-            dingTalkDirectorySyncRequestRequest: { corpId },
-        });
+        const corpId = this.validateManualCorpId();
+        const response = await this.api.sync(sourceSlug, { corpId });
         if (response.queued) {
+            this.queuedCorpIds.add(response.corpId || corpId);
             showMessage({
                 level: MessageLevel.success,
                 message: msg(str`Queued DingTalk directory sync for ${response.corpId}`, {
@@ -394,18 +398,115 @@ export class DingTalkDirectoryPanel extends AKElement {
         // Queuing is an explicit action; restart the bounded poll so the freshly queued
         // corp is followed to completion even if an earlier run had exhausted the cap.
         this.syncPollAttempts = 0;
-        await this.refreshStatus();
+        this.pollPaused = false;
+        await this.refreshStatus({ notifyTerminals: true });
+    }
+
+    private clearObservedQueuedCorps(statuses: DingTalkDirectorySyncStatus[]): void {
+        for (const status of statuses) {
+            if (this.queuedCorpIds.has(status.corpId)) {
+                this.queuedCorpIds.delete(status.corpId);
+            }
+        }
     }
 
     private async deleteSyncStatus(sourceSlug: string, corpId: string): Promise<void> {
         if (this.source?.slug !== sourceSlug) {
             return;
         }
-        await this.api.sourcesOauthDingtalkDirectorySyncDestroy(sourceSlug, corpId);
+        await this.api.destroy(sourceSlug, corpId);
         if (this.source?.slug !== sourceSlug) {
             return;
         }
-        await this.refreshStatus();
+        await this.refreshStatus({ notifyTerminals: true });
+    }
+
+    private async confirmDeleteSyncStatus(
+        event: Event,
+        status: DingTalkDirectorySyncStatus,
+    ): Promise<void> {
+        const sourceSlug = this.source?.slug;
+        if (!sourceSlug) {
+            return;
+        }
+        await confirmDingTalkDestructiveAction(
+            {
+                headline: msg(str`Delete DingTalk directory data for ${status.corpId}`, {
+                    id: "sources.oauth.dingtalk-directory.delete.header",
+                }),
+                body: html`<p>
+                    ${msg(
+                        str`This deletes the sync record and all cached departments and users for ${status.corpId}. Lookups that rely on the cached directory will return no data until the next sync completes.`,
+                        {
+                            id: "sources.oauth.dingtalk-directory.delete.body",
+                        },
+                    )}
+                </p>`,
+                action: msg("Delete", {
+                    id: "sources.oauth.dingtalk-directory.delete",
+                }),
+                successMessage: msg(
+                    str`Deleted DingTalk directory sync record for ${status.corpId}`,
+                    {
+                        id: "sources.oauth.dingtalk-directory.delete.success",
+                    },
+                ),
+                errorMessage: msg("Failed to delete DingTalk directory data.", {
+                    id: "sources.oauth.dingtalk-directory.delete.error",
+                }),
+                onConfirm: () => this.deleteSyncStatus(sourceSlug, status.corpId),
+            },
+            event.currentTarget instanceof HTMLElement ? event.currentTarget : undefined,
+        );
+    }
+
+    private notifyTerminalStatuses(
+        sourceSlug: string,
+        statuses: DingTalkDirectorySyncStatus[],
+    ): void {
+        for (const event of dingtalkDirectoryTerminalEvents(
+            sourceSlug,
+            statuses,
+            this.seenTerminalStatusKeys,
+        )) {
+            if (event.status === "success") {
+                showMessage(
+                    {
+                        level: MessageLevel.success,
+                        message: msg(str`DingTalk directory sync completed for ${event.corpId}.`, {
+                            id: "sources.oauth.dingtalk-directory.sync.completed",
+                        }),
+                    },
+                    true,
+                );
+            } else if (event.status === "warning") {
+                showMessage(
+                    {
+                        level: MessageLevel.warning,
+                        message: msg(
+                            str`DingTalk directory sync completed with warnings for ${event.corpId}.`,
+                            {
+                                id: "sources.oauth.dingtalk-directory.sync.warning",
+                            },
+                        ),
+                    },
+                    true,
+                );
+            } else {
+                showMessage(
+                    {
+                        level: MessageLevel.error,
+                        message: msg(
+                            str`DingTalk directory sync failed for ${event.corpId}: ${event.detail}`,
+                            {
+                                id: "sources.oauth.dingtalk-directory.sync.failed",
+                            },
+                        ),
+                    },
+                    true,
+                );
+            }
+        }
     }
 
     private renderStatusLabel(status: string | undefined): TemplateResult {
@@ -471,9 +572,14 @@ export class DingTalkDirectoryPanel extends AKElement {
         }
     }
 
-    private renderCounterValue(value: unknown): TemplateResult | string {
+    private renderCounterValue(value: unknown, depth = 0): TemplateResult | string {
         if (value === null || value === undefined) {
             return msg("-", { id: "sources.oauth.dingtalk-directory.counters.empty" });
+        }
+        if (depth > 2) {
+            return msg("Nested details omitted", {
+                id: "sources.oauth.dingtalk-directory.counters.nested-omitted",
+            });
         }
         // Arrays (e.g. the warnings list) and nested objects render as their own rows
         // instead of a raw JSON literal dumped into the table cell.
@@ -481,8 +587,18 @@ export class DingTalkDirectoryPanel extends AKElement {
             if (value.length < 1) {
                 return msg("-", { id: "sources.oauth.dingtalk-directory.counters.empty" });
             }
+            const visibleItems = value.slice(0, 5);
             return html`<ul class="ak-dingtalk-directory-counters">
-                ${value.map((item) => html`<li>${this.renderCounterValue(item)}</li>`)}
+                ${visibleItems.map(
+                    (item) => html`<li>${this.renderCounterValue(item, depth + 1)}</li>`,
+                )}
+                ${value.length > visibleItems.length
+                    ? html`<li>
+                          ${msg(str`${value.length - visibleItems.length} more omitted`, {
+                              id: "sources.oauth.dingtalk-directory.counters.more-omitted",
+                          })}
+                      </li>`
+                    : nothing}
             </ul>`;
         }
         if (typeof value === "object") {
@@ -490,18 +606,18 @@ export class DingTalkDirectoryPanel extends AKElement {
             if (nested.length < 1) {
                 return msg("-", { id: "sources.oauth.dingtalk-directory.counters.empty" });
             }
-            return this.renderCounterList(nested);
+            return this.renderCounterList(nested.slice(0, 8), depth + 1);
         }
         return String(value);
     }
 
-    private renderCounterList(entries: [string, unknown][]): TemplateResult {
+    private renderCounterList(entries: [string, unknown][], depth = 0): TemplateResult {
         return html`<ul class="ak-dingtalk-directory-counters">
             ${entries.map(
                 ([key, value]) =>
                     html`<li>
                         <span>${this.localizeCounterKey(key)}</span>:
-                        <span>${this.renderCounterValue(value)}</span>
+                        <span>${this.renderCounterValue(value, depth)}</span>
                     </li>`,
             )}
         </ul>`;
@@ -516,21 +632,81 @@ export class DingTalkDirectoryPanel extends AKElement {
     }
 
     private renderSummary(): TemplateResult {
+        if (!this.loaded) {
+            return html`<p class="ak-dingtalk-directory-muted">
+                ${msg("Loading DingTalk directory status.", {
+                    id: "sources.oauth.dingtalk-directory.summary.loading",
+                })}
+            </p>`;
+        }
+        if (this.loadError && this.statuses.length < 1) {
+            return html`<p class="ak-dingtalk-directory-error">
+                ${msg("DingTalk directory status is unavailable.", {
+                    id: "sources.oauth.dingtalk-directory.summary.unavailable",
+                })}
+            </p>`;
+        }
+        const labels: Record<keyof DingTalkDirectoryStatusSummary, string> = {
+            total: msg("Corp sync records", {
+                id: "sources.oauth.dingtalk-directory.summary.total.label",
+            }),
+            success: msg("Successful", {
+                id: "sources.oauth.dingtalk-directory.summary.success.label",
+            }),
+            error: msg("Failed", {
+                id: "sources.oauth.dingtalk-directory.summary.error.label",
+            }),
+            running: msg("Running", {
+                id: "sources.oauth.dingtalk-directory.summary.running.label",
+            }),
+            unknown: msg("Unknown", {
+                id: "sources.oauth.dingtalk-directory.summary.unknown.label",
+            }),
+        };
         return html`<ul class="ak-dingtalk-directory-summary">
-            ${dingtalkDirectorySummaryMetrics(this.statuses).map(
-                (metric) =>
-                    html`<li class="ak-dingtalk-directory-summary-item">
-                        <span class="ak-dingtalk-directory-summary-value">${metric.value}</span>
-                        <span class="ak-dingtalk-directory-summary-label">${metric.label}</span>
-                    </li>`,
-            )}
-        </ul>`;
+                ${dingtalkDirectorySummaryMetrics(this.statuses, labels).map(
+                    (metric) =>
+                        html`<li class="ak-dingtalk-directory-summary-item">
+                            <span class="ak-dingtalk-directory-summary-value">${metric.value}</span>
+                            <span class="ak-dingtalk-directory-summary-label">${metric.label}</span>
+                        </li>`,
+                )}
+            </ul>
+            ${this.loadError
+                ? html`<p class="ak-dingtalk-directory-error">
+                      ${msg("Previous directory status is shown because refresh failed.", {
+                          id: "sources.oauth.dingtalk-directory.summary.stale",
+                      })}
+                  </p>`
+                : nothing}
+            ${this.pollPaused
+                ? html`<p class="ak-dingtalk-directory-muted ak-dingtalk-directory-poll-paused">
+                      ${msg("Automatic refresh paused while the sync is still running.", {
+                          id: "sources.oauth.dingtalk-directory.summary.poll-paused",
+                      })}
+                  </p>`
+                : nothing}
+            ${this.lastStatusLoadedAt
+                ? html`<p class="ak-dingtalk-directory-muted">
+                      ${msg("Last refreshed", {
+                          id: "sources.oauth.dingtalk-directory.summary.last-refreshed",
+                      })}
+                      ${this.renderTimestamp(this.lastStatusLoadedAt)}
+                  </p>`
+                : nothing}`;
     }
 
     private renderActions(): TemplateResult {
-        const sourceSlug = this.source?.slug;
-        const inputId = `dingtalk-directory-corp-id-${sourceSlug ?? ""}`;
-        return html`<div class="pf-l-flex ak-dingtalk-directory-actions">
+        const inputId = "dingtalk-directory-corp-id";
+        const errorId = "dingtalk-directory-corp-id-error";
+        return html`<form
+            class="pf-c-form ak-dingtalk-directory-actions"
+            novalidate
+            @submit=${(event: SubmitEvent) => {
+                event.preventDefault();
+                this.submitManualSync().catch(() => undefined);
+            }}
+        >
             <ak-spinner-button class="pf-m-secondary" .callAction=${() => this.manualRefresh()}>
                 ${msg("Refresh", { id: "sources.oauth.dingtalk-directory.refresh" })}
             </ak-spinner-button>
@@ -546,69 +722,75 @@ export class DingTalkDirectoryPanel extends AKElement {
                     id=${inputId}
                     class="pf-c-form-control"
                     .value=${this.manualCorpId}
-                    ?disabled=${!this.loaded}
-                    @keydown=${(event: KeyboardEvent) => {
-                        if (event.key === "Enter" && !event.isComposing) {
-                            event.preventDefault();
-                            this.triggerManualSync().catch(console.error);
-                        }
-                    }}
+                    ?disabled=${!this.loaded || this.manualSyncPending}
+                    required
+                    aria-required="true"
+                    aria-invalid=${this.validationError ? "true" : "false"}
+                    aria-describedby=${this.validationError ? errorId : nothing}
                     @input=${(event: InputEvent) => {
                         this.manualCorpId = (event.target as HTMLInputElement).value;
+                        this.validationError = undefined;
                     }}
                 />
+                ${this.validationError
+                    ? html`<div id=${errorId} class="ak-dingtalk-directory-field-error">
+                          ${this.validationError}
+                      </div>`
+                    : nothing}
             </div>
-            <ak-spinner-button
-                class="pf-m-primary"
-                ?disabled=${!this.loaded}
-                .callAction=${() => this.triggerManualSync()}
+            <button
+                class="pf-c-button pf-m-primary"
+                type="submit"
+                ?disabled=${!this.loaded || this.manualSyncPending}
+                aria-busy=${this.manualSyncPending ? "true" : "false"}
             >
                 ${msg("Sync now", { id: "sources.oauth.dingtalk-directory.sync-now" })}
-            </ak-spinner-button>
-        </div>`;
+            </button>
+        </form>`;
     }
 
     private renderDeleteAction(status: DingTalkDirectorySyncStatus): TemplateResult {
-        const sourceSlug = this.source?.slug ?? "";
-        return html`<ak-forms-confirm
-            successMessage=${msg(str`Deleted DingTalk directory sync record for ${status.corpId}`, {
-                id: "sources.oauth.dingtalk-directory.delete.success",
-            })}
-            errorMessage=${msg("Failed to delete DingTalk directory data.", {
-                id: "sources.oauth.dingtalk-directory.delete.error",
-            })}
-            action=${msg("Delete", {
-                id: "sources.oauth.dingtalk-directory.delete",
-            })}
-            .onConfirm=${() => this.deleteSyncStatus(sourceSlug, status.corpId)}
-        >
-            <span slot="header"
-                >${msg("Delete DingTalk directory data", {
-                    id: "sources.oauth.dingtalk-directory.delete.header",
-                })}</span
+        const disabled = !canDeleteDingTalkDirectoryStatus(status);
+        const actionLabel = disabled
+            ? msg(
+                  str`Cannot delete DingTalk directory data for ${status.corpId} while sync is running`,
+                  {
+                      id: "sources.oauth.dingtalk-directory.delete.running-disabled",
+                  },
+              )
+            : msg(str`Delete DingTalk directory data for ${status.corpId}`, {
+                  id: "sources.oauth.dingtalk-directory.delete.aria-label",
+              });
+        if (disabled) {
+            return html`<button
+                class="pf-c-button pf-m-danger pf-m-secondary"
+                type="button"
+                disabled
+                title=${actionLabel}
+                aria-label=${actionLabel}
             >
-            <p slot="body">
-                ${msg(
-                    str`This deletes the sync record and all cached departments and users for ${status.corpId}. Lookups that rely on the cached directory will return no data until the next sync completes.`,
-                    {
-                        id: "sources.oauth.dingtalk-directory.delete.body",
-                    },
-                )}
-            </p>
-            <button slot="trigger" class="pf-c-button pf-m-danger pf-m-secondary" type="button">
                 ${msg("Delete", {
                     id: "sources.oauth.dingtalk-directory.delete",
                 })}
-            </button>
-            <div slot="modal"></div>
-        </ak-forms-confirm>`;
+            </button>`;
+        }
+        return html`<button
+            class="pf-c-button pf-m-danger pf-m-secondary"
+            type="button"
+            aria-label=${actionLabel}
+            @click=${(event: Event) => this.confirmDeleteSyncStatus(event, status)}
+        >
+            ${msg("Delete", {
+                id: "sources.oauth.dingtalk-directory.delete",
+            })}
+        </button>`;
     }
 
     private renderTable(): TemplateResult {
         if (!this.loaded) {
             return html`<ak-empty-state loading></ak-empty-state>`;
         }
-        if (this.loadError) {
+        if (this.loadError && this.statuses.length < 1) {
             return html`<ak-empty-state icon="fa-exclamation-triangle">
                 <span
                     >${msg("Failed to load DingTalk directory status.", {
@@ -639,30 +821,37 @@ export class DingTalkDirectoryPanel extends AKElement {
                 </div>
             </ak-empty-state>`;
         }
-        return html`<table class="pf-c-table pf-m-compact pf-m-grid-md" role="grid">
+        return html`<table class="pf-c-table pf-m-compact pf-m-grid-md">
+            <caption>
+                ${msg("DingTalk directory sync status by corp", {
+                    id: "sources.oauth.dingtalk-directory.table.caption",
+                })}
+            </caption>
             <thead>
                 <tr>
-                    <th>
+                    <th scope="col">
                         ${msg("Corp ID", { id: "sources.oauth.dingtalk-directory.table.corp-id" })}
                     </th>
-                    <th>
+                    <th scope="col">
                         ${msg("Status", { id: "sources.oauth.dingtalk-directory.table.status" })}
                     </th>
-                    <th>
+                    <th scope="col">
                         ${msg("Started", { id: "sources.oauth.dingtalk-directory.table.started" })}
                     </th>
-                    <th>
+                    <th scope="col">
                         ${msg("Finished", {
                             id: "sources.oauth.dingtalk-directory.table.finished",
                         })}
                     </th>
-                    <th>
+                    <th scope="col">
                         ${msg("Counters", {
                             id: "sources.oauth.dingtalk-directory.table.counters",
                         })}
                     </th>
-                    <th>${msg("Error", { id: "sources.oauth.dingtalk-directory.table.error" })}</th>
-                    <th>
+                    <th scope="col">
+                        ${msg("Error", { id: "sources.oauth.dingtalk-directory.table.error" })}
+                    </th>
+                    <th scope="col">
                         ${msg("Actions", {
                             id: "sources.oauth.dingtalk-directory.table.actions",
                         })}
@@ -673,13 +862,14 @@ export class DingTalkDirectoryPanel extends AKElement {
                 ${this.statuses.map(
                     (status) =>
                         html`<tr>
-                            <td
+                            <th
+                                scope="row"
                                 data-label=${msg("Corp ID", {
                                     id: "sources.oauth.dingtalk-directory.table.corp-id",
                                 })}
                             >
                                 ${status.corpId}
-                            </td>
+                            </th>
                             <td
                                 data-label=${msg("Status", {
                                     id: "sources.oauth.dingtalk-directory.table.status",
@@ -716,9 +906,12 @@ export class DingTalkDirectoryPanel extends AKElement {
                                 })}
                             >
                                 ${status.error
-                                    ? html`<span class="ak-dingtalk-directory-error"
-                                          >${status.error}</span
-                                      >`
+                                    ? html`<details class="ak-dingtalk-directory-error">
+                                          <summary>
+                                              ${summarizeDingTalkDirectoryError(status.error)}
+                                          </summary>
+                                          <pre>${status.error}</pre>
+                                      </details>`
                                     : html`<span class="ak-dingtalk-directory-muted"
                                           >${msg("-", {
                                               id: "sources.oauth.dingtalk-directory.error.empty",

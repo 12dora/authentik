@@ -152,10 +152,13 @@ describe("DingTalkAllowlistPanel localization and controls", () => {
         expect(allowlistPanel).toContain("this.discoveryPopup?.close();");
     });
 
-    it("pages through every policy binding before creating or deleting managed bindings", () => {
-        expect(allowlistPanel).toContain("listAllPolicyBindings(");
-        expect(allowlistPanel).toContain("page >= response.pagination.totalPages");
-        expect(allowlistPanel).toContain("this.listAllPolicyBindings({ policy: policy.pk })");
+    it("uses the backend allowlist transaction instead of browser-side policy and binding writes", () => {
+        expect(allowlistPanel).toContain("sourcesOauthDingtalkAllowlistApplyCreate");
+        expect(allowlistPanel).toContain("sourcesOauthDingtalkAllowlistRemoveCreate");
+        expect(allowlistPanel).toContain("expectedRevision");
+        expect(allowlistPanel).not.toContain("createOrUpdatePolicy(");
+        expect(allowlistPanel).not.toContain("listAllPolicyBindings(");
+        expect(allowlistPanel).not.toContain("#elements/forms/ConfirmationForm");
     });
 
     it("paginates and filters the loaded department tree in the picker", () => {
@@ -190,7 +193,9 @@ describe("DingTalkAllowlistPanel localization and controls", () => {
     it("binds async reads and saves to the source slug that started the action", () => {
         expect(allowlistPanel).toContain("const sourceSlug = this.source.slug;");
         expect(allowlistPanel).toContain("this.source?.slug !== sourceSlug");
-        expect(allowlistPanel).toContain("this.createOrUpdatePolicy(expression, sourceSlug)");
+        expect(allowlistPanel).toContain(
+            "this.allowlistApi.sourcesOauthDingtalkAllowlistApplyCreate(sourceSlug",
+        );
     });
 
     it("reports refresh failures through the button result and an alert instead of a silent success", () => {

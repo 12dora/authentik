@@ -1,11 +1,10 @@
 import "#admin/policies/BoundPoliciesList";
 import "#admin/rbac/ak-rbac-object-permission-page";
-import "#admin/sources/oauth/DingTalkAllowlistPanel";
-import "#admin/sources/oauth/DingTalkDirectoryPanel";
 import "#admin/sources/oauth/OAuthSourceDiagram";
 import "#admin/events/ObjectChangelog";
 import "#elements/CodeMirror";
 import "#elements/EmptyState";
+import "#elements/LoadingOverlay";
 import "#elements/Tabs";
 import "#elements/buttons/SpinnerButton/index";
 
@@ -92,24 +91,58 @@ export class OAuthSourceViewPage extends AKElement {
     @state()
     private loadError = false;
 
+    @state()
+    private sourceLoading = false;
+
+    @state()
+    private dingTalkPanelsLoaded = false;
+
+    @state()
+    private activeDingTalkPanel: "page-dingtalk-allowlist" | "page-dingtalk-directory" | null =
+        null;
+
     private requestedSlug = "";
     private requestGeneration = 0;
+    private dingTalkPanelsLoading?: Promise<void>;
 
     private async loadSource(slug: string): Promise<void> {
         const generation = ++this.requestGeneration;
+        const sameLoadedSource = this.source?.slug === slug;
         this.requestedSlug = slug;
-        this.source = undefined;
+        if (!sameLoadedSource) {
+            this.source = undefined;
+            this.activeDingTalkPanel = null;
+        }
         this.loadError = false;
+        this.sourceLoading = true;
         try {
             const source = await new SourcesApi(DEFAULT_CONFIG).sourcesOauthRetrieve({ slug });
             if (generation === this.requestGeneration && this.requestedSlug === slug) {
                 this.source = source;
+                if (source.providerType === ProviderTypeEnum.Dingtalk) {
+                    this.loadDingTalkPanels();
+                }
             }
         } catch {
             if (generation === this.requestGeneration && this.requestedSlug === slug) {
                 this.loadError = true;
             }
+        } finally {
+            if (generation === this.requestGeneration && this.requestedSlug === slug) {
+                this.sourceLoading = false;
+            }
         }
+    }
+
+    private loadDingTalkPanels(): Promise<void> {
+        this.dingTalkPanelsLoading ??= Promise.all([
+            import("#admin/sources/oauth/DingTalkAllowlistPanel"),
+            import("#admin/sources/oauth/DingTalkDirectoryPanel"),
+        ]).then(() => {
+            this.dingTalkPanelsLoaded = true;
+        });
+
+        return this.dingTalkPanelsLoading;
     }
 
     static styles: CSSResult[] = [PFPage, PFButton, PFGrid, PFContent, PFCard, PFDescriptionList];
@@ -123,7 +156,7 @@ export class OAuthSourceViewPage extends AKElement {
     }
 
     render(): SlottedTemplateResult {
-        if (this.loadError) {
+        if (this.loadError && !this.source) {
             return html`<ak-empty-state icon="fa-exclamation-triangle">
                 <span
                     >${msg("Failed to load OAuth source.", {
@@ -141,7 +174,7 @@ export class OAuthSourceViewPage extends AKElement {
             </ak-empty-state>`;
         }
         if (!this.source) {
-            return nothing;
+            return html`<ak-empty-state loading full-height></ak-empty-state>`;
         }
         return html`<main>
             <ak-tabs>
@@ -227,12 +260,19 @@ export class OAuthSourceViewPage extends AKElement {
                                   id: "sources.oauth.dingtalk-allowlist.tab",
                               })}"
                               class="pf-c-page__main-section pf-m-no-padding-mobile"
+                              @activate=${() => {
+                                  this.activeDingTalkPanel = "page-dingtalk-allowlist";
+                                  this.loadDingTalkPanels();
+                              }}
                           >
                               <div class="pf-l-grid pf-m-gutter">
-                                  <ak-source-oauth-dingtalk-allowlist
-                                      class="pf-l-grid__item pf-m-12-col"
-                                      .source=${this.source}
-                                  ></ak-source-oauth-dingtalk-allowlist>
+                                  ${this.dingTalkPanelsLoaded &&
+                                  this.activeDingTalkPanel === "page-dingtalk-allowlist"
+                                      ? html`<ak-source-oauth-dingtalk-allowlist
+                                            class="pf-l-grid__item pf-m-12-col"
+                                            .source=${this.source}
+                                        ></ak-source-oauth-dingtalk-allowlist>`
+                                      : nothing}
                               </div>
                           </div>
                           <div
@@ -244,12 +284,19 @@ export class OAuthSourceViewPage extends AKElement {
                                   id: "sources.oauth.dingtalk-directory.tab",
                               })}"
                               class="pf-c-page__main-section pf-m-no-padding-mobile"
+                              @activate=${() => {
+                                  this.activeDingTalkPanel = "page-dingtalk-directory";
+                                  this.loadDingTalkPanels();
+                              }}
                           >
                               <div class="pf-l-grid pf-m-gutter">
-                                  <ak-source-oauth-dingtalk-directory
-                                      class="pf-l-grid__item pf-m-12-col"
-                                      .source=${this.source}
-                                  ></ak-source-oauth-dingtalk-directory>
+                                  ${this.dingTalkPanelsLoaded &&
+                                  this.activeDingTalkPanel === "page-dingtalk-directory"
+                                      ? html`<ak-source-oauth-dingtalk-directory
+                                            class="pf-l-grid__item pf-m-12-col"
+                                            .source=${this.source}
+                                        ></ak-source-oauth-dingtalk-directory>`
+                                      : nothing}
                               </div>
                           </div>`
                     : nothing}
@@ -288,6 +335,7 @@ export class OAuthSourceViewPage extends AKElement {
                     objectPk=${this.source.pk}
                 ></ak-rbac-object-permission-page>
             </ak-tabs>
+            ${this.sourceLoading ? html`<ak-loading-overlay></ak-loading-overlay>` : nothing}
         </main>`;
     }
 }

@@ -233,7 +233,9 @@ export function pluckErrorDetail(errorLike: unknown, fallback?: string): string 
             );
 
             if (messages.length > 0) {
-                return messages.join(", ");
+                return messages.join(
+                    messages.every((message) => /[.!?]$/.test(message)) ? " " : ", ",
+                );
             }
         }
     }

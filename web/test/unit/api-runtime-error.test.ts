@@ -53,7 +53,13 @@ describe("API response error handling", () => {
 
     it("joins multiple array messages into one readable detail", () => {
         expect(pluckErrorDetail({ detail: ["First problem.", "Second problem."] })).toBe(
-            "First problem., Second problem.",
+            "First problem. Second problem.",
+        );
+    });
+
+    it("joins multiple array fragments into one readable detail", () => {
+        expect(pluckErrorDetail({ detail: ["First problem", "Second problem"] })).toBe(
+            "First problem, Second problem",
         );
     });
 
