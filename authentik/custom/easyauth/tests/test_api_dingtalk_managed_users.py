@@ -9,6 +9,7 @@ from authentik.core.tests.utils import create_test_user
 from authentik.sources.oauth.dingtalk.managed_users import (
     DingTalkBindingConflict,
     DingTalkManagerNotFound,
+    DingTalkSourceUnavailable,
 )
 from authentik.sources.oauth.models import OAuthSource
 
@@ -170,6 +171,7 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["code"], "manager_not_found")
+        self.assertEqual(response.json()["detail"], "DingTalk manager was not found.")
 
     def test_disabled_source_returns_404(self):
         self._login_with_directory_access()
@@ -185,6 +187,20 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
         self.assertEqual(response.status_code, 404)
         get_managed_users.assert_not_called()
 
+    def test_source_unavailable_returns_fixed_404_detail(self):
+        self._login_with_directory_access()
+
+        with patch(
+            "authentik.custom.easyauth.api.dingtalk_managed_users."
+            "get_dingtalk_managed_users",
+            side_effect=DingTalkSourceUnavailable("source secret detail"),
+        ):
+            response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["code"], "source_unavailable")
+        self.assertEqual(response.json()["detail"], "DingTalk source is unavailable.")
+
     def test_binding_conflict_returns_409(self):
         self._login_with_directory_access()
 
@@ -196,6 +212,8 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
             response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "binding_conflict")
+        self.assertEqual(response.json()["detail"], "DingTalk binding conflict.")
 
     def test_invalid_pagination_returns_400(self):
         self._login_with_directory_access()

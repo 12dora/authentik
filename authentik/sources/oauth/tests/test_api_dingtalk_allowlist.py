@@ -381,10 +381,46 @@ class TestDingTalkAllowlistAPI(APITestCase):
         self.assertTrue(data["policy_binding"]["enabled"])
         self.assertTrue(data["source_link_guard"]["enabled"])
         self.assertTrue(data["sourceLinkGuard"])
+        self.assertTrue(data["can_manage"])
         self.assertEqual(
             data["callback_url"],
             "http://testserver/source/oauth/callback/dingtalk-test/",
         )
+
+    def test_status_reports_view_only_user_cannot_manage(self):
+        """Status exposes authoritative manage capability for view-only users."""
+        user = create_test_user()
+        user.assign_perms_to_managed_role("authentik_sources_oauth.view_oauthsource", self.source)
+        self.client.force_authenticate(user)
+
+        response = self.client.get(self.status_path())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["can_manage"])
+
+    def test_status_reports_object_change_user_can_manage(self):
+        """Object-scoped change_oauthsource grants the status manage capability."""
+        user = create_test_user()
+        user.assign_perms_to_managed_role("authentik_sources_oauth.view_oauthsource", self.source)
+        user.assign_perms_to_managed_role("authentik_sources_oauth.change_oauthsource", self.source)
+        self.client.force_authenticate(user)
+
+        response = self.client.get(self.status_path())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["can_manage"])
+
+    def test_status_reports_global_change_user_can_manage(self):
+        """Global change_oauthsource grants the status manage capability."""
+        user = create_test_user()
+        user.assign_perms_to_managed_role("authentik_sources_oauth.view_oauthsource", self.source)
+        user.assign_perms_to_managed_role("authentik_sources_oauth.change_oauthsource")
+        self.client.force_authenticate(user)
+
+        response = self.client.get(self.status_path())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["can_manage"])
 
     def test_status_finds_managed_policy_bound_to_authentication_flow(self):
         """Status finds the UI-created allowlist binding on the source authentication flow."""

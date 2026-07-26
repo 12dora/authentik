@@ -727,6 +727,8 @@ class TokenView(View):
             raise TokenError("invalid_scope")
         if SCOPE_OFFLINE_ACCESS not in self.params.scope:
             raise TokenError("invalid_scope")
+        if provider_has_dingtalk_allowlist_policy(self.provider):
+            raise TokenError("invalid_grant")
         now = timezone.now()
         access_token_expiry = now + timedelta_from_string(self.provider.access_token_validity)
         access_token = AccessToken(

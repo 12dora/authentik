@@ -93,6 +93,7 @@ class DingTalkAllowlistSourceLinkGuardSerializer(serializers.Serializer):
 
 class DingTalkAllowlistStatusResponseSerializer(serializers.Serializer):
     revision = serializers.CharField()
+    can_manage = serializers.BooleanField()
     config = serializers.JSONField()
     managed_policy = DingTalkAllowlistManagedPolicySerializer()
     policy_binding = DingTalkAllowlistPolicyBindingSerializer()
@@ -151,17 +152,24 @@ class CanViewDingTalkSource(BasePermission):
         )
 
 
+def can_manage_dingtalk_source(request: Request | HttpRequest, source: OAuthSource) -> bool:
+    """Return true when the request user can mutate this DingTalk source."""
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated:
+        return False
+    return bool(
+        user.has_perm("authentik_sources_oauth.change_oauthsource")
+        or user.has_perm("authentik_sources_oauth.change_oauthsource", source)
+    )
+
+
 class CanManageDingTalkSource(CanViewDingTalkSource):
     """Require RBAC write access to mutate the managed DingTalk allowlist policy."""
 
     def has_permission(self, request: Request, view) -> bool:
         if not super().has_permission(request, view):
             return False
-        source = view.dingtalk_source
-        return bool(
-            request.user.has_perm("authentik_sources_oauth.change_oauthsource")
-            or request.user.has_perm("authentik_sources_oauth.change_oauthsource", source)
-        )
+        return can_manage_dingtalk_source(request, view.dingtalk_source)
 
 
 def get_dingtalk_view_source(view, source_slug: str) -> OAuthSource:
@@ -243,6 +251,7 @@ def dingtalk_allowlist_status_payload(
     bindings = _policy_bindings(policy)
     return {
         "revision": _revision(policy),
+        "can_manage": can_manage_dingtalk_source(request, source),
         "config": config or {"companies": []},
         "managed_policy": {
             "exists": policy is not None,

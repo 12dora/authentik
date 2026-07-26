@@ -79,10 +79,32 @@ def update_well_known_jwks():
 
 @actor(description=_("Sync DingTalk directory cache."))
 def dingtalk_directory_sync(source_pk: str, corp_id: str, run_id: str | None = None):
-    source = OAuthSource.objects.filter(
-        pk=source_pk, enabled=True, provider_type="dingtalk"
-    ).first()
+    source = OAuthSource.objects.filter(pk=source_pk, provider_type="dingtalk").first()
     if not source:
+        from authentik.sources.oauth.dingtalk.sync import (
+            DINGTALK_SYNC_ERROR_SOURCE_UNAVAILABLE,
+            finalize_dingtalk_directory_sync_error,
+        )
+
+        finalize_dingtalk_directory_sync_error(
+            source_pk=source_pk,
+            corp_id=corp_id,
+            run_id=run_id,
+            error_code=DINGTALK_SYNC_ERROR_SOURCE_UNAVAILABLE,
+        )
+        return None
+    if not source.enabled:
+        from authentik.sources.oauth.dingtalk.sync import (
+            DINGTALK_SYNC_ERROR_SOURCE_DISABLED,
+            finalize_dingtalk_directory_sync_error,
+        )
+
+        finalize_dingtalk_directory_sync_error(
+            source=source,
+            corp_id=corp_id,
+            run_id=run_id,
+            error_code=DINGTALK_SYNC_ERROR_SOURCE_DISABLED,
+        )
         return None
     from authentik.sources.oauth.dingtalk.sync import sync_dingtalk_directory
 
@@ -92,7 +114,11 @@ def dingtalk_directory_sync(source_pk: str, corp_id: str, run_id: str | None = N
 @actor(description=_("Sync all DingTalk directory caches."))
 def dingtalk_directory_sync_all():
     from authentik.sources.oauth.dingtalk.selectors import source_scoped_dingtalk_identity
-    from authentik.sources.oauth.dingtalk.sync import queue_dingtalk_directory_sync
+    from authentik.sources.oauth.dingtalk.sync import (
+        DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE,
+        finalize_dingtalk_directory_sync_error,
+        queue_dingtalk_directory_sync,
+    )
     from authentik.sources.oauth.types.dingtalk import get_dingtalk_allowlist_binding
 
     for source in OAuthSource.objects.filter(enabled=True, provider_type="dingtalk"):
@@ -112,14 +138,23 @@ def dingtalk_directory_sync_all():
             if company.get("corp_id"):
                 corp_ids.add(str(company["corp_id"]))
         for corp_id in corp_ids:
+            run_id = None
             try:
                 run_id, should_enqueue = queue_dingtalk_directory_sync(source, corp_id)
                 if should_enqueue:
                     dingtalk_directory_sync.send(str(source.pk), corp_id, str(run_id))
             except (DatabaseError, RuntimeError, ValueError) as exc:
+                if run_id and isinstance(exc, RuntimeError):
+                    finalize_dingtalk_directory_sync_error(
+                        source=source,
+                        corp_id=corp_id,
+                        run_id=run_id,
+                        exc=exc,
+                        error_code=DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE,
+                    )
                 LOGGER.warning(
                     "dingtalk_directory_sync_all_corp_failed",
                     source_slug=source.slug,
                     corp_id=corp_id,
-                    exc=exc,
+                    exception_type=type(exc).__name__,
                 )

@@ -352,6 +352,9 @@ class DingTalkDirectorySyncStatus(InternallyManagedMixin, SerializerModel):
     last_attempt_at = models.DateTimeField(null=True, blank=True)
     last_success_at = models.DateTimeField(null=True, blank=True)
     error = models.TextField(blank=True, default="")
+    error_code = models.TextField(blank=True, default="")
+    error_params = models.JSONField(default=dict, blank=True)
+    error_correlation_id = models.UUIDField(null=True, blank=True)
     counters = models.JSONField(default=dict, blank=True)
 
     class Meta:

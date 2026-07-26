@@ -34,6 +34,19 @@ DINGTALK_MAX_RAW_PAYLOAD_BYTES = 50 * 1024 * 1024
 DINGTALK_STAGE_BATCH_SIZE = 500
 DINGTALK_MAX_CONCURRENT_SYNCS = 4
 DINGTALK_CONCURRENCY_TIMEOUT = 15 * 60
+DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE = "dingtalk_directory_broker_unavailable"
+DINGTALK_SYNC_ERROR_CONCURRENCY_LIMIT = "dingtalk_directory_concurrency_limit"
+DINGTALK_SYNC_ERROR_HTTP_REQUEST_FAILED = "dingtalk_directory_http_request_failed"
+DINGTALK_SYNC_ERROR_INVALID_RESPONSE = "dingtalk_directory_invalid_response"
+DINGTALK_SYNC_ERROR_PAYLOAD_LIMIT = "dingtalk_directory_payload_limit"
+DINGTALK_SYNC_ERROR_RUN_STALE = "dingtalk_directory_run_stale"
+DINGTALK_SYNC_ERROR_SOURCE_DISABLED = "dingtalk_directory_source_disabled"
+DINGTALK_SYNC_ERROR_SOURCE_UNAVAILABLE = "dingtalk_directory_source_unavailable"
+DINGTALK_SYNC_ERROR_UNSUPPORTED_SOURCE = "dingtalk_directory_unsupported_source"
+DINGTALK_SYNC_ERROR_USER_LIMIT = "dingtalk_directory_user_limit"
+DINGTALK_SYNC_ERROR_USER_DETAIL_FAILED = "dingtalk_directory_user_detail_failed"
+DINGTALK_SYNC_ERROR_UNKNOWN = "dingtalk_directory_sync_failed"
+DINGTALK_SYNC_ERROR_MAX_PARAMS = 10
 
 
 def _typed_counters(
@@ -68,15 +81,7 @@ def _sync_concurrency_lease():
             cache.delete(key)
 
 
-def safe_dingtalk_sync_error(exc: Exception) -> str:
-    """Return a bounded, credential-free status message safe to persist and expose."""
-    if isinstance(exc, RequestException):
-        status_code = getattr(getattr(exc, "response", None), "status_code", None)
-        if status_code is not None:
-            return f"DingTalk HTTP request failed (status {status_code})."
-        return "DingTalk HTTP request failed."
-    if not isinstance(exc, ValueError):
-        return f"DingTalk directory sync failed ({type(exc).__name__})."
+def _redacted_error_detail(exc: Exception) -> str:
     message = str(exc)
     message = sub(
         r"(?i)(access_token|appsecret|consumer_secret|x-acs-dingtalk-access-token)"
@@ -86,6 +91,101 @@ def safe_dingtalk_sync_error(exc: Exception) -> str:
     )
     message = sub(r"(?i)(https?://[^?\s]+)\?[^\s]+", r"\1?[redacted]", message)
     return message[:500] or "DingTalk directory sync failed."
+
+
+def _bounded_error_params(params: dict[str, Any] | None) -> dict[str, Any]:
+    bounded: dict[str, Any] = {}
+    for key, value in (params or {}).items():
+        if len(bounded) >= DINGTALK_SYNC_ERROR_MAX_PARAMS:
+            break
+        bounded[str(key)[:64]] = str(value)[:128]
+    return bounded
+
+
+def classify_dingtalk_sync_error(exc: Exception) -> tuple[str, dict[str, Any]]:
+    """Return stable public error metadata for a DingTalk sync failure."""
+    if isinstance(exc, RequestException):
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+        params = {"status_code": status_code} if status_code is not None else {}
+        return DINGTALK_SYNC_ERROR_HTTP_REQUEST_FAILED, params
+    if not isinstance(exc, ValueError):
+        return DINGTALK_SYNC_ERROR_UNKNOWN, {"exception_type": type(exc).__name__}
+    message = str(exc)
+    if "concurrency budget" in message:
+        return DINGTALK_SYNC_ERROR_CONCURRENCY_LIMIT, {}
+    if "user limit" in message:
+        return DINGTALK_SYNC_ERROR_USER_LIMIT, {}
+    if "payload limit" in message:
+        return DINGTALK_SYNC_ERROR_PAYLOAD_LIMIT, {}
+    if "user detail failed" in message:
+        return DINGTALK_SYNC_ERROR_USER_DETAIL_FAILED, {}
+    if "no longer current" in message or "deleted before it started" in message:
+        return DINGTALK_SYNC_ERROR_RUN_STALE, {}
+    if "not a DingTalk OAuth source" in message:
+        return DINGTALK_SYNC_ERROR_UNSUPPORTED_SOURCE, {}
+    if "source is disabled" in message:
+        return DINGTALK_SYNC_ERROR_SOURCE_DISABLED, {}
+    return DINGTALK_SYNC_ERROR_INVALID_RESPONSE, {}
+
+
+def safe_dingtalk_sync_error(exc: Exception) -> str:
+    """Return the stable public error code for a DingTalk sync failure."""
+    error_code, _params = classify_dingtalk_sync_error(exc)
+    return error_code
+
+
+def finalize_dingtalk_directory_sync_error(
+    *,
+    source: OAuthSource | None = None,
+    source_pk: str | None = None,
+    corp_id: str,
+    run_id: str | UUID | None,
+    exc: Exception | None = None,
+    error_code: str | None = None,
+    error_params: dict[str, Any] | None = None,
+) -> bool:
+    """Mark the matching active DingTalk sync run as terminal ERROR."""
+    if not run_id:
+        return False
+    parsed_run_id = UUID(str(run_id))
+    if exc and not error_code:
+        error_code, classified_params = classify_dingtalk_sync_error(exc)
+        error_params = {**classified_params, **(error_params or {})}
+    error_code = error_code or DINGTALK_SYNC_ERROR_UNKNOWN
+    error_params = _bounded_error_params(error_params)
+    correlation_id = uuid4()
+    lookup = {"corp_id": str(corp_id), "active_run_id": parsed_run_id}
+    if source is not None:
+        lookup["source"] = source
+    elif source_pk is not None:
+        lookup["source_id"] = source_pk
+    else:
+        return False
+    with transaction.atomic():
+        status = DingTalkDirectorySyncStatus.objects.select_for_update().filter(**lookup).first()
+        if not status:
+            return False
+        status.status = DingTalkDirectorySyncStatusChoices.ERROR
+        status.error = error_code
+        status.error_code = error_code
+        status.error_params = error_params
+        status.error_correlation_id = correlation_id
+        status.finished_at = now()
+        status.active_run_id = None
+        status.save()
+    LOGGER.warning(
+        "dingtalk_directory_sync_failed",
+        source_pk=str(source.pk) if source is not None else str(source_pk),
+        source_slug=source.slug if source is not None else None,
+        corp_id=str(corp_id),
+        run_id=str(parsed_run_id),
+        error_code=error_code,
+        error_params=error_params,
+        error_correlation_id=str(correlation_id),
+        exception_type=type(exc).__name__ if exc else None,
+        error_detail=_redacted_error_detail(exc) if exc else "",
+    )
+    return True
 
 
 def _start_sync_run(source: OAuthSource, corp_id: str, started_at: datetime) -> tuple[UUID, int]:
@@ -102,6 +202,9 @@ def _start_sync_run(source: OAuthSource, corp_id: str, started_at: datetime) -> 
         status.last_attempt_at = started_at
         status.finished_at = None
         status.error = ""
+        status.error_code = ""
+        status.error_params = {}
+        status.error_correlation_id = None
         status.save()
         return run_id, status.run_sequence
 
@@ -133,6 +236,9 @@ def queue_dingtalk_directory_sync(
         status.last_attempt_at = queued_at
         status.finished_at = None
         status.error = ""
+        status.error_code = ""
+        status.error_params = {}
+        status.error_correlation_id = None
         status.counters = _typed_counters()
         status.save()
         return status.active_run_id, True
@@ -159,6 +265,9 @@ def _claim_sync_run(
         status.last_attempt_at = started_at
         status.finished_at = None
         status.error = ""
+        status.error_code = ""
+        status.error_params = {}
+        status.error_correlation_id = None
         status.save()
         return queued_run_id, status.run_sequence
 
@@ -452,6 +561,9 @@ def _publish_snapshot(
         status.generation = run_sequence
         status.active_run_id = None
         status.error = ""
+        status.error_code = ""
+        status.error_params = {}
+        status.error_correlation_id = None
         status.counters = counters
         status.finished_at = now()
         status.last_success_at = status.finished_at
@@ -582,7 +694,6 @@ def sync_dingtalk_directory(
     parsed_run_id = UUID(str(queued_run_id)) if queued_run_id else None
     run_id, run_sequence = _claim_sync_run(source, corp_id, started_at, parsed_run_id)
     client = DingTalkDirectoryClient(source)
-    counters = _typed_counters()
     try:
         with _sync_concurrency_lease():
             _verify_sync_corp(source, corp_id, client)
@@ -612,15 +723,11 @@ def sync_dingtalk_directory(
             _cleanup_staging(source, corp_id, run_id)
             return result
     except Exception as exc:
-        with transaction.atomic():
-            status = DingTalkDirectorySyncStatus.objects.select_for_update().get(
-                source=source, corp_id=corp_id
-            )
-            if status.active_run_id == run_id and status.run_sequence == run_sequence:
-                status.status = DingTalkDirectorySyncStatusChoices.ERROR
-                status.error = safe_dingtalk_sync_error(exc)
-                status.counters = status.counters if isinstance(status.counters, dict) else counters
-                status.finished_at = now()
-                status.active_run_id = None
-                status.save()
+        finalize_dingtalk_directory_sync_error(
+            source=source,
+            corp_id=corp_id,
+            run_id=run_id,
+            exc=exc,
+            error_params={"run_sequence": run_sequence},
+        )
         raise

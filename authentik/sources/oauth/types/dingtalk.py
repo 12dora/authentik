@@ -180,6 +180,7 @@ def fetch_dingtalk_app_token_cached(
     token instead of re-fetching, otherwise DingTalk throttles both sync and login.
     """
     key = _dingtalk_app_token_cache_key(source)
+    initial_cached = cache.get(key) if force else None
     if not force:
         cached = cache.get(key)
         if cached:
@@ -196,8 +197,10 @@ def fetch_dingtalk_app_token_cached(
         for _ in range(DINGTALK_APP_TOKEN_LEASE_WAIT_ATTEMPTS):
             sleep(DINGTALK_APP_TOKEN_LEASE_WAIT_SECONDS)
             cached = cache.get(key)
-            if cached:
+            if cached and (not force or cached != initial_cached):
                 return str(cached)
+            if force and not cache.get(lease_key):
+                break
         if not cache.get(lease_key):
             try:
                 have_lease = cache.add(lease_key, "1", DINGTALK_APP_TOKEN_LEASE_TTL)

@@ -15,6 +15,7 @@ from authentik.sources.oauth.dingtalk.managed_users import (
 from authentik.sources.oauth.dingtalk.selectors import MAX_MANAGER_CHAIN_DEPTH
 from authentik.sources.oauth.models import (
     DingTalkDirectorySyncStatus,
+    DingTalkDirectorySyncStatusChoices,
     DingTalkDirectoryUser,
     OAuthSource,
     UserOAuthSourceConnection,
@@ -222,13 +223,27 @@ class TestDingTalkManagedUsers(TestCase):
 
     def test_stale_status_still_returns_cached_subordinates(self):
         DingTalkDirectorySyncStatus.objects.filter(source=self.source, corp_id="CORP").update(
-            finished_at=now() - timedelta(hours=25),
+            last_success_at=now() - timedelta(hours=25),
         )
         self._directory_user("EMP1")
 
         result = get_dingtalk_managed_users(self.source, "CORP", "MANAGER")
 
         self.assertTrue(result["stale"])
+        self.assertEqual([item["source_user_id"] for item in result["users"]], ["EMP1"])
+
+    def test_failed_attempt_returns_previous_success_timestamp_and_is_stale(self):
+        DingTalkDirectorySyncStatus.objects.filter(source=self.source, corp_id="CORP").update(
+            status=DingTalkDirectorySyncStatusChoices.ERROR,
+            finished_at=now(),
+            last_success_at=self.seen,
+        )
+        self._directory_user("EMP1")
+
+        result = get_dingtalk_managed_users(self.source, "CORP", "MANAGER")
+
+        self.assertTrue(result["stale"])
+        self.assertEqual(result["last_synced_at"], self.seen.isoformat())
         self.assertEqual([item["source_user_id"] for item in result["users"]], ["EMP1"])
 
     def test_duplicate_source_identifier_fails_closed(self):

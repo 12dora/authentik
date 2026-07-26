@@ -7,6 +7,7 @@ from django.utils.timezone import now
 from rest_framework.test import APIClient, APITestCase
 
 from authentik.core.tests.utils import create_test_admin_user, create_test_user
+from authentik.sources.oauth.dingtalk.sync import DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE
 from authentik.sources.oauth.models import (
     DingTalkDirectoryDepartment,
     DingTalkDirectorySyncStatus,
@@ -91,6 +92,44 @@ class TestDingTalkDirectoryAPI(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["sync"][0]["generation"], 9)
+
+    def test_status_reports_view_only_user_cannot_change(self):
+        user = create_test_user("directory-status-viewer")
+        user.assign_perms_to_managed_role("authentik_sources_oauth.view_oauthsource", self.source)
+        self.authenticate(user)
+
+        response = self.client.get(
+            reverse("authentik_api:dingtalk-directory-status", kwargs={"source_slug": "dingtalk"})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["can_change"])
+
+    def test_status_reports_object_change_user_can_change(self):
+        user = create_test_user("directory-status-object-changer")
+        user.assign_perms_to_managed_role("authentik_sources_oauth.view_oauthsource", self.source)
+        user.assign_perms_to_managed_role("authentik_sources_oauth.change_oauthsource", self.source)
+        self.authenticate(user)
+
+        response = self.client.get(
+            reverse("authentik_api:dingtalk-directory-status", kwargs={"source_slug": "dingtalk"})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["can_change"])
+
+    def test_status_reports_model_change_user_can_change(self):
+        user = create_test_user("directory-status-model-changer")
+        user.assign_perms_to_managed_role("authentik_sources_oauth.view_oauthsource", self.source)
+        user.assign_perms_to_managed_role("authentik_sources_oauth.change_oauthsource")
+        self.authenticate(user)
+
+        response = self.client.get(
+            reverse("authentik_api:dingtalk-directory-status", kwargs={"source_slug": "dingtalk"})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["can_change"])
 
     def test_user_list_returns_contact_fields_without_private_identifiers(self):
         self.authenticate(create_test_admin_user())
@@ -191,7 +230,9 @@ class TestDingTalkDirectoryAPI(APITestCase):
         status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
         self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.ERROR)
         self.assertIsNone(status.active_run_id)
-        self.assertEqual(status.error, "DingTalk directory sync could not be queued.")
+        self.assertEqual(status.error, DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE)
+        self.assertEqual(status.error_code, DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE)
+        self.assertIsNotNone(status.error_correlation_id)
 
     def test_sync_delete_clears_corp_cache_and_marks_status_deleted(self):
         DingTalkDirectorySyncStatus.objects.create(

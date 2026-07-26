@@ -96,6 +96,32 @@ class TestDingTalkAllowlistPolicyReconciliation(TestCase):
             bad.expression, f"{DINGTALK_ALLOWLIST_MARKER}\n# config: {{not-json}}\nreturn True\n"
         )
 
+    def test_forward_migration_does_not_widen_string_false_allow_all(self):
+        policy = ExpressionPolicy.objects.create(
+            name="string-false",
+            expression=(
+                f"{DINGTALK_ALLOWLIST_MARKER}\n"
+                '# config: {"companies":[{"corp_id":"CORP_FAKE","allow_all":"false"}]}\n'
+                "return False\n"
+            ),
+        )
+
+        self.assertIsNone(policy_migration.parse_policy(policy.expression))
+
+        policy_migration.reconcile_dingtalk_allowlist_policies(
+            apps, SimpleNamespace(connection=connection)
+        )
+        policy.refresh_from_db()
+
+        self.assertIn('"allow_all":"false"', policy.expression)
+        self.assertNotIn('"allow_all":true', policy.expression)
+
+        out = StringIO()
+        call_command("reconcile_dingtalk", stdout=out)
+        data = loads(out.getvalue())
+
+        self.assertEqual(data["policies"]["unparseable"][0]["pk"], str(policy.pk))
+
     def test_management_command_dry_run_check_and_apply_policy_reconciliation(self):
         policy = ExpressionPolicy.objects.create(
             name="dingtalk-allowlist-dt",

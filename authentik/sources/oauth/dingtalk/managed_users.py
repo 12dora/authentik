@@ -44,8 +44,8 @@ def _is_stale(status: DingTalkDirectorySyncStatus | None) -> bool:
     return (
         not status
         or status.status != "success"
-        or not status.finished_at
-        or status.finished_at < now() - STALE_AFTER
+        or not status.last_success_at
+        or status.last_success_at < now() - STALE_AFTER
     )
 
 
@@ -255,8 +255,8 @@ def get_dingtalk_managed_users(
             corp_id=corp_id,
             manager_user_id=manager.user_id,
             sync_status=status.status if status else None,
-            last_synced_at=status.finished_at.isoformat()
-            if status and status.finished_at
+            last_synced_at=status.last_success_at.isoformat()
+            if status and status.last_success_at
             else None,
         )
 
@@ -267,8 +267,8 @@ def get_dingtalk_managed_users(
         "resolver": RESOLVER,
         "resolved_at": now().isoformat(),
         "stale": stale,
-        "last_synced_at": status.finished_at.isoformat()
-        if status and status.finished_at
+        "last_synced_at": status.last_success_at.isoformat()
+        if status and status.last_success_at
         else None,
         "diagnostics": diagnostics,
         "pagination": {

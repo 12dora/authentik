@@ -12,6 +12,10 @@ from requests.exceptions import RequestException
 from authentik.core.tests.utils import create_test_user
 from authentik.sources.oauth.dingtalk.selectors import get_dingtalk_org_context
 from authentik.sources.oauth.dingtalk.sync import (
+    DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE,
+    DINGTALK_SYNC_ERROR_HTTP_REQUEST_FAILED,
+    DINGTALK_SYNC_ERROR_INVALID_RESPONSE,
+    DINGTALK_SYNC_ERROR_SOURCE_DISABLED,
     _publish_snapshot,
     _start_sync_run,
     safe_dingtalk_sync_error,
@@ -27,6 +31,7 @@ from authentik.sources.oauth.models import (
     OAuthSource,
     UserOAuthSourceConnection,
 )
+from authentik.sources.oauth.tasks import dingtalk_directory_sync as dingtalk_directory_sync_task
 from authentik.sources.oauth.tasks import dingtalk_directory_sync_all
 
 ORG_AUTH_CORP = {"raw": {"result": {"corpId": "CORP"}}, "label": "Example"}
@@ -187,7 +192,9 @@ class TestDingTalkDirectorySync(TestCase):
 
         status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
         self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.ERROR)
-        self.assertEqual(status.error, "missing permission")
+        self.assertEqual(status.error, DINGTALK_SYNC_ERROR_INVALID_RESPONSE)
+        self.assertEqual(status.error_code, DINGTALK_SYNC_ERROR_INVALID_RESPONSE)
+        self.assertIsNotNone(status.error_correlation_id)
         self.assertEqual(status.generation, 7)
         self.assertIsNone(status.last_success_at)
 
@@ -280,7 +287,7 @@ class TestDingTalkDirectorySync(TestCase):
 
         detail = safe_dingtalk_sync_error(error)
 
-        self.assertEqual(detail, "DingTalk HTTP request failed (status 403).")
+        self.assertEqual(detail, DINGTALK_SYNC_ERROR_HTTP_REQUEST_FAILED)
         self.assertNotIn("SECRET_TOKEN", detail)
         self.assertNotIn("access_token", detail)
 
@@ -493,6 +500,23 @@ class TestDingTalkDirectorySync(TestCase):
         status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
         self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.QUEUED)
 
+    def test_queued_run_marks_error_when_source_disabled_before_worker_starts(self):
+        from authentik.sources.oauth.dingtalk.sync import queue_dingtalk_directory_sync
+
+        run_id, _enqueued = queue_dingtalk_directory_sync(self.source, "CORP")
+        self.source.enabled = False
+        self.source.save(update_fields=["enabled"])
+
+        result = dingtalk_directory_sync_task(str(self.source.pk), "CORP", str(run_id))
+
+        self.assertIsNone(result)
+        status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
+        self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.ERROR)
+        self.assertIsNone(status.active_run_id)
+        self.assertEqual(status.error, DINGTALK_SYNC_ERROR_SOURCE_DISABLED)
+        self.assertEqual(status.error_code, DINGTALK_SYNC_ERROR_SOURCE_DISABLED)
+        self.assertIsNotNone(status.error_correlation_id)
+
     @patch("authentik.sources.oauth.types.dingtalk.get_dingtalk_allowlist_binding")
     @patch("authentik.sources.oauth.tasks.dingtalk_directory_sync.send")
     def test_scheduled_sync_uses_source_scoped_corp_identity(
@@ -543,6 +567,25 @@ class TestDingTalkDirectorySync(TestCase):
                 source=self.source, corp_id="CORP_B"
             ).exists()
         )
+
+    @patch("authentik.sources.oauth.types.dingtalk.get_dingtalk_allowlist_binding")
+    @patch("authentik.sources.oauth.tasks.dingtalk_directory_sync.send")
+    def test_scheduled_sync_marks_single_corp_error_when_broker_rejects(
+        self,
+        send_mock,
+        allowlist_mock,
+    ):
+        send_mock.side_effect = RuntimeError("broker secret detail")
+        allowlist_mock.return_value = (None, None, {"companies": [{"corp_id": "CORP"}]})
+
+        dingtalk_directory_sync_all()
+
+        status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
+        self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.ERROR)
+        self.assertIsNone(status.active_run_id)
+        self.assertEqual(status.error, DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE)
+        self.assertEqual(status.error_code, DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE)
+        self.assertIsNotNone(status.error_correlation_id)
 
 
 class TestDingTalkOrgContext(TestCase):

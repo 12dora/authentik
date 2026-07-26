@@ -93,6 +93,19 @@ class TestDingTalkDirectoryClient(TestCase):
 
         self.assertEqual(token, "LEASED_TOKEN")
 
+    def test_forced_app_token_waits_for_existing_lease_until_cache_changes(self):
+        key = _dingtalk_app_token_cache_key(self.source)
+        cache.set(key, "STALE_TOKEN")
+        cache.add(f"{key}/lease", "1", 30)
+
+        def sleeper(_seconds):
+            cache.set(key, "FRESH_TOKEN")
+
+        with patch("authentik.sources.oauth.types.dingtalk.sleep", side_effect=sleeper):
+            token = fetch_dingtalk_app_token_cached(self.source, force=True)
+
+        self.assertEqual(token, "FRESH_TOKEN")
+
     def test_department_limits_are_constructor_scoped(self):
         with Mocker() as mocker:
             mocker.get(DINGTALK_APP_ACCESS_TOKEN_URL, json={"access_token": "APP_TOKEN"})

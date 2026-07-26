@@ -25,7 +25,7 @@ def normalize_config(config):
             continue
         companies.append(
             {
-                "allow_all": bool(item.get("allow_all", False)),
+                "allow_all": normalize_allow_all(item.get("allow_all", False)),
                 "corp_id": str(corp_id),
                 "dept_ids": normalize_id_list(
                     item.get("dept_ids") or item.get("dept_id_list") or item.get("departments")
@@ -34,6 +34,12 @@ def normalize_config(config):
             }
         )
     return {"companies": companies}
+
+
+def normalize_allow_all(value):
+    if type(value) is not bool:
+        raise ValueError("DingTalk allowlist allow_all must be a boolean.")
+    return value
 
 
 def config_version(config):

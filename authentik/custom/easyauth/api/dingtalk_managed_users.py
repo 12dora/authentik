@@ -147,18 +147,18 @@ class DingTalkManagedUsersByManagerView(APIView):
             response = DingTalkManagedUsersResponseSerializer(data=payload)
             response.is_valid(raise_exception=True)
             return Response(response.data)
-        except DingTalkSourceUnavailable as exc:
+        except DingTalkSourceUnavailable:
             return Response(
-                {"code": "source_unavailable", "detail": str(exc)},
+                {"code": "source_unavailable", "detail": "DingTalk source is unavailable."},
                 status=HTTP_404_NOT_FOUND,
             )
-        except DingTalkManagerNotFound as exc:
+        except DingTalkManagerNotFound:
             return Response(
-                {"code": "manager_not_found", "detail": str(exc)},
+                {"code": "manager_not_found", "detail": "DingTalk manager was not found."},
                 status=HTTP_404_NOT_FOUND,
             )
-        except DingTalkBindingConflict as exc:
+        except DingTalkBindingConflict:
             return Response(
-                {"code": "binding_conflict", "detail": str(exc)},
+                {"code": "binding_conflict", "detail": "DingTalk binding conflict."},
                 status=HTTP_409_CONFLICT,
             )

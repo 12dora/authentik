@@ -20,7 +20,11 @@ from authentik.sources.oauth.dingtalk.selectors import (
     get_dingtalk_org_context,
     source_scoped_dingtalk_identity,
 )
-from authentik.sources.oauth.dingtalk.sync import queue_dingtalk_directory_sync
+from authentik.sources.oauth.dingtalk.sync import (
+    DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE,
+    finalize_dingtalk_directory_sync_error,
+    queue_dingtalk_directory_sync,
+)
 from authentik.sources.oauth.models import (
     DingTalkDirectoryDepartment,
     DingTalkDirectorySyncStatus,
@@ -63,17 +67,21 @@ class CanViewDingTalkDirectory(BasePermission):
         )
 
 
+def can_change_dingtalk_directory(request: Request, source: OAuthSource) -> bool:
+    """Return whether the request user can change the source-scoped DingTalk directory."""
+    return bool(
+        request.user.has_perm("authentik_sources_oauth.change_oauthsource")
+        or request.user.has_perm("authentik_sources_oauth.change_oauthsource", source)
+    )
+
+
 class CanChangeDingTalkDirectory(CanViewDingTalkDirectory):
     """Require source change access for sync trigger endpoints."""
 
     def has_permission(self, request: Request, view) -> bool:
         if not super().has_permission(request, view):
             return False
-        source = view.dingtalk_source
-        return bool(
-            request.user.has_perm("authentik_sources_oauth.change_oauthsource")
-            or request.user.has_perm("authentik_sources_oauth.change_oauthsource", source)
-        )
+        return can_change_dingtalk_directory(request, view.dingtalk_source)
 
 
 class CanViewDingTalkDirectoryDepartment(CanViewDingTalkDirectory):
@@ -109,12 +117,16 @@ class DingTalkDirectorySyncStatusSerializer(serializers.ModelSerializer):
             "last_attempt_at",
             "last_success_at",
             "error",
+            "error_code",
+            "error_params",
+            "error_correlation_id",
             "counters",
         ]
 
 
 class DingTalkDirectoryStatusSerializer(serializers.Serializer):
     source_slug = serializers.CharField()
+    can_change = serializers.BooleanField()
     sync = DingTalkDirectorySyncStatusSerializer(many=True)
 
 
@@ -187,6 +199,7 @@ class DingTalkDirectoryStatusView(APIView):
         return Response(
             {
                 "source_slug": source.slug,
+                "can_change": can_change_dingtalk_directory(request, source),
                 "sync": DingTalkDirectorySyncStatusSerializer(statuses, many=True).data,
             }
         )
@@ -211,18 +224,16 @@ class DingTalkDirectorySyncView(APIView):
             try:
                 dingtalk_directory_sync.send(str(source.pk), str(corp_id), str(run_id))
             except RuntimeError as exc:
-                status = DingTalkDirectorySyncStatus.objects.filter(
-                    source=source, corp_id=str(corp_id), active_run_id=run_id
-                ).first()
-                if status:
-                    status.status = DingTalkDirectorySyncStatusChoices.ERROR
-                    status.error = str(
-                        gettext_lazy("DingTalk directory sync could not be queued.")
-                    )
-                    status.finished_at = now()
-                    status.active_run_id = None
-                    status.save()
-                raise DingTalkDirectoryConflict(str(exc)) from exc
+                finalize_dingtalk_directory_sync_error(
+                    source=source,
+                    corp_id=str(corp_id),
+                    run_id=run_id,
+                    exc=exc,
+                    error_code=DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE,
+                )
+                raise DingTalkDirectoryConflict(
+                    gettext_lazy("DingTalk directory sync could not be queued.")
+                ) from exc
         return Response({"queued": should_enqueue, "corp_id": str(corp_id), "run_id": str(run_id)})
 
     @extend_schema(
@@ -262,6 +273,9 @@ class DingTalkDirectorySyncView(APIView):
             status.finished_at = now()
             status.last_attempt_at = status.finished_at
             status.error = ""
+            status.error_code = ""
+            status.error_params = {}
+            status.error_correlation_id = None
             status.counters = {}
             status.save()
             DingTalkDirectoryDepartment.objects.filter(source=source, corp_id=corp_id).delete()

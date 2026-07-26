@@ -261,6 +261,62 @@ class TestToken(OAuthTestCase):
         self.assertNotIn("refresh_token", body)
         self.assertFalse(RefreshToken.objects.filter(user=user, provider=provider).exists())
 
+    @apply_blueprint("system/providers-oauth2.yaml")
+    def test_refresh_token_dingtalk_protected_app_rejects_historical_refresh_token(self):
+        """DingTalk-protected applications reject previously-issued refresh tokens."""
+        provider = OAuth2Provider.objects.create(
+            name=generate_id(),
+            authorization_flow=create_test_flow(),
+            grant_types=[GrantType.REFRESH_TOKEN],
+            redirect_uris=[RedirectURI(RedirectURIMatchingMode.STRICT, "http://local.invalid")],
+            signing_key=self.keypair,
+        )
+        provider.property_mappings.set(
+            ScopeMapping.objects.filter(
+                managed__in=[
+                    "goauthentik.io/providers/oauth2/scope-openid",
+                    "goauthentik.io/providers/oauth2/scope-offline_access",
+                ]
+            )
+        )
+        self.app.provider = provider
+        self.app.save()
+        policy = ExpressionPolicy.objects.create(
+            name="require-dingtalk-allowlist-marker",
+            expression=render_dingtalk_allowlist_policy(
+                {"companies": [{"corp_id": "CORP_ALLOWED", "allow_all": True}]}
+            ),
+        )
+        PolicyBinding.objects.create(target=self.app, policy=policy, order=0)
+        header = b64encode(f"{provider.client_id}:{provider.client_secret}".encode()).decode()
+        user = create_test_admin_user()
+        token = RefreshToken.objects.create(
+            provider=provider,
+            user=user,
+            token=generate_id(),
+            _id_token=dumps({}),
+            auth_time=timezone.now(),
+            _scope="offline_access",
+        )
+
+        response = self.client.post(
+            reverse("authentik_providers_oauth2:token"),
+            data={
+                "grant_type": GRANT_TYPE_REFRESH_TOKEN,
+                "refresh_token": token.token,
+                "redirect_uri": "http://local.invalid",
+            },
+            HTTP_AUTHORIZATION=f"Basic {header}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertEqual(body["error"], "invalid_grant")
+        self.assertFalse(AccessToken.objects.filter(user=user, provider=provider).exists())
+        self.assertEqual(RefreshToken.objects.filter(user=user, provider=provider).count(), 1)
+        token.refresh_from_db()
+        self.assertFalse(token.revoked)
+
     def test_auth_code_enc(self):
         """test request param"""
         provider = OAuth2Provider.objects.create(
