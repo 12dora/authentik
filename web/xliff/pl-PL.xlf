@@ -10881,23 +10881,8 @@ Powiązania z grupami/użytkownikami są sprawdzane względem użytkownika zdarz
 <trans-unit id="sources.oauth.dingtalk-allowlist.picker.headline">
   <source>Allowed departments for <x id="0" equiv-text="${company.label || company.corpId}"/></source>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.policy.unmanaged-existing-policy">
-  <source>A policy with the managed DingTalk allowlist name exists but does not contain the managed marker.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.binding.auth.label">
-  <source>Authentication flow binding</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.binding.enrollment.label">
-  <source>Enrollment flow binding</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.save.partial">
-  <source>DingTalk allowlist saved with binding warnings.</source>
-</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.save.success">
   <source>DingTalk allowlist saved and applied.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.binding.flow-not-configured">
-  <source>Flow is not configured on this source.</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.departments.unauthorized-corp">
   <source>DingTalk departments can only be loaded for a company authorized by this DingTalk application. Edit the company label manually, or bind/authorize this company in the DingTalk developer console before loading departments.</source>
@@ -10929,14 +10914,8 @@ Powiązania z grupami/użytkownikami są sprawdzane względem użytkownika zdarz
 <trans-unit id="sources.oauth.dingtalk-allowlist.status.good.bound">
   <source>Bound</source>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.status.no-flow">
-  <source>No flow configured</source>
-</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.status.enrollment-binding">
   <source>Enrollment flow binding</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.status.no-enrollment-flow">
-  <source>No flow configured</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.company.corp-id">
   <source>Company corpId</source>
@@ -11288,6 +11267,21 @@ Powiązania z grupami/użytkownikami są sprawdzane względem użytkownika zdarz
 </trans-unit>
 <trans-unit id="flow.identification.email-or-username">
   <source>Email or username</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.read-only">
+  <source>You can view this DingTalk allowlist, but you need permission to change this OAuth source before editing or applying changes.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.read-only.toast">
+  <source>You do not have permission to change this DingTalk allowlist.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.table.caption">
+  <source>DingTalk allowlist companies</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.read-only-disabled">
+  <source>Cannot delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.read-only">
+  <source>You can view DingTalk directory status, but you need permission to change this OAuth source before syncing or deleting directory data.</source>
 </trans-unit>
 </body>
 </file>

@@ -11751,18 +11751,6 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sd1b98c71ea0d603b">
   <source>Flags allow you to enable new functionality and behavior in authentik early.</source>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.binding.auth.label">
-  <source>Authentication flow binding</source>
-  <target>认证流程绑定</target>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.binding.enrollment.label">
-  <source>Enrollment flow binding</source>
-  <target>注册流程绑定</target>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.binding.flow-not-configured">
-  <source>Flow is not configured on this source.</source>
-  <target>此源未配置流程。</target>
-</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.company.add">
   <source>Add company</source>
   <target>添加企业</target>
@@ -11931,6 +11919,14 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>Failed to remove the DingTalk allowlist policy.</source>
   <target>删除钉钉白名单策略失败。</target>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.read-only">
+  <source>You can view this DingTalk allowlist, but you need permission to change this OAuth source before editing or applying changes.</source>
+  <target>你可以查看此钉钉白名单，但需要拥有更改此 OAuth 源的权限才能编辑或应用更改。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.read-only.toast">
+  <source>You do not have permission to change this DingTalk allowlist.</source>
+  <target>你没有更改此钉钉白名单的权限。</target>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.validation.company-required">
   <source>Add at least one DingTalk company.</source>
   <target>请至少添加一家钉钉企业。</target>
@@ -11979,17 +11975,9 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>Some DingTalk status checks failed.</source>
   <target>部分钉钉状态检查失败。</target>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.policy.unmanaged-existing-policy">
-  <source>A policy with the managed DingTalk allowlist name exists but does not contain the managed marker.</source>
-  <target>已存在同名的托管钉钉白名单策略，但其中没有托管标记。</target>
-</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.save.apply">
   <source>Save and apply</source>
   <target>保存并应用</target>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.save.partial">
-  <source>DingTalk allowlist saved with binding warnings.</source>
-  <target>钉钉白名单已保存，但绑定存在警告。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.save.success">
   <source>DingTalk allowlist saved and applied.</source>
@@ -12014,14 +12002,6 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-allowlist.status.expression-validates">
   <source>Expression validates</source>
   <target>表达式校验通过</target>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.status.no-enrollment-flow">
-  <source>No flow configured</source>
-  <target>未配置注册流程</target>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.status.no-flow">
-  <source>No flow configured</source>
-  <target>未配置流程</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.status.not-run">
   <source>Not run</source>
@@ -12094,6 +12074,10 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-allowlist.table.actions">
   <source>Actions</source>
   <target>操作</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.table.caption">
+  <source>DingTalk allowlist companies</source>
+  <target>钉钉白名单企业</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.table.company">
   <source>Company</source>
@@ -14772,8 +14756,15 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-directory.delete.running-disabled">
   <source>Cannot delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/> while sync is running</source>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.read-only-disabled">
+  <source>Cannot delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/></source>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.delete.aria-label">
   <source>Delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.read-only">
+  <source>You can view DingTalk directory status, but you need permission to change this OAuth source before syncing or deleting directory data.</source>
+  <target>你可以查看钉钉通讯录状态，但需要拥有更改此 OAuth 源的权限才能同步或删除通讯录数据。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.table.caption">
   <source>DingTalk directory sync status by corp</source>
