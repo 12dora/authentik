@@ -12,6 +12,12 @@
  * Do not edit the class manually.
  */
 
+import type { DingTalkDirectorySyncStatusStatusEnum } from "./DingTalkDirectorySyncStatusStatusEnum";
+import {
+    DingTalkDirectorySyncStatusStatusEnumFromJSON,
+    DingTalkDirectorySyncStatusStatusEnumToJSON,
+} from "./DingTalkDirectorySyncStatusStatusEnum";
+
 /**
  *
  * @export
@@ -26,10 +32,16 @@ export interface DingTalkDirectorySyncStatus {
     corpId: string;
     /**
      *
-     * @type {string}
+     * @type {DingTalkDirectorySyncStatusStatusEnum}
      * @memberof DingTalkDirectorySyncStatus
      */
-    status?: string;
+    status: DingTalkDirectorySyncStatusStatusEnum;
+    /**
+     *
+     * @type {number}
+     * @memberof DingTalkDirectorySyncStatus
+     */
+    generation?: number;
     /**
      *
      * @type {Date}
@@ -44,16 +56,28 @@ export interface DingTalkDirectorySyncStatus {
     finishedAt?: Date | null;
     /**
      *
+     * @type {Date}
+     * @memberof DingTalkDirectorySyncStatus
+     */
+    lastAttemptAt?: Date | null;
+    /**
+     *
+     * @type {Date}
+     * @memberof DingTalkDirectorySyncStatus
+     */
+    lastSuccessAt?: Date | null;
+    /**
+     *
      * @type {string}
      * @memberof DingTalkDirectorySyncStatus
      */
     error?: string;
     /**
      *
-     * @type {any}
+     * @type {{ [key: string]: any; }}
      * @memberof DingTalkDirectorySyncStatus
      */
-    counters?: any | null;
+    counters: { [key: string]: any };
 }
 
 /**
@@ -63,6 +87,8 @@ export function instanceOfDingTalkDirectorySyncStatus(
     value: object,
 ): value is DingTalkDirectorySyncStatus {
     if (!("corpId" in value) || value["corpId"] === undefined) return false;
+    if (!("status" in value) || value["status"] === undefined) return false;
+    if (!("counters" in value) || value["counters"] === undefined) return false;
     return true;
 }
 
@@ -79,11 +105,16 @@ export function DingTalkDirectorySyncStatusFromJSONTyped(
     }
     return {
         corpId: json["corp_id"],
-        status: json["status"] == null ? undefined : json["status"],
+        status: DingTalkDirectorySyncStatusStatusEnumFromJSON(json["status"]),
+        generation: json["generation"] == null ? undefined : json["generation"],
         startedAt: json["started_at"] == null ? undefined : new Date(json["started_at"]),
         finishedAt: json["finished_at"] == null ? undefined : new Date(json["finished_at"]),
+        lastAttemptAt:
+            json["last_attempt_at"] == null ? undefined : new Date(json["last_attempt_at"]),
+        lastSuccessAt:
+            json["last_success_at"] == null ? undefined : new Date(json["last_success_at"]),
         error: json["error"] == null ? undefined : json["error"],
-        counters: json["counters"] == null ? undefined : json["counters"],
+        counters: json["counters"],
     };
 }
 
@@ -101,11 +132,20 @@ export function DingTalkDirectorySyncStatusToJSONTyped(
 
     return {
         corp_id: value["corpId"],
-        status: value["status"],
+        status: DingTalkDirectorySyncStatusStatusEnumToJSON(value["status"]),
+        generation: value["generation"],
         started_at:
             value["startedAt"] == null ? value["startedAt"] : value["startedAt"].toISOString(),
         finished_at:
             value["finishedAt"] == null ? value["finishedAt"] : value["finishedAt"].toISOString(),
+        last_attempt_at:
+            value["lastAttemptAt"] == null
+                ? value["lastAttemptAt"]
+                : value["lastAttemptAt"].toISOString(),
+        last_success_at:
+            value["lastSuccessAt"] == null
+                ? value["lastSuccessAt"]
+                : value["lastSuccessAt"].toISOString(),
         error: value["error"],
         counters: value["counters"],
     };

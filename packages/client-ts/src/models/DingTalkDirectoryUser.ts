@@ -50,6 +50,24 @@ export interface DingTalkDirectoryUser {
     avatar?: string;
     /**
      *
+     * @type {string}
+     * @memberof DingTalkDirectoryUser
+     */
+    email?: string;
+    /**
+     *
+     * @type {string}
+     * @memberof DingTalkDirectoryUser
+     */
+    mobile?: string;
+    /**
+     *
+     * @type {string}
+     * @memberof DingTalkDirectoryUser
+     */
+    jobNumber?: string;
+    /**
+     *
      * @type {any}
      * @memberof DingTalkDirectoryUser
      */
@@ -107,6 +125,9 @@ export function DingTalkDirectoryUserFromJSONTyped(
         name: json["name"] == null ? undefined : json["name"],
         title: json["title"] == null ? undefined : json["title"],
         avatar: json["avatar"] == null ? undefined : json["avatar"],
+        email: json["email"] == null ? undefined : json["email"],
+        mobile: json["mobile"] == null ? undefined : json["mobile"],
+        jobNumber: json["job_number"] == null ? undefined : json["job_number"],
         deptIdList: json["dept_id_list"] == null ? undefined : json["dept_id_list"],
         managerUserId: json["manager_user_id"] == null ? undefined : json["manager_user_id"],
         active: json["active"] == null ? undefined : json["active"],
@@ -133,6 +154,9 @@ export function DingTalkDirectoryUserToJSONTyped(
         name: value["name"],
         title: value["title"],
         avatar: value["avatar"],
+        email: value["email"],
+        mobile: value["mobile"],
+        job_number: value["jobNumber"],
         dept_id_list: value["deptIdList"],
         manager_user_id: value["managerUserId"],
         active: value["active"],

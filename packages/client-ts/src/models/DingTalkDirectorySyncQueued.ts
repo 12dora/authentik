@@ -30,6 +30,12 @@ export interface DingTalkDirectorySyncQueued {
      * @memberof DingTalkDirectorySyncQueued
      */
     corpId: string;
+    /**
+     *
+     * @type {string}
+     * @memberof DingTalkDirectorySyncQueued
+     */
+    runId: string | null;
 }
 
 /**
@@ -40,6 +46,7 @@ export function instanceOfDingTalkDirectorySyncQueued(
 ): value is DingTalkDirectorySyncQueued {
     if (!("queued" in value) || value["queued"] === undefined) return false;
     if (!("corpId" in value) || value["corpId"] === undefined) return false;
+    if (!("runId" in value) || value["runId"] === undefined) return false;
     return true;
 }
 
@@ -57,6 +64,7 @@ export function DingTalkDirectorySyncQueuedFromJSONTyped(
     return {
         queued: json["queued"],
         corpId: json["corp_id"],
+        runId: json["run_id"],
     };
 }
 
@@ -75,5 +83,6 @@ export function DingTalkDirectorySyncQueuedToJSONTyped(
     return {
         queued: value["queued"],
         corp_id: value["corpId"],
+        run_id: value["runId"],
     };
 }

@@ -36,6 +36,12 @@ import {
 export interface DingTalkAllowlistStatusResponse {
     /**
      *
+     * @type {string}
+     * @memberof DingTalkAllowlistStatusResponse
+     */
+    revision: string;
+    /**
+     *
      * @type {any}
      * @memberof DingTalkAllowlistStatusResponse
      */
@@ -52,6 +58,12 @@ export interface DingTalkAllowlistStatusResponse {
      * @memberof DingTalkAllowlistStatusResponse
      */
     policyBinding: DingTalkAllowlistPolicyBinding;
+    /**
+     *
+     * @type {Array<DingTalkAllowlistPolicyBinding>}
+     * @memberof DingTalkAllowlistStatusResponse
+     */
+    policyBindings: Array<DingTalkAllowlistPolicyBinding>;
     /**
      *
      * @type {DingTalkAllowlistSourceLinkGuard}
@@ -72,9 +84,11 @@ export interface DingTalkAllowlistStatusResponse {
 export function instanceOfDingTalkAllowlistStatusResponse(
     value: object,
 ): value is DingTalkAllowlistStatusResponse {
+    if (!("revision" in value) || value["revision"] === undefined) return false;
     if (!("config" in value) || value["config"] === undefined) return false;
     if (!("managedPolicy" in value) || value["managedPolicy"] === undefined) return false;
     if (!("policyBinding" in value) || value["policyBinding"] === undefined) return false;
+    if (!("policyBindings" in value) || value["policyBindings"] === undefined) return false;
     if (!("sourceLinkGuard" in value) || value["sourceLinkGuard"] === undefined) return false;
     if (!("callbackUrl" in value) || value["callbackUrl"] === undefined) return false;
     return true;
@@ -94,9 +108,13 @@ export function DingTalkAllowlistStatusResponseFromJSONTyped(
         return json;
     }
     return {
+        revision: json["revision"],
         config: json["config"],
         managedPolicy: DingTalkAllowlistManagedPolicyFromJSON(json["managed_policy"]),
         policyBinding: DingTalkAllowlistPolicyBindingFromJSON(json["policy_binding"]),
+        policyBindings: (json["policy_bindings"] as Array<any>).map(
+            DingTalkAllowlistPolicyBindingFromJSON,
+        ),
         sourceLinkGuard: DingTalkAllowlistSourceLinkGuardFromJSON(json["source_link_guard"]),
         callbackUrl: json["callback_url"],
     };
@@ -115,9 +133,13 @@ export function DingTalkAllowlistStatusResponseToJSONTyped(
     }
 
     return {
+        revision: value["revision"],
         config: value["config"],
         managed_policy: DingTalkAllowlistManagedPolicyToJSON(value["managedPolicy"]),
         policy_binding: DingTalkAllowlistPolicyBindingToJSON(value["policyBinding"]),
+        policy_bindings: (value["policyBindings"] as Array<any>).map(
+            DingTalkAllowlistPolicyBindingToJSON,
+        ),
         source_link_guard: DingTalkAllowlistSourceLinkGuardToJSON(value["sourceLinkGuard"]),
         callback_url: value["callbackUrl"],
     };

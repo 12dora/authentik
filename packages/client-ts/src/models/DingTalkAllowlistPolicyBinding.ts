@@ -36,6 +36,12 @@ export interface DingTalkAllowlistPolicyBinding {
      * @memberof DingTalkAllowlistPolicyBinding
      */
     enabled: boolean;
+    /**
+     *
+     * @type {string}
+     * @memberof DingTalkAllowlistPolicyBinding
+     */
+    target?: string;
 }
 
 /**
@@ -65,6 +71,7 @@ export function DingTalkAllowlistPolicyBindingFromJSONTyped(
         _exists: json["exists"],
         pk: json["pk"],
         enabled: json["enabled"],
+        target: json["target"] == null ? undefined : json["target"],
     };
 }
 
@@ -84,5 +91,6 @@ export function DingTalkAllowlistPolicyBindingToJSONTyped(
         exists: value["_exists"],
         pk: value["pk"],
         enabled: value["enabled"],
+        target: value["target"],
     };
 }
