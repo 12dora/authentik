@@ -37,7 +37,7 @@ import {
 import { DingTalkDepartmentPickerModal } from "#admin/sources/oauth/DingTalkDepartmentPickerModal";
 import { confirmDingTalkDestructiveAction } from "#admin/sources/oauth/DingTalkDestructiveActionModal";
 
-import { OAuthSource, SourcesApi } from "@goauthentik/api";
+import { type OAuthSource, SourcesApi } from "@goauthentik/api";
 
 import { msg, str } from "@lit/localize";
 import { css, CSSResult, html, nothing, PropertyValues, TemplateResult } from "lit";
@@ -50,6 +50,7 @@ import PFContent from "@patternfly/patternfly/components/Content/content.css";
 import PFForm from "@patternfly/patternfly/components/Form/form.css";
 import PFFormControl from "@patternfly/patternfly/components/FormControl/form-control.css";
 import PFSwitch from "@patternfly/patternfly/components/Switch/switch.css";
+import PFTableGrid from "@patternfly/patternfly/components/Table/table-grid.css";
 import PFTable from "@patternfly/patternfly/components/Table/table.css";
 import PFFlex from "@patternfly/patternfly/layouts/Flex/flex.css";
 
@@ -208,6 +209,7 @@ export class DingTalkAllowlistPanel extends AKElement {
         PFFormControl,
         PFSwitch,
         PFTable,
+        PFTableGrid,
         PFFlex,
         css`
             .ak-dingtalk-section {
@@ -318,6 +320,21 @@ export class DingTalkAllowlistPanel extends AKElement {
         this.dirty = true;
     }
 
+    private get canManage(): boolean {
+        return this.status?.canManage === true;
+    }
+
+    private get readOnlyNotice(): TemplateResult {
+        return html`<ak-alert class="ak-dingtalk-section" level="info" icon="fa-lock">
+            ${msg(
+                "You can view this DingTalk allowlist, but you need permission to change this OAuth source before editing or applying changes.",
+                {
+                    id: "sources.oauth.dingtalk-allowlist.read-only",
+                },
+            )}
+        </ak-alert>`;
+    }
+
     // IME-safe input plumbing: while a composition is active we must not push the
     // intermediate value back into component state, because re-rendering rewrites the
     // input's `.value` and cancels the in-progress Chinese composition.
@@ -374,6 +391,15 @@ export class DingTalkAllowlistPanel extends AKElement {
                     msg("DingTalk discovery failed.", {
                         id: "sources.oauth.dingtalk-allowlist.discovery.failed",
                     }),
+            });
+            return;
+        }
+        if (!this.canManage) {
+            showMessage({
+                level: MessageLevel.warning,
+                message: msg("You do not have permission to change this DingTalk allowlist.", {
+                    id: "sources.oauth.dingtalk-allowlist.read-only.toast",
+                }),
             });
             return;
         }
@@ -548,6 +574,9 @@ export class DingTalkAllowlistPanel extends AKElement {
     // Explicit opt-in for the companies detected on a shared flow: copy them into the
     // editable model, mark the panel dirty, and drop the read-only banner.
     private adoptDetectedSharedConfig(): void {
+        if (!this.canManage) {
+            return;
+        }
         const detected = this.detectedSharedConfig;
         if (!detected) {
             return;
@@ -564,6 +593,9 @@ export class DingTalkAllowlistPanel extends AKElement {
         allowAll: boolean,
         deptIds: string[],
     ): void {
+        if (!this.canManage) {
+            return;
+        }
         const existing = this.model.companies.some((company) => company.corpId === corpId);
         this.model = upsertDingTalkCompany(this.model, corpId, label, allowAll, deptIds);
         if (!existing) {
@@ -592,11 +624,17 @@ export class DingTalkAllowlistPanel extends AKElement {
     }
 
     private updateCompany(corpId: string, patch: Partial<DingTalkAllowlistModel["companies"][0]>) {
+        if (!this.canManage) {
+            return;
+        }
         this.model = updateDingTalkCompany(this.model, corpId, patch);
         this.markDirty();
     }
 
     private removeCompany(corpId: string): void {
+        if (!this.canManage) {
+            return;
+        }
         this.model = removeDingTalkCompany(this.model, corpId);
         // Drop the per-corp UI state too, otherwise re-adding the same corpId would
         // surface the previous round's (possibly stale) department input.
@@ -605,6 +643,9 @@ export class DingTalkAllowlistPanel extends AKElement {
     }
 
     private addDepartments(corpId: string): void {
+        if (!this.canManage) {
+            return;
+        }
         const result = addDingTalkDepartments(this.model, this.departmentInputs, corpId);
         if (result.error) {
             showMessage({
@@ -636,6 +677,9 @@ export class DingTalkAllowlistPanel extends AKElement {
     }
 
     private setDepartmentInput(corpId: string, value: string): void {
+        if (!this.canManage) {
+            return;
+        }
         this.departmentInputs = {
             ...this.departmentInputs,
             [corpId]: value,
@@ -644,6 +688,9 @@ export class DingTalkAllowlistPanel extends AKElement {
     }
 
     private applyDepartmentInput(corpId: string, departmentInput: string): void {
+        if (!this.canManage) {
+            return;
+        }
         const company = this.model.companies.find((candidate) => candidate.corpId === corpId);
         if (!company || company.allowAll) {
             return;
@@ -673,7 +720,7 @@ export class DingTalkAllowlistPanel extends AKElement {
     }
 
     private async discoverCompany(): Promise<void> {
-        if (!this.source?.slug) {
+        if (!this.source?.slug || !this.canManage) {
             return;
         }
         const sourceSlug = this.source.slug;
@@ -780,6 +827,9 @@ export class DingTalkAllowlistPanel extends AKElement {
     // then hands selection editing to the modal picker. The allowlist model is only
     // touched when the admin applies the selection.
     private async pickDepartments(corpId: string): Promise<void> {
+        if (!this.canManage) {
+            return;
+        }
         const company = this.model.companies.find((candidate) => candidate.corpId === corpId);
         if (!company || company.allowAll) {
             return;
@@ -800,7 +850,7 @@ export class DingTalkAllowlistPanel extends AKElement {
 
     private async saveAndApply(): Promise<void> {
         const sourceSlug = this.source?.slug;
-        if (!sourceSlug) {
+        if (!sourceSlug || !this.canManage) {
             return;
         }
         const departmentInputResult = applyDingTalkDepartmentInputs(
@@ -857,7 +907,7 @@ export class DingTalkAllowlistPanel extends AKElement {
 
     private async removeManagedConfiguration(): Promise<void> {
         const sourceSlug = this.source?.slug;
-        if (!sourceSlug || !this.status?.managedPolicy._exists) {
+        if (!sourceSlug || !this.canManage || !this.status?.managedPolicy._exists) {
             return;
         }
         const status = await this.allowlistApi.sourcesOauthDingtalkAllowlistRemoveCreate(
@@ -874,6 +924,9 @@ export class DingTalkAllowlistPanel extends AKElement {
     }
 
     private async confirmRemoveManagedConfiguration(event: Event): Promise<void> {
+        if (!this.canManage) {
+            return;
+        }
         await confirmDingTalkDestructiveAction(
             {
                 headline: msg("Remove DingTalk allowlist", {
@@ -945,10 +998,13 @@ export class DingTalkAllowlistPanel extends AKElement {
         const staleState = (state: StatusItem["state"]): StatusItem["state"] =>
             stale && state === "good" ? "unknown" : state;
         const managedPolicy = this.status?.managedPolicy;
-        const enabledPolicyBindings =
-            this.status?.policyBindings.filter((binding) => binding._exists && binding.enabled) ??
-            [];
-        const bindingState = enabledPolicyBindings.length > 0 ? "good" : "danger";
+        const bindingStateForTarget = (target?: string | null): StatusItem["state"] =>
+            target &&
+            this.status?.policyBindings.some(
+                (binding) => binding._exists && binding.enabled && binding.target === target,
+            )
+                ? "good"
+                : "danger";
 
         return [
             {
@@ -1000,7 +1056,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                 label: msg("Authentication flow binding", {
                     id: "sources.oauth.dingtalk-allowlist.status.auth-binding",
                 }),
-                state: staleState(bindingState),
+                state: staleState(bindingStateForTarget(this.source?.authenticationFlow)),
                 goodLabel: msg("Bound", {
                     id: "sources.oauth.dingtalk-allowlist.status.good.bound",
                 }),
@@ -1010,7 +1066,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                 label: msg("Enrollment flow binding", {
                     id: "sources.oauth.dingtalk-allowlist.status.enrollment-binding",
                 }),
-                state: staleState(bindingState),
+                state: staleState(bindingStateForTarget(this.source?.enrollmentFlow)),
                 goodLabel: msg("Bound", {
                     id: "sources.oauth.dingtalk-allowlist.status.good.bound",
                 }),
@@ -1042,6 +1098,7 @@ export class DingTalkAllowlistPanel extends AKElement {
     }
 
     private renderManualAdd(): TemplateResult {
+        const disabled = !this.canManage;
         return html`<div class="pf-c-form ak-dingtalk-section">
             <div class="pf-l-flex ak-dingtalk-inline-form">
                 <div class="pf-c-form__group">
@@ -1055,6 +1112,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                     <input
                         id="dingtalk-manual-corp-id"
                         class="pf-c-form-control"
+                        ?disabled=${disabled}
                         .value=${this.manualCorpId}
                         @compositionstart=${this.startComposition}
                         @compositionend=${(event: CompositionEvent) =>
@@ -1080,6 +1138,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                     <input
                         id="dingtalk-manual-label"
                         class="pf-c-form-control"
+                        ?disabled=${disabled}
                         .value=${this.manualLabel}
                         @compositionstart=${this.startComposition}
                         @compositionend=${(event: CompositionEvent) =>
@@ -1097,6 +1156,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                 <button
                     type="button"
                     class="pf-c-button pf-m-secondary"
+                    ?disabled=${disabled}
                     @click=${() => this.addManualCompany()}
                 >
                     ${msg("Add company", {
@@ -1123,19 +1183,26 @@ export class DingTalkAllowlistPanel extends AKElement {
             </ak-empty-state>`;
         }
 
-        return html`<table class="pf-c-table pf-m-compact pf-m-grid-md" role="grid">
+        return html`<table class="pf-c-table pf-m-compact pf-m-grid-md">
+            <caption>
+                ${msg("DingTalk allowlist companies", {
+                    id: "sources.oauth.dingtalk-allowlist.table.caption",
+                })}
+            </caption>
             <thead>
                 <tr>
-                    <th>
+                    <th scope="col">
                         ${msg("Company", { id: "sources.oauth.dingtalk-allowlist.table.company" })}
                     </th>
-                    <th>${msg("Mode", { id: "sources.oauth.dingtalk-allowlist.table.mode" })}</th>
-                    <th>
+                    <th scope="col">
+                        ${msg("Mode", { id: "sources.oauth.dingtalk-allowlist.table.mode" })}
+                    </th>
+                    <th scope="col">
                         ${msg("Department IDs", {
                             id: "sources.oauth.dingtalk-allowlist.table.departments",
                         })}
                     </th>
-                    <th>
+                    <th scope="col">
                         ${msg("Actions", { id: "sources.oauth.dingtalk-allowlist.table.actions" })}
                     </th>
                 </tr>
@@ -1147,18 +1214,21 @@ export class DingTalkAllowlistPanel extends AKElement {
     }
 
     private renderCompanyRow(company: DingTalkAllowlistModel["companies"][0]): TemplateResult {
+        const disabled = !this.canManage;
         const missingDepartments = isDingTalkCompanyMissingDepartments(
             company,
             this.departmentInputs[company.corpId],
         );
         return html`<tr>
-            <td
+            <th
+                scope="row"
                 data-label=${msg("Company", {
                     id: "sources.oauth.dingtalk-allowlist.table.company",
                 })}
             >
                 <input
                     class="pf-c-form-control"
+                    ?disabled=${disabled}
                     .value=${company.label}
                     aria-label=${msg("Company label", {
                         id: "sources.oauth.dingtalk-allowlist.company.label.aria-label",
@@ -1174,12 +1244,13 @@ export class DingTalkAllowlistPanel extends AKElement {
                         })}
                 />
                 <div class="ak-dingtalk-muted">${company.corpId}</div>
-            </td>
+            </th>
             <td data-label=${msg("Mode", { id: "sources.oauth.dingtalk-allowlist.table.mode" })}>
                 <label class="pf-c-switch">
                     <input
                         class="pf-c-switch__input"
                         type="checkbox"
+                        ?disabled=${disabled}
                         .checked=${company.allowAll}
                         @change=${(event: InputEvent) => {
                             this.updateCompany(company.corpId, {
@@ -1234,7 +1305,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                 <div class="ak-dingtalk-input-row">
                     <input
                         class="pf-c-form-control ak-dingtalk-department-input"
-                        ?disabled=${company.allowAll}
+                        ?disabled=${disabled || company.allowAll}
                         aria-label=${msg(
                             str`Allowed department IDs for ${company.label || company.corpId}`,
                             {
@@ -1261,7 +1332,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                     <button
                         type="button"
                         class="pf-c-button pf-m-secondary"
-                        ?disabled=${company.allowAll}
+                        ?disabled=${disabled || company.allowAll}
                         @click=${() => this.addDepartments(company.corpId)}
                     >
                         ${msg("Add departments", {
@@ -1270,7 +1341,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                     </button>
                     <ak-spinner-button
                         class="pf-m-secondary"
-                        ?disabled=${company.allowAll}
+                        ?disabled=${disabled || company.allowAll}
                         .callAction=${() => this.pickDepartments(company.corpId)}
                     >
                         ${msg("Select departments…", {
@@ -1284,15 +1355,17 @@ export class DingTalkAllowlistPanel extends AKElement {
                     id: "sources.oauth.dingtalk-allowlist.table.actions",
                 })}
             >
-                <div class="ak-dingtalk-table-actions">
-                    <button
-                        type="button"
-                        class="pf-c-button pf-m-danger"
-                        @click=${() => this.removeCompany(company.corpId)}
-                    >
-                        ${msg("Remove", { id: "common.actions.remove" })}
-                    </button>
-                </div>
+                ${this.canManage
+                    ? html`<div class="ak-dingtalk-table-actions">
+                          <button
+                              type="button"
+                              class="pf-c-button pf-m-danger"
+                              @click=${() => this.removeCompany(company.corpId)}
+                          >
+                              ${msg("Remove", { id: "common.actions.remove" })}
+                          </button>
+                      </div>`
+                    : nothing}
             </td>
         </tr>`;
     }
@@ -1376,6 +1449,7 @@ export class DingTalkAllowlistPanel extends AKElement {
             <button
                 type="button"
                 class="pf-c-button pf-m-secondary pf-m-small"
+                ?disabled=${!this.canManage}
                 @click=${() => this.adoptDetectedSharedConfig()}
             >
                 ${msg("Adopt detected companies", {
@@ -1406,7 +1480,7 @@ export class DingTalkAllowlistPanel extends AKElement {
     }
 
     private renderRemoveConfiguration(): TemplateResult {
-        if (!this.status?.managedPolicy._exists) {
+        if (!this.status?.managedPolicy._exists || !this.canManage) {
             return html``;
         }
         return html`<button
@@ -1435,7 +1509,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                     <div class="pf-l-flex ak-dingtalk-actions ak-dingtalk-section">
                         <ak-spinner-button
                             class="pf-m-secondary"
-                            ?disabled=${!this.loaded}
+                            ?disabled=${!this.loaded || !this.canManage}
                             .callAction=${() => this.discoverCompany()}
                         >
                             ${msg("Discover company", {
@@ -1444,7 +1518,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                         </ak-spinner-button>
                         <ak-spinner-button
                             class="pf-m-primary"
-                            ?disabled=${!this.loaded}
+                            ?disabled=${!this.loaded || !this.canManage}
                             .callAction=${() => this.saveAndApply()}
                         >
                             ${msg("Save and apply", {
@@ -1462,7 +1536,8 @@ export class DingTalkAllowlistPanel extends AKElement {
                         ${this.renderRemoveConfiguration()}
                     </div>
                     ${this.loaded
-                        ? html`${this.renderFailClosedNotice()} ${this.renderUnsavedChanges()}
+                        ? html`${this.canManage ? nothing : this.readOnlyNotice}
+                              ${this.renderFailClosedNotice()} ${this.renderUnsavedChanges()}
                               ${this.renderDiscoveryDetails()}
                               <ul class="ak-dingtalk-status ak-dingtalk-section">
                                   ${this.statusItems().map((item) => this.renderStatus(item))}

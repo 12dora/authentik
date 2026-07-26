@@ -2,9 +2,9 @@ import type { DingTalkAllowlistModel } from "#admin/sources/oauth/DingTalkAllowl
 
 import {
     type Configuration,
-    DingTalkAllowlistApplyRequestRequest,
-    DingTalkAllowlistRemoveRequestRequest,
-    DingTalkAllowlistStatusResponse,
+    type DingTalkAllowlistApplyRequestRequest,
+    type DingTalkAllowlistRemoveRequestRequest,
+    type DingTalkAllowlistStatusResponse,
     SourcesApi,
 } from "@goauthentik/api";
 
@@ -12,9 +12,9 @@ export interface DingTalkAllowlistStatus extends DingTalkAllowlistStatusResponse
     revision: string;
 }
 
-export interface DingTalkAllowlistApplyRequest extends DingTalkAllowlistApplyRequestRequest {}
+export type DingTalkAllowlistApplyRequest = DingTalkAllowlistApplyRequestRequest;
 
-export interface DingTalkAllowlistRemoveRequest extends DingTalkAllowlistRemoveRequestRequest {}
+export type DingTalkAllowlistRemoveRequest = DingTalkAllowlistRemoveRequestRequest;
 
 function dingTalkAllowlistConfigToJSON(model: DingTalkAllowlistModel): unknown {
     return {

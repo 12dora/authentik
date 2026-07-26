@@ -1,9 +1,9 @@
 import { DEFAULT_CONFIG } from "#common/api/config";
 
 import {
-    DingTalkDirectoryStatus,
-    DingTalkDirectorySyncQueued,
-    DingTalkDirectorySyncRequestRequest,
+    type DingTalkDirectoryStatus,
+    type DingTalkDirectorySyncQueued,
+    type DingTalkDirectorySyncRequestRequest,
     SourcesApi,
 } from "@goauthentik/api";
 

@@ -25,7 +25,7 @@ import { AKElement } from "#elements/Base";
 import { showMessage } from "#elements/messages/MessageContainer";
 import { SlottedTemplateResult } from "#elements/types";
 
-import { OAuthSource } from "@goauthentik/api";
+import type { OAuthSource } from "@goauthentik/api";
 
 import { msg, str } from "@lit/localize";
 import { css, CSSResult, html, nothing, PropertyValues, TemplateResult } from "lit";
@@ -78,6 +78,9 @@ export class DingTalkDirectoryPanel extends AKElement {
 
     @state()
     private validationError?: string;
+
+    @state()
+    private canChange = false;
 
     private api: DingTalkDirectoryClient = new GeneratedDingTalkDirectoryClient();
 
@@ -221,6 +224,7 @@ export class DingTalkDirectoryPanel extends AKElement {
         this.pollPaused = false;
         this.lastStatusLoadedAt = undefined;
         this.validationError = undefined;
+        this.canChange = false;
         this.manualSyncPromise = undefined;
         this.seenTerminalStatusKeys.clear();
         this.queuedCorpIds.clear();
@@ -235,10 +239,12 @@ export class DingTalkDirectoryPanel extends AKElement {
         const sourceSlug = this.source.slug;
         const generation = ++this.refreshGeneration;
         let statuses: DingTalkDirectorySyncStatus[] | undefined;
+        let canChange = false;
         let parsedError: string | undefined;
         try {
             const response = await this.api.status(sourceSlug);
             statuses = response.sync;
+            canChange = response.canChange;
         } catch (error) {
             parsedError = pluckErrorDetail(await parseAPIResponseError(error));
         }
@@ -249,6 +255,7 @@ export class DingTalkDirectoryPanel extends AKElement {
         }
         if (statuses) {
             this.statuses = statuses;
+            this.canChange = canChange;
             this.loadError = undefined;
             this.pollPaused = false;
             this.lastStatusLoadedAt = new Date();
@@ -346,6 +353,9 @@ export class DingTalkDirectoryPanel extends AKElement {
     }
 
     private async submitManualSync(): Promise<void> {
+        if (!this.canChange) {
+            return;
+        }
         if (this.manualSyncPromise) {
             return this.manualSyncPromise;
         }
@@ -367,7 +377,7 @@ export class DingTalkDirectoryPanel extends AKElement {
     }
 
     private async triggerManualSync(): Promise<void> {
-        if (!this.source?.slug) {
+        if (!this.source?.slug || !this.canChange) {
             return;
         }
         const sourceSlug = this.source.slug;
@@ -411,7 +421,7 @@ export class DingTalkDirectoryPanel extends AKElement {
     }
 
     private async deleteSyncStatus(sourceSlug: string, corpId: string): Promise<void> {
-        if (this.source?.slug !== sourceSlug) {
+        if (this.source?.slug !== sourceSlug || !this.canChange) {
             return;
         }
         await this.api.destroy(sourceSlug, corpId);
@@ -426,7 +436,7 @@ export class DingTalkDirectoryPanel extends AKElement {
         status: DingTalkDirectorySyncStatus,
     ): Promise<void> {
         const sourceSlug = this.source?.slug;
-        if (!sourceSlug) {
+        if (!sourceSlug || !this.canChange) {
             return;
         }
         await confirmDingTalkDestructiveAction(
@@ -722,7 +732,7 @@ export class DingTalkDirectoryPanel extends AKElement {
                     id=${inputId}
                     class="pf-c-form-control"
                     .value=${this.manualCorpId}
-                    ?disabled=${!this.loaded || this.manualSyncPending}
+                    ?disabled=${!this.loaded || this.manualSyncPending || !this.canChange}
                     required
                     aria-required="true"
                     aria-invalid=${this.validationError ? "true" : "false"}
@@ -741,7 +751,7 @@ export class DingTalkDirectoryPanel extends AKElement {
             <button
                 class="pf-c-button pf-m-primary"
                 type="submit"
-                ?disabled=${!this.loaded || this.manualSyncPending}
+                ?disabled=${!this.loaded || this.manualSyncPending || !this.canChange}
                 aria-busy=${this.manualSyncPending ? "true" : "false"}
             >
                 ${msg("Sync now", { id: "sources.oauth.dingtalk-directory.sync-now" })}
@@ -750,14 +760,18 @@ export class DingTalkDirectoryPanel extends AKElement {
     }
 
     private renderDeleteAction(status: DingTalkDirectorySyncStatus): TemplateResult {
-        const disabled = !canDeleteDingTalkDirectoryStatus(status);
+        const disabled = !this.canChange || !canDeleteDingTalkDirectoryStatus(status);
         const actionLabel = disabled
-            ? msg(
-                  str`Cannot delete DingTalk directory data for ${status.corpId} while sync is running`,
-                  {
-                      id: "sources.oauth.dingtalk-directory.delete.running-disabled",
-                  },
-              )
+            ? this.canChange
+                ? msg(
+                      str`Cannot delete DingTalk directory data for ${status.corpId} while sync is running`,
+                      {
+                          id: "sources.oauth.dingtalk-directory.delete.running-disabled",
+                      },
+                  )
+                : msg(str`Cannot delete DingTalk directory data for ${status.corpId}`, {
+                      id: "sources.oauth.dingtalk-directory.delete.read-only-disabled",
+                  })
             : msg(str`Delete DingTalk directory data for ${status.corpId}`, {
                   id: "sources.oauth.dingtalk-directory.delete.aria-label",
               });
@@ -939,6 +953,18 @@ export class DingTalkDirectoryPanel extends AKElement {
                 })}
             </div>
             <div class="pf-c-card__body pf-c-content">${this.renderSummary()}</div>
+            ${this.loaded && !this.canChange
+                ? html`<div class="pf-c-card__body">
+                      <ak-alert level="info" icon="fa-lock">
+                          ${msg(
+                              "You can view DingTalk directory status, but you need permission to change this OAuth source before syncing or deleting directory data.",
+                              {
+                                  id: "sources.oauth.dingtalk-directory.read-only",
+                              },
+                          )}
+                      </ak-alert>
+                  </div>`
+                : nothing}
             <div class="pf-c-card__body pf-c-form">${this.renderActions()}</div>
             <div class="pf-c-card__body">${this.renderTable()}</div>
             <div class="pf-c-card__title">

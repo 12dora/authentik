@@ -101,6 +101,11 @@ export class OAuthSourceViewPage extends AKElement {
     private activeDingTalkPanel: "page-dingtalk-allowlist" | "page-dingtalk-directory" | null =
         null;
 
+    @state()
+    private activatedDingTalkPanels: ReadonlySet<
+        "page-dingtalk-allowlist" | "page-dingtalk-directory"
+    > = new Set();
+
     private requestedSlug = "";
     private requestGeneration = 0;
     private dingTalkPanelsLoading?: Promise<void>;
@@ -112,6 +117,7 @@ export class OAuthSourceViewPage extends AKElement {
         if (!sameLoadedSource) {
             this.source = undefined;
             this.activeDingTalkPanel = null;
+            this.activatedDingTalkPanels = new Set();
         }
         this.loadError = false;
         this.sourceLoading = true;
@@ -143,6 +149,14 @@ export class OAuthSourceViewPage extends AKElement {
         });
 
         return this.dingTalkPanelsLoading;
+    }
+
+    private activateDingTalkPanel(
+        panel: "page-dingtalk-allowlist" | "page-dingtalk-directory",
+    ): void {
+        this.activeDingTalkPanel = panel;
+        this.activatedDingTalkPanels = new Set([...this.activatedDingTalkPanels, panel]);
+        this.loadDingTalkPanels();
     }
 
     static styles: CSSResult[] = [PFPage, PFButton, PFGrid, PFContent, PFCard, PFDescriptionList];
@@ -260,14 +274,12 @@ export class OAuthSourceViewPage extends AKElement {
                                   id: "sources.oauth.dingtalk-allowlist.tab",
                               })}"
                               class="pf-c-page__main-section pf-m-no-padding-mobile"
-                              @activate=${() => {
-                                  this.activeDingTalkPanel = "page-dingtalk-allowlist";
-                                  this.loadDingTalkPanels();
-                              }}
+                              @activate=${() =>
+                                  this.activateDingTalkPanel("page-dingtalk-allowlist")}
                           >
                               <div class="pf-l-grid pf-m-gutter">
                                   ${this.dingTalkPanelsLoaded &&
-                                  this.activeDingTalkPanel === "page-dingtalk-allowlist"
+                                  this.activatedDingTalkPanels.has("page-dingtalk-allowlist")
                                       ? html`<ak-source-oauth-dingtalk-allowlist
                                             class="pf-l-grid__item pf-m-12-col"
                                             .source=${this.source}
@@ -284,17 +296,18 @@ export class OAuthSourceViewPage extends AKElement {
                                   id: "sources.oauth.dingtalk-directory.tab",
                               })}"
                               class="pf-c-page__main-section pf-m-no-padding-mobile"
-                              @activate=${() => {
-                                  this.activeDingTalkPanel = "page-dingtalk-directory";
-                                  this.loadDingTalkPanels();
-                              }}
+                              @activate=${() =>
+                                  this.activateDingTalkPanel("page-dingtalk-directory")}
                           >
                               <div class="pf-l-grid pf-m-gutter">
                                   ${this.dingTalkPanelsLoaded &&
-                                  this.activeDingTalkPanel === "page-dingtalk-directory"
+                                  this.activatedDingTalkPanels.has("page-dingtalk-directory")
                                       ? html`<ak-source-oauth-dingtalk-directory
                                             class="pf-l-grid__item pf-m-12-col"
-                                            .source=${this.source}
+                                            .source=${this.activeDingTalkPanel ===
+                                            "page-dingtalk-directory"
+                                                ? this.source
+                                                : undefined}
                                         ></ak-source-oauth-dingtalk-directory>`
                                       : nothing}
                               </div>

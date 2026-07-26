@@ -21,6 +21,7 @@ import { css, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
 import PFCheck from "@patternfly/patternfly/components/Check/check.css";
+import PFTableGrid from "@patternfly/patternfly/components/Table/table-grid.css";
 import PFTable from "@patternfly/patternfly/components/Table/table.css";
 
 // Client-side page size for the department tree; large directories would
@@ -39,6 +40,7 @@ export class DingTalkDepartmentPickerModal extends AKModal {
         ...AKModal.styles,
         PFCheck,
         PFTable,
+        PFTableGrid,
         css`
             .ak-dingtalk-picker-toolbar {
                 display: flex;
@@ -263,22 +265,22 @@ export class DingTalkDepartmentPickerModal extends AKModal {
             >
                 <thead>
                     <tr>
-                        <th>
+                        <th scope="col">
                             ${msg("Allowed", {
                                 id: "sources.oauth.dingtalk-allowlist.department.allowed",
                             })}
                         </th>
-                        <th>
+                        <th scope="col">
                             ${msg("Department ID", {
                                 id: "sources.oauth.dingtalk-allowlist.department.id",
                             })}
                         </th>
-                        <th>
+                        <th scope="col">
                             ${msg("Name", {
                                 id: "sources.oauth.dingtalk-allowlist.department.name",
                             })}
                         </th>
-                        <th>
+                        <th scope="col">
                             ${msg("Parent ID", {
                                 id: "sources.oauth.dingtalk-allowlist.department.parent-id",
                             })}

@@ -13,6 +13,16 @@ const departmentPicker = readFileSync(
     "utf8",
 );
 
+const allowlistApi = readFileSync(
+    resolve(import.meta.dirname, "../../src/admin/sources/oauth/DingTalkAllowlistApi.ts"),
+    "utf8",
+);
+
+const directoryPanel = readFileSync(
+    resolve(import.meta.dirname, "../../src/admin/sources/oauth/DingTalkDirectoryPanel.ts"),
+    "utf8",
+);
+
 const zhHans = readFileSync(resolve(import.meta.dirname, "../../xliff/zh-Hans.xlf"), "utf8");
 
 describe("DingTalkAllowlistPanel localization and controls", () => {
@@ -45,6 +55,39 @@ describe("DingTalkAllowlistPanel localization and controls", () => {
         expect(departmentPicker).toContain("toggleDingTalkDepartmentTreeInput(");
         expect(departmentPicker).toContain("buildDingTalkDepartmentTreeRows(");
         expect(departmentPicker).toContain('.indeterminate=${row.selection === "indeterminate"}');
+    });
+
+    it("uses target-specific policy bindings for authentication and enrollment status rows", () => {
+        expect(allowlistPanel).toContain("bindingStateForTarget(this.source?.authenticationFlow)");
+        expect(allowlistPanel).toContain("bindingStateForTarget(this.source?.enrollmentFlow)");
+        expect(allowlistPanel).toContain("binding.target === target");
+    });
+
+    it("gates allowlist mutation controls with canManage from status", () => {
+        expect(allowlistPanel).toContain("private get canManage()");
+        expect(allowlistPanel).toContain("this.status?.canManage === true");
+        expect(allowlistPanel).toContain("sources.oauth.dingtalk-allowlist.read-only");
+        expect(allowlistPanel).toContain("?disabled=${!this.loaded || !this.canManage}");
+        expect(allowlistPanel).toContain("if (!this.canManage)");
+    });
+
+    it("gates directory mutation controls with canChange from status", () => {
+        expect(directoryPanel).toContain("private canChange = false");
+        expect(directoryPanel).toContain("canChange = response.canChange");
+        expect(directoryPanel).toContain("sources.oauth.dingtalk-directory.read-only");
+        expect(directoryPanel).toContain(
+            "?disabled=${!this.loaded || this.manualSyncPending || !this.canChange}",
+        );
+        expect(directoryPanel).toContain("if (!this.canChange)");
+    });
+
+    it("uses generated allowlist API methods instead of raw request shims", () => {
+        expect(allowlistApi).toContain("sourcesOauthDingtalkAllowlistApplyCreate({");
+        expect(allowlistApi).toContain("sourcesOauthDingtalkAllowlistRemoveCreate({");
+        expect(allowlistApi).not.toContain("RequestOpts");
+        expect(allowlistApi).not.toContain("JSONApiResponse");
+        expect(allowlistApi).not.toContain("this.request(");
+        expect(allowlistApi).not.toContain("fetch(");
     });
 
     it("renders bulk loaded-department selection controls in the picker", () => {
@@ -132,6 +175,16 @@ describe("DingTalkAllowlistPanel localization and controls", () => {
         // aria-level is only meaningful on treeitem/row/heading roles, not a checkbox.
         expect(departmentPicker).not.toContain("aria-level=");
         expect(departmentPicker).toContain('class="pf-c-check__input"');
+    });
+
+    it("uses native responsive table semantics for allowlist and picker tables", () => {
+        expect(allowlistPanel).toContain("PFTableGrid");
+        expect(departmentPicker).toContain("PFTableGrid");
+        expect(allowlistPanel).toContain("sources.oauth.dingtalk-allowlist.table.caption");
+        expect(allowlistPanel).not.toContain('role="grid"');
+        expect(allowlistPanel).toContain('scope="col"');
+        expect(allowlistPanel).toContain('scope="row"');
+        expect(departmentPicker).toContain('scope="col"');
     });
 
     it("styles the allow-full-company toggle as a PatternFly switch", () => {

@@ -16,6 +16,7 @@ describe("DingTalkAllowlistApi", () => {
         const fetchApi = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
             makeResponse({
                 revision: "rev-2",
+                can_manage: true,
                 config: null,
                 managed_policy: { exists: true, pk: "policy-pk", name: "managed" },
                 policy_binding: { exists: true, pk: "binding-pk", enabled: true },
@@ -68,6 +69,7 @@ describe("DingTalkAllowlistApi", () => {
         const fetchApi = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
             makeResponse({
                 revision: "rev-3",
+                can_manage: true,
                 config: null,
                 managed_policy: { exists: false, pk: null, name: "" },
                 policy_binding: { exists: false, pk: null, enabled: false },
