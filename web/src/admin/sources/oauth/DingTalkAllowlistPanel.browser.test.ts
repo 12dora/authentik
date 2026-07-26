@@ -11,8 +11,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { html } from "lit";
 
+const showMessage = vi.hoisted(() => vi.fn());
+
 vi.mock("#elements/messages/MessageContainer", () => ({
-    showMessage: vi.fn(),
+    showMessage,
 }));
 
 vi.mock("#admin/policies/expression/ExpressionPolicyForm", () => ({
@@ -106,7 +108,12 @@ interface AllowlistPanelHarness {
     allowlistApi: {
         sourcesOauthDingtalkAllowlistApplyCreate: ReturnType<typeof vi.fn>;
     };
+    sourcesApi: {
+        sourcesOauthDingtalkAllowlistDepartmentsCreate: ReturnType<typeof vi.fn>;
+    };
     refreshStatus: ReturnType<typeof vi.fn>;
+    discoveryPopup: Window | null;
+    handleDiscoveryMessage: (event: MessageEvent<unknown>) => void;
 }
 
 let DingTalkAllowlistPanelElement: typeof DingTalkAllowlistPanel;
@@ -212,6 +219,7 @@ async function renderLoadedPanel(
 
 describe("DingTalkAllowlistPanel", () => {
     beforeEach(async () => {
+        showMessage.mockClear();
         ({ DingTalkAllowlistPanel: DingTalkAllowlistPanelElement } =
             await import("#admin/sources/oauth/DingTalkAllowlistPanel"));
         ({ confirmDingTalkDestructiveAction } =
@@ -279,6 +287,146 @@ describe("DingTalkAllowlistPanel", () => {
             "ak-spinner-button.pf-m-primary",
         ) as HTMLElement & { disabled?: boolean };
         expect(saveButton?.disabled).toBe(true);
+    });
+
+    it("gives repeated company row controls unique accessible names", async () => {
+        setAuthentikGlobal();
+        const panel = mountPanel();
+        panel.refreshStatus = vi.fn(async () => {});
+        panel.source = makeSource("dingtalk");
+        await renderLoadedPanel(panel);
+        panel.model = {
+            companies: [
+                { corpId: "corp-a", label: "Alpha", allowAll: false, deptIds: ["10"] },
+                { corpId: "corp-b", label: "Alpha", allowAll: false, deptIds: ["20"] },
+            ],
+        };
+        await panel.updateComplete;
+
+        const ariaLabels = Array.from(
+            panel.shadowRoot?.querySelectorAll<HTMLElement>(
+                [
+                    'input[aria-label^="Company label"]',
+                    'input[aria-label^="Allow full company access"]',
+                    ".ak-dingtalk-department-input",
+                    'button[aria-label^="Add departments"]',
+                    'ak-spinner-button[aria-label^="Select departments"]',
+                    'button[aria-label^="Remove"]',
+                ].join(","),
+            ) ?? [],
+        ).map((element) => element.getAttribute("aria-label"));
+
+        expect(ariaLabels).toContain("Company label for Alpha (corp-a)");
+        expect(ariaLabels).toContain("Company label for Alpha (corp-b)");
+        expect(ariaLabels).toContain("Allow full company access for Alpha (corp-a)");
+        expect(ariaLabels).toContain("Allow full company access for Alpha (corp-b)");
+        expect(ariaLabels).toContain("Allowed department IDs for Alpha (corp-a)");
+        expect(ariaLabels).toContain("Allowed department IDs for Alpha (corp-b)");
+        expect(ariaLabels).toContain("Add departments for Alpha (corp-a)");
+        expect(ariaLabels).toContain("Add departments for Alpha (corp-b)");
+        expect(ariaLabels).toContain("Select departments for Alpha (corp-a)");
+        expect(ariaLabels).toContain("Select departments for Alpha (corp-b)");
+        expect(ariaLabels).toContain("Remove Alpha (corp-a)");
+        expect(ariaLabels).toContain("Remove Alpha (corp-b)");
+        expect(new Set(ariaLabels).size).toBe(ariaLabels.length);
+    });
+
+    it("localizes department error codes without displaying raw provider text", async () => {
+        setAuthentikGlobal();
+        const panel = mountPanel();
+        panel.refreshStatus = vi.fn(async () => {});
+        panel.source = makeSource("dingtalk");
+        await renderLoadedPanel(panel);
+        panel.model = {
+            companies: [{ corpId: "corp-a", label: "Alpha", allowAll: false, deptIds: ["10"] }],
+        };
+        panel.sourcesApi = {
+            sourcesOauthDingtalkAllowlistDepartmentsCreate: vi.fn(async () => {
+                throw Object.assign(new Error("DingTalk department request failed"), {
+                    error_code: "department_access_denied",
+                    detail: "raw provider prose access_token=SECRET",
+                });
+            }),
+        };
+        await panel.updateComplete;
+
+        const selectButton = panel.shadowRoot?.querySelector(
+            'ak-spinner-button[aria-label="Select departments for Alpha (corp-a)"]',
+        ) as HTMLElement & { callAction?: () => Promise<void> };
+        await selectButton.callAction?.();
+
+        const message = showMessage.mock.calls.at(-1)?.[0]?.message;
+        expect(String(message)).toContain("authorized by this DingTalk application");
+        expect(String(message)).not.toContain("raw provider prose");
+        expect(String(message)).not.toContain("SECRET");
+    });
+
+    it("uses canonical discovery DTOs and localizes discovery error codes", async () => {
+        setAuthentikGlobal();
+        const close = vi.spyOn(window, "close").mockImplementation(() => undefined);
+        const panel = mountPanel();
+        panel.refreshStatus = vi.fn(async () => {});
+        panel.source = makeSource("dingtalk");
+        await renderLoadedPanel(panel);
+        panel.discoveryPopup = window;
+
+        panel.handleDiscoveryMessage(
+            new MessageEvent("message", {
+                origin: window.location.origin,
+                source: window,
+                data: {
+                    source: "goauthentik.io",
+                    context: "dingtalk-allowlist-discovery",
+                    ok: true,
+                    corp_id: "corp-canonical",
+                    label: "Canonical Company",
+                    user_id: "user-canonical",
+                    profile: {
+                        corp_id: "corp-from-profile",
+                        corpName: "Raw Profile Company",
+                    },
+                },
+            }),
+        );
+        await panel.updateComplete;
+
+        expect(panel.model.companies[0]).toMatchObject({
+            corpId: "corp-canonical",
+            label: "Canonical Company",
+        });
+        expect(panel.shadowRoot?.textContent).toContain("corp-canonical");
+        expect(panel.shadowRoot?.textContent).toContain("user-canonical");
+        expect(panel.shadowRoot?.textContent).not.toContain("corp-from-profile");
+
+        const expectedStateMessages = new Map([
+            ["state_invalid", "expired or could not be verified"],
+            ["state_expired", "expired"],
+            ["state_replayed", "already used"],
+            ["state_source_mismatch", "different source"],
+        ]);
+        for (const [code, expected] of expectedStateMessages) {
+            showMessage.mockClear();
+            panel.discoveryPopup = window;
+            panel.handleDiscoveryMessage(
+                new MessageEvent("message", {
+                    origin: window.location.origin,
+                    source: window,
+                    data: {
+                        source: "goauthentik.io",
+                        context: "dingtalk-allowlist-discovery",
+                        ok: false,
+                        code,
+                        error: "raw provider prose access_token=SECRET",
+                    },
+                }),
+            );
+
+            const message = showMessage.mock.calls.at(-1)?.[0]?.message;
+            expect(String(message)).toContain(expected);
+            expect(String(message)).not.toContain("raw provider prose");
+            expect(String(message)).not.toContain("SECRET");
+        }
+        close.mockRestore();
     });
 
     it("sends the current revision to the backend allowlist apply transaction", async () => {

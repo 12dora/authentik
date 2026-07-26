@@ -67,6 +67,31 @@ interface DingTalkDiscoveryResult {
     userId?: string;
 }
 
+type DingTalkAllowlistErrorCode =
+    | "authorization_code_missing"
+    | "department_access_denied"
+    | "department_dependency_unavailable"
+    | "department_response_invalid"
+    | "provider_response_invalid"
+    | "provider_unavailable"
+    | "state_expired"
+    | "state_invalid"
+    | "state_replayed"
+    | "state_source_mismatch";
+
+const DINGTALK_ALLOWLIST_ERROR_CODES = new Set<DingTalkAllowlistErrorCode>([
+    "authorization_code_missing",
+    "department_access_denied",
+    "department_dependency_unavailable",
+    "department_response_invalid",
+    "provider_response_invalid",
+    "provider_unavailable",
+    "state_expired",
+    "state_invalid",
+    "state_replayed",
+    "state_source_mismatch",
+]);
+
 interface DingTalkDepartment {
     deptId: string;
     name: string;
@@ -78,6 +103,46 @@ function normalizeOptionalString(value: unknown): string {
         return "";
     }
     return String(value).trim();
+}
+
+function isDingTalkAllowlistErrorCode(value: string): value is DingTalkAllowlistErrorCode {
+    return DINGTALK_ALLOWLIST_ERROR_CODES.has(value as DingTalkAllowlistErrorCode);
+}
+
+function normalizeDingTalkAllowlistErrorCode(value: unknown): DingTalkAllowlistErrorCode | null {
+    const code = normalizeOptionalString(value);
+    return isDingTalkAllowlistErrorCode(code) ? code : null;
+}
+
+function extractDingTalkAllowlistErrorCode(value: unknown): DingTalkAllowlistErrorCode | null {
+    const direct = normalizeDingTalkAllowlistErrorCode(value);
+    if (direct) {
+        return direct;
+    }
+    if (Array.isArray(value)) {
+        for (const item of value) {
+            const code = extractDingTalkAllowlistErrorCode(item);
+            if (code) {
+                return code;
+            }
+        }
+        return null;
+    }
+    if (!value || typeof value !== "object") {
+        return null;
+    }
+    const record = value as Record<string, unknown>;
+    for (const key of ["error_code", "errorCode", "code", "non_field_errors"]) {
+        const code = extractDingTalkAllowlistErrorCode(record[key]);
+        if (code) {
+            return code;
+        }
+    }
+    const detail = record.detail;
+    if (detail && typeof detail === "object") {
+        return extractDingTalkAllowlistErrorCode(detail);
+    }
+    return null;
 }
 
 // The departments field of the API response is an untyped JSON field; the entries
@@ -386,11 +451,9 @@ export class DingTalkAllowlistPanel extends AKElement {
         if (record.ok === false) {
             showMessage({
                 level: MessageLevel.error,
-                message:
-                    normalizeOptionalString(record.error) ||
-                    msg("DingTalk discovery failed.", {
-                        id: "sources.oauth.dingtalk-allowlist.discovery.failed",
-                    }),
+                message: this.localizeDingTalkDiscoveryError(
+                    extractDingTalkAllowlistErrorCode(record),
+                ),
             });
             return;
         }
@@ -450,10 +513,13 @@ export class DingTalkAllowlistPanel extends AKElement {
     private extractDiscoveryResult(
         record: Record<string, unknown>,
     ): DingTalkDiscoveryResult | null {
-        const payload =
+        const profile =
             record.profile && typeof record.profile === "object"
                 ? (record.profile as Record<string, unknown>)
-                : record;
+                : {};
+        // New callbacks return a minimal canonical DTO at the top level. Older
+        // callbacks carried full profile data; keep it as a fallback only.
+        const payload = { ...profile, ...record };
         const corpId = normalizeOptionalString(payload.corpId ?? payload.corp_id);
         if (!corpId) {
             return null;
@@ -839,9 +905,12 @@ export class DingTalkAllowlistPanel extends AKElement {
             return;
         }
         const picker = new DingTalkDepartmentPickerModal();
-        picker.headline = msg(str`Allowed departments for ${company.label || company.corpId}`, {
-            id: "sources.oauth.dingtalk-allowlist.picker.headline",
-        });
+        picker.headline = msg(
+            str`Allowed departments for ${company.label || company.corpId} (${company.corpId})`,
+            {
+                id: "sources.oauth.dingtalk-allowlist.picker.headline",
+            },
+        );
         picker.departments = departments;
         picker.value = this.currentDepartmentInput(company, corpId);
         picker.onApply = (value) => this.applyDepartmentInput(corpId, value);
@@ -956,36 +1025,83 @@ export class DingTalkAllowlistPanel extends AKElement {
     }
 
     private errorMessage(error: unknown): string {
-        if (error instanceof Error) {
-            return this.localizeDingTalkDepartmentError(error.message);
-        }
-        return this.localizeDingTalkDepartmentError(String(error));
+        return this.localizeDingTalkDepartmentError(extractDingTalkAllowlistErrorCode(error));
     }
 
     private async apiErrorMessage(error: unknown): Promise<string> {
         const parsedError = await parseAPIResponseError(error);
-        return this.localizeDingTalkDepartmentError(pluckErrorDetail(parsedError));
+        return this.localizeDingTalkDepartmentError(
+            extractDingTalkAllowlistErrorCode(parsedError) ??
+                extractDingTalkAllowlistErrorCode(error) ??
+                extractDingTalkAllowlistErrorCode(pluckErrorDetail(parsedError)),
+        );
     }
 
-    private localizeDingTalkDepartmentError(detail: string): string {
-        if (
-            detail.includes(
-                "DingTalk departments can only be loaded for a company authorized by this DingTalk application",
-            )
-        ) {
-            return msg(
-                "DingTalk departments can only be loaded for a company authorized by this DingTalk application. Edit the company label manually, or bind/authorize this company in the DingTalk developer console before loading departments.",
-                {
-                    id: "sources.oauth.dingtalk-allowlist.departments.unauthorized-corp",
-                },
-            );
+    private localizeDingTalkDepartmentError(code: DingTalkAllowlistErrorCode | null): string {
+        switch (code) {
+            case "department_access_denied":
+                return msg(
+                    "DingTalk departments can only be loaded for a company authorized by this DingTalk application. Edit the company label manually, or bind/authorize this company in the DingTalk developer console before loading departments.",
+                    {
+                        id: "sources.oauth.dingtalk-allowlist.departments.unauthorized-corp",
+                    },
+                );
+            case "department_dependency_unavailable":
+                return msg("Could not fetch DingTalk departments. Try again later.", {
+                    id: "sources.oauth.dingtalk-allowlist.departments.load-failed",
+                });
+            case "department_response_invalid":
+                return msg("DingTalk returned an invalid department response. Try again later.", {
+                    id: "sources.oauth.dingtalk-allowlist.departments.response-invalid",
+                });
+            default:
+                return msg("Could not fetch DingTalk departments. Try again later.", {
+                    id: "sources.oauth.dingtalk-allowlist.departments.load-failed",
+                });
         }
-        if (detail) {
-            return detail;
+    }
+
+    private localizeDingTalkDiscoveryError(code: DingTalkAllowlistErrorCode | null): string {
+        switch (code) {
+            case "state_invalid":
+                return msg("DingTalk discovery expired or could not be verified. Try again.", {
+                    id: "sources.oauth.dingtalk-allowlist.discovery.state-invalid",
+                });
+            case "state_expired":
+                return msg("DingTalk discovery expired. Start discovery again.", {
+                    id: "sources.oauth.dingtalk-allowlist.discovery.state-expired",
+                });
+            case "state_replayed":
+                return msg(
+                    "This DingTalk discovery result was already used. Start discovery again.",
+                    {
+                        id: "sources.oauth.dingtalk-allowlist.discovery.state-replayed",
+                    },
+                );
+            case "state_source_mismatch":
+                return msg(
+                    "This DingTalk discovery result belongs to a different source. Start discovery again.",
+                    {
+                        id: "sources.oauth.dingtalk-allowlist.discovery.state-source-mismatch",
+                    },
+                );
+            case "authorization_code_missing":
+                return msg("DingTalk discovery did not return an authorization code. Try again.", {
+                    id: "sources.oauth.dingtalk-allowlist.discovery.missing-code",
+                });
+            case "provider_unavailable":
+                return msg("DingTalk discovery failed. Try again later.", {
+                    id: "sources.oauth.dingtalk-allowlist.discovery.load-failed",
+                });
+            case "provider_response_invalid":
+                return msg("DingTalk returned an invalid discovery response. Try again.", {
+                    id: "sources.oauth.dingtalk-allowlist.discovery.response-invalid",
+                });
+            default:
+                return msg("DingTalk discovery failed.", {
+                    id: "sources.oauth.dingtalk-allowlist.discovery.failed",
+                });
         }
-        return msg("An unknown error occurred.", {
-            id: "sources.oauth.dingtalk-allowlist.departments.unknown-error",
-        });
     }
 
     private statusItems(): StatusItem[] {
@@ -1215,6 +1331,7 @@ export class DingTalkAllowlistPanel extends AKElement {
 
     private renderCompanyRow(company: DingTalkAllowlistModel["companies"][0]): TemplateResult {
         const disabled = !this.canManage;
+        const companyName = company.label || company.corpId;
         const missingDepartments = isDingTalkCompanyMissingDepartments(
             company,
             this.departmentInputs[company.corpId],
@@ -1230,7 +1347,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                     class="pf-c-form-control"
                     ?disabled=${disabled}
                     .value=${company.label}
-                    aria-label=${msg("Company label", {
+                    aria-label=${msg(str`Company label for ${companyName} (${company.corpId})`, {
                         id: "sources.oauth.dingtalk-allowlist.company.label.aria-label",
                     })}
                     @compositionstart=${this.startComposition}
@@ -1252,6 +1369,12 @@ export class DingTalkAllowlistPanel extends AKElement {
                         type="checkbox"
                         ?disabled=${disabled}
                         .checked=${company.allowAll}
+                        aria-label=${msg(
+                            str`Allow full company access for ${companyName} (${company.corpId})`,
+                            {
+                                id: "sources.oauth.dingtalk-allowlist.company.allow-all.aria-label",
+                            },
+                        )}
                         @change=${(event: InputEvent) => {
                             this.updateCompany(company.corpId, {
                                 allowAll: (event.target as HTMLInputElement).checked,
@@ -1307,7 +1430,7 @@ export class DingTalkAllowlistPanel extends AKElement {
                         class="pf-c-form-control ak-dingtalk-department-input"
                         ?disabled=${disabled || company.allowAll}
                         aria-label=${msg(
-                            str`Allowed department IDs for ${company.label || company.corpId}`,
+                            str`Allowed department IDs for ${companyName} (${company.corpId})`,
                             {
                                 id: "sources.oauth.dingtalk-allowlist.departments.input.aria-label",
                             },
@@ -1333,6 +1456,12 @@ export class DingTalkAllowlistPanel extends AKElement {
                         type="button"
                         class="pf-c-button pf-m-secondary"
                         ?disabled=${disabled || company.allowAll}
+                        aria-label=${msg(
+                            str`Add departments for ${companyName} (${company.corpId})`,
+                            {
+                                id: "sources.oauth.dingtalk-allowlist.departments.add.aria-label",
+                            },
+                        )}
                         @click=${() => this.addDepartments(company.corpId)}
                     >
                         ${msg("Add departments", {
@@ -1342,6 +1471,12 @@ export class DingTalkAllowlistPanel extends AKElement {
                     <ak-spinner-button
                         class="pf-m-secondary"
                         ?disabled=${disabled || company.allowAll}
+                        aria-label=${msg(
+                            str`Select departments for ${companyName} (${company.corpId})`,
+                            {
+                                id: "sources.oauth.dingtalk-allowlist.departments.select.aria-label",
+                            },
+                        )}
                         .callAction=${() => this.pickDepartments(company.corpId)}
                     >
                         ${msg("Select departments…", {
@@ -1360,6 +1495,9 @@ export class DingTalkAllowlistPanel extends AKElement {
                           <button
                               type="button"
                               class="pf-c-button pf-m-danger"
+                              aria-label=${msg(str`Remove ${companyName} (${company.corpId})`, {
+                                  id: "sources.oauth.dingtalk-allowlist.company.remove.aria-label",
+                              })}
                               @click=${() => this.removeCompany(company.corpId)}
                           >
                               ${msg("Remove", { id: "common.actions.remove" })}

@@ -116,9 +116,32 @@ describe("DingTalkAllowlistPanel localization and controls", () => {
     });
 
     it("normalizes discovered company labels from DingTalk corp name fields", () => {
+        expect(allowlistPanel).toContain("const payload = { ...profile, ...record };");
         expect(allowlistPanel).toContain("payload.companyName");
         expect(allowlistPanel).toContain("payload.corp_name");
         expect(allowlistPanel).toContain("payload.corpName");
+    });
+
+    it("localizes DingTalk allowlist errors by stable machine code instead of raw prose", () => {
+        expect(allowlistPanel).toContain("extractDingTalkAllowlistErrorCode(");
+        expect(allowlistPanel).toContain('"department_access_denied"');
+        expect(allowlistPanel).toContain('"department_dependency_unavailable"');
+        expect(allowlistPanel).toContain('"department_response_invalid"');
+        expect(allowlistPanel).toContain('"authorization_code_missing"');
+        expect(allowlistPanel).toContain('"provider_unavailable"');
+        expect(allowlistPanel).toContain('"provider_response_invalid"');
+        expect(allowlistPanel).toContain('"state_invalid"');
+        expect(allowlistPanel).toContain('"state_expired"');
+        expect(allowlistPanel).toContain('"state_replayed"');
+        expect(allowlistPanel).toContain('"state_source_mismatch"');
+        expect(allowlistPanel).toContain("localizeDingTalkDepartmentError(");
+        expect(allowlistPanel).toContain("localizeDingTalkDiscoveryError(");
+        expect(allowlistPanel).not.toContain('"invalid_discovery_state"');
+        expect(allowlistPanel).not.toContain('"state_consumed"');
+        expect(allowlistPanel).not.toContain('"state_mismatch"');
+        expect(allowlistPanel).not.toContain("detail.includes(");
+        expect(allowlistPanel).not.toContain('"error",');
+        expect(allowlistPanel).not.toContain("normalizeOptionalString(record.error)");
     });
 
     it("defaults a discovered company to restricted so an inattentive save cannot grant org-wide access", () => {
