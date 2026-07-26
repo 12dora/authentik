@@ -32,6 +32,12 @@ export interface DingTalkDirectoryStatus {
     sourceSlug: string;
     /**
      *
+     * @type {boolean}
+     * @memberof DingTalkDirectoryStatus
+     */
+    canChange: boolean;
+    /**
+     *
      * @type {Array<DingTalkDirectorySyncStatus>}
      * @memberof DingTalkDirectoryStatus
      */
@@ -43,6 +49,7 @@ export interface DingTalkDirectoryStatus {
  */
 export function instanceOfDingTalkDirectoryStatus(value: object): value is DingTalkDirectoryStatus {
     if (!("sourceSlug" in value) || value["sourceSlug"] === undefined) return false;
+    if (!("canChange" in value) || value["canChange"] === undefined) return false;
     if (!("sync" in value) || value["sync"] === undefined) return false;
     return true;
 }
@@ -60,6 +67,7 @@ export function DingTalkDirectoryStatusFromJSONTyped(
     }
     return {
         sourceSlug: json["source_slug"],
+        canChange: json["can_change"],
         sync: (json["sync"] as Array<any>).map(DingTalkDirectorySyncStatusFromJSON),
     };
 }
@@ -78,6 +86,7 @@ export function DingTalkDirectoryStatusToJSONTyped(
 
     return {
         source_slug: value["sourceSlug"],
+        can_change: value["canChange"],
         sync: (value["sync"] as Array<any>).map(DingTalkDirectorySyncStatusToJSON),
     };
 }

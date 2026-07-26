@@ -38296,6 +38296,8 @@ components:
       properties:
         revision:
           type: string
+        can_manage:
+          type: boolean
         config: {}
         managed_policy:
           $ref: '#/components/schemas/DingTalkAllowlistManagedPolicy'
@@ -38311,6 +38313,7 @@ components:
           type: string
       required:
       - callback_url
+      - can_manage
       - config
       - managed_policy
       - policy_binding
@@ -38371,11 +38374,14 @@ components:
       properties:
         source_slug:
           type: string
+        can_change:
+          type: boolean
         sync:
           type: array
           items:
             $ref: '#/components/schemas/DingTalkDirectorySyncStatus'
       required:
+      - can_change
       - source_slug
       - sync
     DingTalkDirectorySyncDeleted:
@@ -38440,6 +38446,13 @@ components:
           nullable: true
         error:
           type: string
+        error_code:
+          type: string
+        error_params: {}
+        error_correlation_id:
+          type: string
+          format: uuid
+          nullable: true
         counters:
           type: object
           additionalProperties: {}

@@ -42,6 +42,12 @@ export interface DingTalkAllowlistStatusResponse {
     revision: string;
     /**
      *
+     * @type {boolean}
+     * @memberof DingTalkAllowlistStatusResponse
+     */
+    canManage: boolean;
+    /**
+     *
      * @type {any}
      * @memberof DingTalkAllowlistStatusResponse
      */
@@ -85,6 +91,7 @@ export function instanceOfDingTalkAllowlistStatusResponse(
     value: object,
 ): value is DingTalkAllowlistStatusResponse {
     if (!("revision" in value) || value["revision"] === undefined) return false;
+    if (!("canManage" in value) || value["canManage"] === undefined) return false;
     if (!("config" in value) || value["config"] === undefined) return false;
     if (!("managedPolicy" in value) || value["managedPolicy"] === undefined) return false;
     if (!("policyBinding" in value) || value["policyBinding"] === undefined) return false;
@@ -109,6 +116,7 @@ export function DingTalkAllowlistStatusResponseFromJSONTyped(
     }
     return {
         revision: json["revision"],
+        canManage: json["can_manage"],
         config: json["config"],
         managedPolicy: DingTalkAllowlistManagedPolicyFromJSON(json["managed_policy"]),
         policyBinding: DingTalkAllowlistPolicyBindingFromJSON(json["policy_binding"]),
@@ -134,6 +142,7 @@ export function DingTalkAllowlistStatusResponseToJSONTyped(
 
     return {
         revision: value["revision"],
+        can_manage: value["canManage"],
         config: value["config"],
         managed_policy: DingTalkAllowlistManagedPolicyToJSON(value["managedPolicy"]),
         policy_binding: DingTalkAllowlistPolicyBindingToJSON(value["policyBinding"]),

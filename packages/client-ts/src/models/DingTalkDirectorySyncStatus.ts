@@ -74,6 +74,24 @@ export interface DingTalkDirectorySyncStatus {
     error?: string;
     /**
      *
+     * @type {string}
+     * @memberof DingTalkDirectorySyncStatus
+     */
+    errorCode?: string;
+    /**
+     *
+     * @type {any}
+     * @memberof DingTalkDirectorySyncStatus
+     */
+    errorParams?: any | null;
+    /**
+     *
+     * @type {string}
+     * @memberof DingTalkDirectorySyncStatus
+     */
+    errorCorrelationId?: string | null;
+    /**
+     *
      * @type {{ [key: string]: any; }}
      * @memberof DingTalkDirectorySyncStatus
      */
@@ -114,6 +132,10 @@ export function DingTalkDirectorySyncStatusFromJSONTyped(
         lastSuccessAt:
             json["last_success_at"] == null ? undefined : new Date(json["last_success_at"]),
         error: json["error"] == null ? undefined : json["error"],
+        errorCode: json["error_code"] == null ? undefined : json["error_code"],
+        errorParams: json["error_params"] == null ? undefined : json["error_params"],
+        errorCorrelationId:
+            json["error_correlation_id"] == null ? undefined : json["error_correlation_id"],
         counters: json["counters"],
     };
 }
@@ -147,6 +169,9 @@ export function DingTalkDirectorySyncStatusToJSONTyped(
                 ? value["lastSuccessAt"]
                 : value["lastSuccessAt"].toISOString(),
         error: value["error"],
+        error_code: value["errorCode"],
+        error_params: value["errorParams"],
+        error_correlation_id: value["errorCorrelationId"],
         counters: value["counters"],
     };
 }
