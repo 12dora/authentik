@@ -74,6 +74,22 @@ class SourceType:
             "name": group_id,
         }
 
+    def oauth_source_policy_result(self, manager: Any, result: Any) -> Any:
+        """Allow source types to adjust source-bound policy failures."""
+        return result
+
+    def oauth_pre_existing_link(self, manager: Any, connection: Any) -> Any | None:
+        """Allow source types to intercept an existing linked-user login."""
+        return None
+
+    def oauth_pre_auth(self, manager: Any, connection: Any) -> Any | None:
+        """Allow source types to intercept an authenticated source-stage login."""
+        return None
+
+    def oauth_pre_enroll(self, manager: Any, connection: Any) -> Any | None:
+        """Allow source types to intercept enrollment before user write."""
+        return None
+
 
 class SourceTypeRegistry:
     """Registry to hold all Source types."""

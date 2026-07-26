@@ -9,8 +9,9 @@ from requests_mock import Mocker
 
 from authentik.core.models import UserTypes
 from authentik.core.sources.stage import PLAN_CONTEXT_SOURCES_CONNECTION
-from authentik.core.tests.utils import create_test_admin_user, create_test_flow
+from authentik.core.tests.utils import create_test_admin_user, create_test_flow, create_test_user
 from authentik.flows.views.executor import SESSION_KEY_PLAN
+from authentik.lib.generators import generate_id
 from authentik.lib.utils.reflection import all_subclasses
 from authentik.policies.expression.models import ExpressionPolicy
 from authentik.policies.models import PolicyBinding
@@ -66,6 +67,7 @@ class TestTypeDingTalk(TestCase):
             name="test",
             slug="test",
             provider_type="dingtalk",
+            enabled=True,
             consumer_key="CLIENT_ID",
             consumer_secret="CLIENT_SECRET",
         )
@@ -190,6 +192,21 @@ class TestTypeDingTalk(TestCase):
 
         self.assertEqual(token, {"error": "invalid_grant"})
 
+    def test_access_token_handles_non_object_json_response(self):
+        """DingTalk token exchange rejects valid JSON that is not an object."""
+        request = self.get_callback_request(authCode="AUTH_CODE", state="STATE")
+        client = DingTalkOAuth2Client(
+            self.source,
+            request,
+            callback="/source/oauth/callback/test/",
+        )
+
+        with Mocker() as mocker:
+            mocker.post(DINGTALK_ACCESS_TOKEN_URL, json=["not", "an", "object"])
+            token = client.get_access_token()
+
+        self.assertEqual(token, {"error": "DingTalk token exchange failed."})
+
     def test_profile_fetch_returns_base_profile(self):
         """Test DingTalk profile fetch"""
         request = self.factory.get("/")
@@ -282,6 +299,53 @@ class TestTypeDingTalk(TestCase):
         self.assertEqual(profile["nick"], "Ada")
         self.assertNotIn("title", profile)
 
+    def test_profile_fetch_handles_non_object_json_response(self):
+        """DingTalk profile fetch fails closed on non-object JSON."""
+        request = self.factory.get("/")
+        request.session = {}
+        client = DingTalkOAuth2Client(self.source, request)
+
+        with Mocker() as mocker:
+            mocker.get(DINGTALK_PROFILE_URL, json=["not", "an", "object"])
+            profile = client.get_profile_info(
+                {"access_token": "USER_ACCESS_TOKEN", "token_type": "Bearer"}
+            )
+
+        self.assertIsNone(profile)
+
+    def test_enhanced_profile_refreshes_invalid_cached_app_token_once(self):
+        """Login enrichment refreshes once for legacy invalid-token app responses."""
+        request = self.factory.get("/")
+        request.session = {}
+        client = DingTalkOAuth2Client(self.source, request)
+
+        with Mocker() as mocker:
+            mocker.get(DINGTALK_PROFILE_URL, json=DINGTALK_ME_PROFILE)
+            mocker.get(
+                DINGTALK_APP_ACCESS_TOKEN_URL,
+                [
+                    {"json": {"access_token": "STALE_APP_TOKEN"}},
+                    {"json": {"access_token": "FRESH_APP_TOKEN"}},
+                ],
+            )
+            user_id_mock = mocker.post(
+                DINGTALK_GET_BY_UNION_ID_URL,
+                [
+                    {"json": {"errcode": 40014, "errmsg": "invalid token"}},
+                    {"json": GET_BY_UNION_ID_RESPONSE},
+                ],
+            )
+            detail_mock = mocker.post(DINGTALK_USER_DETAIL_URL, json=USER_DETAIL_RESPONSE)
+            profile = client.get_profile_info(
+                {"access_token": "USER_ACCESS_TOKEN", "token_type": "Bearer"}
+            )
+
+        self.assertEqual(profile["userid"], "USER_ID")
+        self.assertEqual(user_id_mock.call_count, 2)
+        self.assertEqual(detail_mock.call_count, 1)
+        self.assertIn("access_token=STALE_APP_TOKEN", mocker.request_history[2].url)
+        self.assertIn("access_token=FRESH_APP_TOKEN", mocker.request_history[4].url)
+
     def test_profile_fetch_does_not_log_app_secret_on_enhancement_failure(self):
         """Test DingTalk enhanced profile failures don't log the app secret"""
         request = self.factory.get("/")
@@ -328,6 +392,8 @@ class TestTypeDingTalk(TestCase):
         self.assertEqual(context["name"], "Ada Lovelace")
         self.assertEqual(context["type"], UserTypes.INTERNAL)
         self.assertEqual(context["attributes"]["dingtalk"]["union_id"], "UNION_ID")
+        self.assertEqual(context["attributes"]["dingtalk"]["source_pk"], str(self.source.pk))
+        self.assertEqual(context["attributes"]["dingtalk"]["source_slug"], self.source.slug)
         self.assertEqual(context["attributes"]["dingtalk"]["open_id"], "OPEN_ID")
         self.assertEqual(context["attributes"]["dingtalk"]["user_id"], "USER_ID")
         self.assertEqual(context["attributes"]["dingtalk"]["corp_id"], "CORP_ID")
@@ -338,6 +404,10 @@ class TestTypeDingTalk(TestCase):
             "https://example.invalid/detail-avatar.png",
         )
         self.assertEqual(context["attributes"]["dingtalk"]["raw_profile"], profile)
+        self.assertEqual(
+            context["attributes"]["dingtalk_sources"][str(self.source.pk)],
+            context["attributes"]["dingtalk"],
+        )
 
     def test_base_user_properties_without_userid_has_no_username(self):
         """Without the directory enhancement there is no userid, so username is left unset."""
@@ -349,6 +419,78 @@ class TestTypeDingTalk(TestCase):
         # rather than provisioning an account with a derived/unstable username.
         self.assertIsNone(context["username"])
         self.assertEqual(context["name"], "Ada")
+
+    def test_base_user_properties_are_scoped_by_source(self):
+        """A later DingTalk source login keeps earlier source-scoped identity facts."""
+        other_source = OAuthSource.objects.create(
+            name="other",
+            slug="other",
+            provider_type="dingtalk",
+            enabled=True,
+            consumer_key="OTHER_CLIENT_ID",
+            consumer_secret="OTHER_CLIENT_SECRET",
+        )
+        user = create_test_user()
+        other_union_id = generate_id()
+        other_user_id = generate_id()
+        other_corp_id = generate_id()
+        first = DingTalkType().get_base_user_properties(
+            source=self.source,
+            info=DINGTALK_ME_PROFILE | USER_DETAIL_RESPONSE["result"],
+            client=None,
+            token={},
+        )
+        second = DingTalkType().get_base_user_properties(
+            source=other_source,
+            info={
+                **DINGTALK_ME_PROFILE,
+                **USER_DETAIL_RESPONSE["result"],
+                "unionId": other_union_id,
+                "userid": other_user_id,
+                "corpId": other_corp_id,
+            },
+            client=None,
+            token={},
+        )
+
+        user.update_attributes(first)
+        user.update_attributes(second)
+
+        sources_by_pk = user.attributes["dingtalk_sources"]
+
+        self.assertEqual(sources_by_pk[str(self.source.pk)]["union_id"], "UNION_ID")
+        self.assertEqual(sources_by_pk[str(other_source.pk)]["union_id"], other_union_id)
+        self.assertEqual(user.attributes["dingtalk"]["union_id"], other_union_id)
+
+    def test_base_user_properties_update_same_source_replaces_without_duplicate(self):
+        """A later same-source DingTalk login replaces that source bucket."""
+        user = create_test_user()
+        first = DingTalkType().get_base_user_properties(
+            source=self.source,
+            info=DINGTALK_ME_PROFILE | USER_DETAIL_RESPONSE["result"],
+            client=None,
+            token={},
+        )
+        updated_union_id = generate_id()
+        second = DingTalkType().get_base_user_properties(
+            source=self.source,
+            info={
+                **DINGTALK_ME_PROFILE,
+                **USER_DETAIL_RESPONSE["result"],
+                "unionId": updated_union_id,
+            },
+            client=None,
+            token={},
+        )
+
+        user.update_attributes(first)
+        user.update_attributes(second)
+
+        self.assertEqual(list(user.attributes["dingtalk_sources"]), [str(self.source.pk)])
+        self.assertEqual(
+            user.attributes["dingtalk_sources"][str(self.source.pk)]["union_id"],
+            updated_union_id,
+        )
 
     def test_registry(self):
         """Test DingTalk registry entry"""

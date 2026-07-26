@@ -1,5 +1,6 @@
 """DingTalk allowlist API tests."""
 
+from html.parser import HTMLParser
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
@@ -32,7 +33,31 @@ from authentik.sources.oauth.types.dingtalk import (
     _extract_dingtalk_corp_label,
     dingtalk_allowlist_config_version,
     fetch_dingtalk_departments,
+    get_dingtalk_allowlist_binding,
+    normalize_dingtalk_allowlist_config,
 )
+
+
+class ScriptCollector(HTMLParser):
+    """Collect script tags from the discovery callback HTML."""
+
+    def __init__(self):
+        super().__init__()
+        self.scripts: list[dict[str, str]] = []
+        self._current: dict[str, str] | None = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "script":
+            self._current = {"attrs": dict(attrs), "data": ""}
+
+    def handle_data(self, data):
+        if self._current is not None:
+            self._current["data"] += data
+
+    def handle_endtag(self, tag):
+        if tag == "script" and self._current is not None:
+            self.scripts.append(self._current)
+            self._current = None
 
 
 class TestDingTalkAllowlistPolicyHelpers(TestCase):
@@ -249,6 +274,15 @@ class TestDingTalkAllowlistPolicyHelpers(TestCase):
         self.assertEqual(parsed, {"companies": []})
         self.assertFalse(evaluate_dingtalk_allowlist(parsed, {"corpId": "CORP_FAKE"}))
 
+    def test_allow_all_requires_json_boolean(self):
+        """Managed allowlist config rejects stringly booleans instead of widening access."""
+        for value in ["false", "true", 1, 0, None]:
+            with self.subTest(value=value):
+                with self.assertRaisesMessage(ValueError, "allow_all must be a boolean"):
+                    normalize_dingtalk_allowlist_config(
+                        {"companies": [{"corp_id": "CORP_FAKE", "allow_all": value}]}
+                    )
+
 
 class TestDingTalkAllowlistAPI(APITestCase):
     """Test DingTalk allowlist discovery API."""
@@ -256,10 +290,12 @@ class TestDingTalkAllowlistAPI(APITestCase):
     def setUp(self):
         self.user = create_test_admin_user()
         self.client.force_login(self.user)
+        self.client.force_authenticate(self.user)
         self.source = OAuthSource.objects.create(
             name="DingTalk Test",
             slug="dingtalk-test",
             provider_type="dingtalk",
+            enabled=True,
             consumer_key="FAKE_CLIENT_ID",
             consumer_secret="FAKE_CLIENT_SECRET",
         )
@@ -301,6 +337,15 @@ class TestDingTalkAllowlistAPI(APITestCase):
             BACKEND_SESSION_KEY: session.get(BACKEND_SESSION_KEY),
             HASH_SESSION_KEY: session.get(HASH_SESSION_KEY),
         }
+
+    def status_path(self, source: OAuthSource | None = None) -> str:
+        return f"/api/v3/sources/oauth/dingtalk-allowlist/{(source or self.source).slug}/status/"
+
+    def apply_path(self, source: OAuthSource | None = None) -> str:
+        return f"/api/v3/sources/oauth/dingtalk-allowlist/{(source or self.source).slug}/apply/"
+
+    def remove_path(self, source: OAuthSource | None = None) -> str:
+        return f"/api/v3/sources/oauth/dingtalk-allowlist/{(source or self.source).slug}/remove/"
 
     def test_status_reports_policy_binding_guard_and_callback(self):
         """Status returns parsed allowlist and policy/binding/guard state."""
@@ -410,6 +455,158 @@ class TestDingTalkAllowlistAPI(APITestCase):
         self.assertTrue(data["source_link_guard"]["enabled"])
         self.assertTrue(data["sourceLinkGuard"])
         self.assertEqual(data["config"]["companies"][0]["corp_id"], "CORP_ENABLED")
+
+    def test_allowlist_binding_lookup_uses_bulk_policy_fetch(self):
+        """Lookup cost stays bounded when several policies are bound to the source."""
+        for index in range(3):
+            policy = ExpressionPolicy.objects.create(
+                name=f"managed-dingtalk-{index}",
+                expression=render_dingtalk_allowlist_policy(
+                    {"companies": [{"corp_id": f"CORP_{index}", "allow_all": True}]}
+                ),
+            )
+            PolicyBinding.objects.create(
+                target=self.source,
+                policy=policy,
+                order=index,
+                enabled=True,
+            )
+
+        with self.assertNumQueries(2):
+            binding, policy, config = get_dingtalk_allowlist_binding(self.source)
+
+        self.assertIsNotNone(binding)
+        self.assertIsNotNone(policy)
+        self.assertEqual(config["companies"][0]["corp_id"], "CORP_0")
+
+    def test_apply_requires_change_permission(self):
+        """Apply is a mutation and requires source change permission."""
+        user = create_test_user()
+        user.assign_perms_to_managed_role("authentik_sources_oauth.view_oauthsource")
+        self.client.force_authenticate(user)
+
+        response = self.client.post(
+            self.apply_path(),
+            {
+                "config": {"companies": [{"corp_id": "CORP_FAKE", "allow_all": True}]},
+                "expected_revision": "none",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_apply_transactionally_creates_source_scoped_policy_and_bindings(self):
+        """Apply creates the managed policy and all source login bindings in one operation."""
+        self.source.authentication_flow = create_test_flow()
+        self.source.enrollment_flow = create_test_flow()
+        self.source.save()
+
+        response = self.client.post(
+            self.apply_path(),
+            {
+                "config": {"companies": [{"corp_id": "CORP_FAKE", "allow_all": True}]},
+                "expected_revision": "none",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertNotEqual(data["revision"], "none")
+        self.assertTrue(data["managed_policy"]["exists"])
+        policy = ExpressionPolicy.objects.get(pk=data["managed_policy"]["pk"])
+        self.assertIn(f'# source: "{self.source.slug}"', policy.expression)
+        self.assertIn(f'# source_pk: "{self.source.pk}"', policy.expression)
+        self.assertEqual(len(data["policy_bindings"]), 3)
+        self.assertTrue(all(binding["enabled"] for binding in data["policy_bindings"]))
+
+    def test_apply_rejects_stale_revision_without_overwriting(self):
+        """A stale revision returns a typed conflict and preserves current config."""
+        first = self.client.post(
+            self.apply_path(),
+            {
+                "config": {"companies": [{"corp_id": "CORP_A", "allow_all": True}]},
+                "expected_revision": "none",
+            },
+            format="json",
+        )
+        self.assertEqual(first.status_code, 200)
+
+        response = self.client.post(
+            self.apply_path(),
+            {
+                "config": {"companies": [{"corp_id": "CORP_B", "allow_all": True}]},
+                "expected_revision": "none",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("revision_conflict", response.content.decode())
+        status = self.client.get(self.status_path()).json()
+        self.assertEqual(status["config"]["companies"][0]["corp_id"], "CORP_A")
+
+    def test_apply_is_idempotent_for_same_config_and_old_revision(self):
+        """Retried apply with the same payload succeeds even if the revision already advanced."""
+        payload = {
+            "config": {"companies": [{"corp_id": "CORP_A", "allow_all": True}]},
+            "expected_revision": "none",
+        }
+        first = self.client.post(self.apply_path(), payload, format="json")
+        second = self.client.post(self.apply_path(), payload, format="json")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        policy = ExpressionPolicy.objects.get(name=f"dingtalk-allowlist-{self.source.slug}")
+        self.assertEqual(PolicyBinding.objects.filter(policy=policy).count(), 1)
+
+    def test_apply_rolls_back_policy_when_binding_create_fails(self):
+        """A mid-operation binding failure leaves no partial managed policy."""
+        with patch(
+            "authentik.sources.oauth.api.dingtalk_allowlist.PolicyBinding.objects.create",
+            side_effect=RuntimeError("boom"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.client.post(
+                    self.apply_path(),
+                    {
+                        "config": {"companies": [{"corp_id": "CORP_A", "allow_all": True}]},
+                        "expected_revision": "none",
+                    },
+                    format="json",
+                )
+
+        self.assertFalse(
+            ExpressionPolicy.objects.filter(name=f"dingtalk-allowlist-{self.source.slug}").exists()
+        )
+
+    def test_remove_deletes_all_managed_bindings_and_policy(self):
+        """Remove deletes every managed policy binding before deleting the policy."""
+        self.source.authentication_flow = create_test_flow()
+        self.source.enrollment_flow = create_test_flow()
+        self.source.save()
+        applied = self.client.post(
+            self.apply_path(),
+            {
+                "config": {"companies": [{"corp_id": "CORP_A", "allow_all": True}]},
+                "expected_revision": "none",
+            },
+            format="json",
+        )
+        policy_pk = applied.json()["managed_policy"]["pk"]
+        self.assertEqual(PolicyBinding.objects.filter(policy_id=policy_pk).count(), 3)
+
+        response = self.client.post(
+            self.remove_path(),
+            {"expected_revision": applied.json()["revision"]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["revision"], "none")
+        self.assertFalse(PolicyBinding.objects.filter(policy_id=policy_pk).exists())
+        self.assertFalse(ExpressionPolicy.objects.filter(pk=policy_pk).exists())
 
     def test_discover_start_returns_signed_state_and_dingtalk_authorize_url(self):
         """Discovery start uses source credentials, scopes, standard callback, and signed state."""
@@ -537,6 +734,32 @@ class TestDingTalkAllowlistAPI(APITestCase):
             response = method(path, body, format="json")
             self.assertEqual(response.status_code, 403)
 
+    def test_disabled_source_cannot_use_server_side_discovery_endpoints(self):
+        """Disabled DingTalk sources do not expose live credential-backed operations."""
+        self.source.enabled = False
+        self.source.save()
+
+        for method, path, body in [
+            (
+                self.client.get,
+                f"/api/v3/sources/oauth/dingtalk-allowlist/{self.source.slug}/status/",
+                {},
+            ),
+            (
+                self.client.post,
+                f"/api/v3/sources/oauth/dingtalk-allowlist/{self.source.slug}/discover/start/",
+                {},
+            ),
+            (
+                self.client.post,
+                f"/api/v3/sources/oauth/dingtalk-allowlist/{self.source.slug}/departments/",
+                {"corp_id": "CORP_FAKE"},
+            ),
+        ]:
+            with self.subTest(path=path):
+                response = method(path, body, format="json")
+                self.assertEqual(response.status_code, 403)
+
     def test_departments_fetches_and_normalizes_flat_list_without_secrets(self):
         """Departments API fetches via server-side credentials and omits secrets/tokens."""
         with Mocker() as mocker:
@@ -655,7 +878,7 @@ class TestDingTalkAllowlistAPI(APITestCase):
                 format="json",
             )
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 503)
         content = response.content.decode()
         self.assertIn("Could not fetch DingTalk departments.", content)
         self.assertNotIn("FAKE_CLIENT_SECRET", content)
@@ -741,6 +964,36 @@ class TestDingTalkAllowlistAPI(APITestCase):
         self.assertEqual(self.auth_session_snapshot(), auth_snapshot)
         self.assertNotIn(SESSION_KEY_PLAN, self.client.session)
 
+    def test_discovery_callback_payload_is_html_safe(self):
+        """Provider strings cannot terminate the JSON script and create executable scripts."""
+        state = self.start_discovery()["state"]
+        hostile = '</script><script>globalThis.pwned=1</script>"\u2028\u2029'
+
+        with Mocker() as mocker:
+            mocker.post(
+                DINGTALK_ACCESS_TOKEN_URL,
+                json={"accessToken": "FAKE_USER_TOKEN", "corpId": "CORP_FAKE"},
+            )
+            mocker.get(
+                DINGTALK_PROFILE_URL,
+                json={"unionId": "UNION_FAKE", "corpId": "CORP_FAKE", "nick": hostile},
+            )
+            mocker.get(DINGTALK_APP_ACCESS_TOKEN_URL, status_code=403, json={"errcode": 88})
+            response = self.client.get(
+                self.callback_url(),
+                {"authCode": "AUTH_CODE", "state": state},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        parser = ScriptCollector()
+        parser.feed(content)
+        self.assertEqual(len(parser.scripts), 2)
+        self.assertEqual(parser.scripts[0]["attrs"].get("type"), "application/json")
+        self.assertIn("\\u003C/script\\u003E\\u003Cscript\\u003E", parser.scripts[0]["data"])
+        self.assertNotIn("</script><script>", parser.scripts[0]["data"])
+        self.assertNotIn("globalThis.pwned=1", parser.scripts[1]["data"])
+
     def test_discovery_callback_rejects_replayed_state(self):
         """Discovery callback consumes state once and rejects a second use."""
         state = self.start_discovery()["state"]
@@ -772,6 +1025,7 @@ class TestDingTalkAllowlistAPI(APITestCase):
             name="Other DingTalk Test",
             slug="dingtalk-other",
             provider_type="dingtalk",
+            enabled=True,
             consumer_key="OTHER_CLIENT_ID",
             consumer_secret="OTHER_CLIENT_SECRET",
         )

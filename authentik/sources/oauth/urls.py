@@ -3,9 +3,11 @@
 from django.urls import path
 
 from authentik.sources.oauth.api.dingtalk_allowlist import (
+    DingTalkAllowlistApplyView,
     DingTalkAllowlistCallbackView,
     DingTalkAllowlistDepartmentsView,
     DingTalkAllowlistDiscoverStartView,
+    DingTalkAllowlistRemoveView,
     DingTalkAllowlistStatusView,
 )
 from authentik.sources.oauth.api.dingtalk_directory import (
@@ -51,6 +53,16 @@ api_urlpatterns = [
         "sources/oauth/dingtalk-allowlist/<slug:source_slug>/status/",
         DingTalkAllowlistStatusView.as_view(),
         name="dingtalk-allowlist-status",
+    ),
+    path(
+        "sources/oauth/dingtalk-allowlist/<slug:source_slug>/apply/",
+        DingTalkAllowlistApplyView.as_view(),
+        name="dingtalk-allowlist-apply",
+    ),
+    path(
+        "sources/oauth/dingtalk-allowlist/<slug:source_slug>/remove/",
+        DingTalkAllowlistRemoveView.as_view(),
+        name="dingtalk-allowlist-remove",
     ),
     path(
         "sources/oauth/dingtalk-allowlist/<slug:source_slug>/discover/start/",

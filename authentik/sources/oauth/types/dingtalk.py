@@ -1,16 +1,20 @@
 """DingTalk OAuth Views"""
 
+from copy import deepcopy
 from hashlib import sha256
 from http import HTTPStatus
 from json import dumps, loads
 from secrets import token_urlsafe
+from time import sleep
 from typing import Any
 from urllib.parse import parse_qs, quote, urlencode, urlparse, urlunparse
 
 from django.core import signing
 from django.core.cache import cache
+from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
 from django.urls import reverse
+from django.utils.html import json_script
 from django.utils.timezone import now
 from django.utils.translation import gettext_lazy as _
 from requests import Session
@@ -22,7 +26,14 @@ from authentik.flows.models import FlowStageBinding
 from authentik.lib.utils.http import get_http_session
 from authentik.policies.expression.models import ExpressionPolicy
 from authentik.policies.models import PolicyBinding
+from authentik.policies.types import PolicyResult
 from authentik.sources.oauth.clients.oauth2 import OAuth2Client
+from authentik.sources.oauth.dingtalk.config import (
+    DINGTALK_ALLOWLIST_SCOPES,
+    DINGTALK_MAX_DEPARTMENT_DEPTH,
+    DINGTALK_MAX_DEPARTMENTS,
+    normalize_dingtalk_id_list,
+)
 from authentik.sources.oauth.models import OAuthSource
 from authentik.sources.oauth.types.registry import SourceType, registry
 from authentik.sources.oauth.views.callback import OAuthCallback
@@ -40,12 +51,13 @@ DINGTALK_USER_DETAIL_URL = "https://oapi.dingtalk.com/topapi/v2/user/get"
 DINGTALK_ALLOWLIST_MARKER = "# authentik-managed-dingtalk-allowlist"
 DINGTALK_ALLOWLIST_SESSION_KEY = "authentik/sources/oauth/dingtalk/allowlist"
 DINGTALK_ALLOWLIST_PLAN_CONTEXT = "authentik/sources/oauth/dingtalk/allowlist/pending"
-DINGTALK_ALLOWLIST_SCOPES = ["openid", "corpid", "Contact.User.Read"]
 DINGTALK_ALLOWLIST_STATE_SALT = "authentik.sources.oauth.dingtalk.allowlist"
-DINGTALK_MAX_DEPARTMENT_DEPTH = 50
-DINGTALK_MAX_DEPARTMENTS = 10000
+DINGTALK_INVALID_TOKEN_CODES = {40014, 42001}
 # DingTalk app tokens are valid for 7200s; refresh slightly early to avoid edge expiry.
 DINGTALK_APP_TOKEN_CACHE_TTL = 7000
+DINGTALK_APP_TOKEN_LEASE_TTL = 30
+DINGTALK_APP_TOKEN_LEASE_WAIT_SECONDS = 0.1
+DINGTALK_APP_TOKEN_LEASE_WAIT_ATTEMPTS = 20
 DINGTALK_DEPARTMENT_CORP_UNAVAILABLE = _(
     "DingTalk departments can only be loaded for a company authorized by this DingTalk "
     "application. Edit the company label manually, or bind/authorize this company in the "
@@ -57,8 +69,18 @@ class DingTalkDepartmentCorpUnavailable(ValueError):
     """Raised when the current DingTalk app token cannot verify the requested corp."""
 
 
+class DingTalkDepartmentLoadFailed(ValueError):
+    """Raised when DingTalk department discovery fails for a retryable dependency reason."""
+
+
 class DingTalkAppTokenError(ValueError):
     """Credential-free DingTalk app-token failure safe for logs and API responses."""
+
+
+def _require_mapping(value: Any, message: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(message)
+    return value
 
 
 def _legacy_error(data: dict[str, Any]) -> str:
@@ -69,9 +91,7 @@ def _legacy_error(data: dict[str, Any]) -> str:
 
 
 def _normalize_id_list(value: Any) -> list[str]:
-    if not isinstance(value, list | tuple | set):
-        return []
-    return sorted({str(item) for item in value if item is not None})
+    return normalize_dingtalk_id_list(value)
 
 
 def _extract_dingtalk_corp_label(data: dict[str, Any]) -> str:
@@ -125,8 +145,11 @@ def _fetch_dingtalk_app_token(source: OAuthSource, session: Session) -> str:
             params={"appkey": source.consumer_key, "appsecret": source.consumer_secret},
         )
         token_response.raise_for_status()
-        token_data = token_response.json()
-    except (RequestException, JSONDecodeError) as exc:
+        token_data = _require_mapping(
+            token_response.json(),
+            "DingTalk app token response was not an object.",
+        )
+    except (RequestException, JSONDecodeError, ValueError) as exc:
         status_code = getattr(getattr(exc, "response", None), "status_code", None)
         suffix = f" (status {status_code})" if status_code is not None else ""
         raise DingTalkAppTokenError(f"DingTalk app token request failed{suffix}.") from exc
@@ -161,10 +184,39 @@ def fetch_dingtalk_app_token_cached(
         cached = cache.get(key)
         if cached:
             return str(cached)
-    token = _fetch_dingtalk_app_token(source, session or get_http_session())
-    # DingTalk tokens are valid for 7200s; refresh a little early to avoid edge expiry.
-    cache.set(key, token, DINGTALK_APP_TOKEN_CACHE_TTL)
-    return token
+    lease_key = f"{key}/lease"
+    have_lease = False
+    if not cache.get(lease_key):
+        try:
+            have_lease = cache.add(lease_key, "1", DINGTALK_APP_TOKEN_LEASE_TTL)
+        except IntegrityError:
+            if transaction.get_connection().in_atomic_block:
+                transaction.set_rollback(False)
+    if not have_lease:
+        for _ in range(DINGTALK_APP_TOKEN_LEASE_WAIT_ATTEMPTS):
+            sleep(DINGTALK_APP_TOKEN_LEASE_WAIT_SECONDS)
+            cached = cache.get(key)
+            if cached:
+                return str(cached)
+        if not cache.get(lease_key):
+            try:
+                have_lease = cache.add(lease_key, "1", DINGTALK_APP_TOKEN_LEASE_TTL)
+            except IntegrityError:
+                if transaction.get_connection().in_atomic_block:
+                    transaction.set_rollback(False)
+                have_lease = False
+    try:
+        if have_lease and not force:
+            cached = cache.get(key)
+            if cached:
+                return str(cached)
+        token = _fetch_dingtalk_app_token(source, session or get_http_session())
+        # DingTalk tokens are valid for 7200s; refresh a little early to avoid edge expiry.
+        cache.set(key, token, DINGTALK_APP_TOKEN_CACHE_TTL)
+        return token
+    finally:
+        if have_lease:
+            cache.delete(lease_key)
 
 
 def normalize_dingtalk_allowlist_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -177,7 +229,7 @@ def normalize_dingtalk_allowlist_config(config: dict[str, Any]) -> dict[str, Any
             continue
         companies.append(
             {
-                "allow_all": bool(item.get("allow_all", False)),
+                "allow_all": _normalize_allow_all(item.get("allow_all", False)),
                 "corp_id": str(corp_id),
                 "dept_ids": _normalize_id_list(
                     item.get("dept_ids") or item.get("dept_id_list") or item.get("departments")
@@ -186,6 +238,12 @@ def normalize_dingtalk_allowlist_config(config: dict[str, Any]) -> dict[str, Any
             }
         )
     return {"companies": companies}
+
+
+def _normalize_allow_all(value: Any) -> bool:
+    if type(value) is not bool:
+        raise ValueError("DingTalk allowlist allow_all must be a boolean.")
+    return value
 
 
 def dingtalk_allowlist_config_hash(config: dict[str, Any]) -> str:
@@ -297,7 +355,7 @@ def inject_dingtalk_allowlist_policy_context(policy_request) -> None:
     """Expose current-session DingTalk allowlist evidence to application policies.
 
     Registered as a generic policy-request processor (see ``authentik.policies.hooks``) so the
-    core policy engine no longer imports DingTalk code directly (D1). Only acts on Application
+    core policy engine no longer imports DingTalk code directly. Only acts on Application
     policy evaluations, matching the previous engine behavior.
     """
     from authentik.core.models import Application
@@ -319,7 +377,7 @@ def inject_dingtalk_allowlist_policy_context(policy_request) -> None:
 def finalize_dingtalk_allowlist_session(sender, request, user, stage_view, **kwargs) -> None:
     """Persist the current-login DingTalk allowlist marker onto the session after login.
 
-    Connected to the user_login stage signal (D2) so the core login stage does not import
+    Connected to the user_login stage signal so the core login stage does not import
     DingTalk code. Writes the marker (bound to the logged-in user) when the source flow set
     one, and clears any stale marker otherwise.
     """
@@ -332,13 +390,19 @@ def finalize_dingtalk_allowlist_session(sender, request, user, stage_view, **kwa
     request.session.modified = True
 
 
-def render_dingtalk_allowlist_policy(config: dict[str, Any], source_slug: str | None = None) -> str:
+def render_dingtalk_allowlist_policy(
+    config: dict[str, Any],
+    source_slug: str | None = None,
+    source_pk: str | None = None,
+) -> str:
     normalized = normalize_dingtalk_allowlist_config(config)
     config_json = dumps(normalized, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     config_python = repr(normalized)
     config_version = dingtalk_allowlist_config_version(normalized)
     config_hash = sha256(config_version.encode("utf-8")).hexdigest()
+    source_pk_value = str(source_pk) if source_pk else ""
     source_marker = f"# source: {dumps(source_slug)}\n" if source_slug else ""
+    source_pk_marker = f"# source_pk: {dumps(source_pk_value)}\n" if source_pk_value else ""
     source_guard = (
         f"""if source and getattr(source, "slug", None) != {source_slug!r}:
     return True
@@ -347,7 +411,7 @@ def render_dingtalk_allowlist_policy(config: dict[str, Any], source_slug: str | 
         else ""
     )
     return f"""{DINGTALK_ALLOWLIST_MARKER}
-{source_marker}# config: {config_json}
+{source_marker}{source_pk_marker}# config: {config_json}
 userinfo = request.context.get("oauth_userinfo") or {{}}
 source = request.context.get("source")
 {source_guard}corp_id = userinfo.get("corp_id") or userinfo.get("corpId")
@@ -373,9 +437,16 @@ if not corp_id:
         return True
     marker = request.context.get("{DINGTALK_ALLOWLIST_SESSION_KEY}") or {{}}
     if not marker:
-        # Only DingTalk-originated sessions carry a marker; users who authenticated by
-        # other means are not blocked by the DingTalk allowlist on application access.
-        return True
+        ak_message("DingTalk login failed: sign in through DingTalk before accessing this app.")
+        return False
+    expected_source_pk = {source_pk_value!r}
+    expected_source_slug = {source_slug!r}
+    if expected_source_pk and str(marker.get("source_pk") or "") != expected_source_pk:
+        ak_message("DingTalk login failed: sign in through the required DingTalk source.")
+        return False
+    if expected_source_slug and marker.get("source_slug") != expected_source_slug:
+        ak_message("DingTalk login failed: sign in through the required DingTalk source.")
+        return False
     marker_current = (
         marker.get("config_hash") == "{config_hash}"
         or marker.get("config_version") == {config_version!r}
@@ -435,11 +506,27 @@ def _dingtalk_policy_source_slug(expression: str) -> str | None:
     return None
 
 
+def _dingtalk_policy_source_pk(expression: str) -> str | None:
+    for raw_line in expression.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("# source_pk:"):
+            continue
+        try:
+            value = loads(line.removeprefix("# source_pk:").strip())
+        except ValueError:
+            return ""
+        return str(value) if value else ""
+    return None
+
+
 def _dingtalk_policy_belongs_to_source(
     binding: PolicyBinding, policy: ExpressionPolicy, source: OAuthSource
 ) -> bool:
     marked_source = _dingtalk_policy_source_slug(policy.expression)
     if marked_source is not None:
+        marked_pk = _dingtalk_policy_source_pk(policy.expression)
+        if marked_pk is not None:
+            return marked_pk == str(source.pk)
         return marked_source == source.slug
     # Legacy policies predate the source marker. The managed frontend name and a
     # direct source binding are the only unambiguous ownership signals; a nameless
@@ -449,24 +536,35 @@ def _dingtalk_policy_belongs_to_source(
     )
 
 
+def _dingtalk_allowlist_bindings_with_policies(
+    source: OAuthSource,
+    enabled_only: bool,
+) -> list[tuple[PolicyBinding, ExpressionPolicy]]:
+    bindings = PolicyBinding.objects.filter(
+        policy__isnull=False,
+        target_id__in=_dingtalk_allowlist_binding_targets(source),
+    ).order_by("order", "pk")
+    if enabled_only:
+        bindings = bindings.filter(enabled=True)
+    binding_list = list(bindings)
+    policies = ExpressionPolicy.objects.in_bulk(
+        [binding.policy_id for binding in binding_list if binding.policy_id]
+    )
+    return [
+        (binding, policy)
+        for binding in binding_list
+        if (policy := policies.get(binding.policy_id)) is not None
+    ]
+
+
 def dingtalk_allowlist_has_unparseable_binding(source: OAuthSource) -> bool:
     """Return True when a managed DingTalk allowlist policy exists but its config is unreadable.
 
     Distinguishes "no allowlist configured" (an intended fail-open) from "a managed allowlist
     exists but its ``# config:`` line is corrupt", which must fail closed and alert an admin
-    instead of silently allowing every DingTalk user (see B5).
+    instead of silently allowing every DingTalk user.
     """
-    bindings = PolicyBinding.objects.filter(
-        policy__isnull=False,
-        target_id__in=_dingtalk_allowlist_binding_targets(source),
-        enabled=True,
-    )
-    for binding in bindings:
-        policy = binding.policy
-        if not isinstance(policy, ExpressionPolicy):
-            policy = ExpressionPolicy.objects.filter(pk=policy.pk).first()
-        if not policy:
-            continue
+    for binding, policy in _dingtalk_allowlist_bindings_with_policies(source, enabled_only=True):
         if not _dingtalk_policy_belongs_to_source(binding, policy, source):
             continue
         if (
@@ -480,18 +578,7 @@ def dingtalk_allowlist_has_unparseable_binding(source: OAuthSource) -> bool:
 def get_dingtalk_allowlist_binding(
     source: OAuthSource, enabled_only: bool = True
 ) -> tuple[PolicyBinding | None, ExpressionPolicy | None, dict[str, Any] | None]:
-    targets = _dingtalk_allowlist_binding_targets(source)
-    bindings = PolicyBinding.objects.filter(policy__isnull=False, target_id__in=targets).order_by(
-        "order", "pk"
-    )
-    if enabled_only:
-        bindings = bindings.filter(enabled=True)
-    for binding in bindings:
-        policy = binding.policy
-        if not isinstance(policy, ExpressionPolicy):
-            policy = ExpressionPolicy.objects.filter(pk=policy.pk).first()
-        if not policy:
-            continue
+    for binding, policy in _dingtalk_allowlist_bindings_with_policies(source, enabled_only):
         if not _dingtalk_policy_belongs_to_source(binding, policy, source):
             continue
         config = parse_dingtalk_allowlist_policy(policy.expression)
@@ -556,7 +643,10 @@ def _fetch_dingtalk_user_profile(
         },
     )
     token_response.raise_for_status()
-    token = token_response.json()
+    token = _require_mapping(
+        token_response.json(),
+        "DingTalk token response was not an object.",
+    )
     access_token = token.get("accessToken") or token.get("access_token")
     if not access_token:
         raise ValueError(_("DingTalk token response did not include an access token."))
@@ -565,7 +655,10 @@ def _fetch_dingtalk_user_profile(
         headers={"x-acs-dingtalk-access-token": access_token},
     )
     profile_response.raise_for_status()
-    profile = profile_response.json()
+    profile = _require_mapping(
+        profile_response.json(),
+        "DingTalk profile response was not an object.",
+    )
     if corp_id := token.get("corpId") or token.get("corp_id"):
         profile.setdefault("corpId", corp_id)
         profile.setdefault("corp_id", corp_id)
@@ -588,10 +681,15 @@ def _discovery_response(payload: dict[str, Any]) -> HttpResponse:
         "source": "goauthentik.io",
         "context": "dingtalk-allowlist-discovery",
     }
-    body = dumps(message, ensure_ascii=False)
+    payload_script = json_script(message, "dingtalk-allowlist-discovery-payload")
     return HttpResponse(
-        "<!doctype html><script>"
-        f"window.opener && window.opener.postMessage({body}, window.location.origin);"
+        "<!doctype html>"
+        f"{payload_script}"
+        "<script>"
+        "const payload = JSON.parse("
+        'document.getElementById("dingtalk-allowlist-discovery-payload").textContent'
+        ");"
+        "window.opener && window.opener.postMessage(payload, window.location.origin);"
         "window.close();"
         "</script>"
     )
@@ -615,23 +713,35 @@ def fetch_dingtalk_org_auth_info(
     session: Session | None = None,
 ) -> dict[str, Any]:
     session = session or get_http_session()
-    app_token = fetch_dingtalk_app_token_cached(source, session)
-    response = session.get(
-        DINGTALK_ORG_AUTH_INFO_URL,
-        params={"targetCorpId": corp_id},
-        headers={"x-acs-dingtalk-access-token": app_token},
-    )
-    if response.status_code == HTTPStatus.UNAUTHORIZED:
-        app_token = fetch_dingtalk_app_token_cached(source, session, force=True)
+    data = {}
+    for attempt in range(2):
+        app_token = fetch_dingtalk_app_token_cached(source, session, force=attempt > 0)
         response = session.get(
             DINGTALK_ORG_AUTH_INFO_URL,
             params={"targetCorpId": corp_id},
             headers={"x-acs-dingtalk-access-token": app_token},
         )
-    response.raise_for_status()
-    data = response.json()
-    if error := _legacy_error(data):
-        raise ValueError(error)
+        if response.status_code == HTTPStatus.UNAUTHORIZED and attempt == 0:
+            continue
+        if response.status_code in (
+            HTTPStatus.UNAUTHORIZED,
+            HTTPStatus.FORBIDDEN,
+            HTTPStatus.NOT_FOUND,
+        ):
+            raise DingTalkDepartmentCorpUnavailable(DINGTALK_DEPARTMENT_CORP_UNAVAILABLE)
+        try:
+            response.raise_for_status()
+            data = _require_mapping(
+                response.json(),
+                "DingTalk organization authorization response was not an object.",
+            )
+        except (RequestException, JSONDecodeError, ValueError) as exc:
+            raise DingTalkDepartmentLoadFailed("DingTalk organization lookup failed.") from exc
+        if data.get("errcode") in DINGTALK_INVALID_TOKEN_CODES and attempt == 0:
+            continue
+        if _legacy_error(data):
+            raise DingTalkDepartmentCorpUnavailable(DINGTALK_DEPARTMENT_CORP_UNAVAILABLE)
+        break
     return {
         "corp_id": corp_id,
         "label": _extract_dingtalk_corp_label(data),
@@ -640,18 +750,17 @@ def fetch_dingtalk_org_auth_info(
 
 
 def fetch_dingtalk_departments(source: OAuthSource, corp_id: str) -> dict[str, Any]:
-    from authentik.sources.oauth.dingtalk import client as dingtalk_client
+    from authentik.sources.oauth.dingtalk.client import DingTalkDirectoryClient
 
-    try:
-        org_info = fetch_dingtalk_org_auth_info(source, corp_id)
-    except (RequestException, ValueError) as exc:
-        raise DingTalkDepartmentCorpUnavailable(DINGTALK_DEPARTMENT_CORP_UNAVAILABLE) from exc
-
-    dingtalk_client.DINGTALK_MAX_DEPARTMENT_DEPTH = DINGTALK_MAX_DEPARTMENT_DEPTH
-    dingtalk_client.DINGTALK_MAX_DEPARTMENTS = DINGTALK_MAX_DEPARTMENTS
+    org_info = fetch_dingtalk_org_auth_info(source, corp_id)
 
     departments = []
-    for department in dingtalk_client.DingTalkDirectoryClient(source).iter_departments():
+    client = DingTalkDirectoryClient(
+        source,
+        max_department_depth=DINGTALK_MAX_DEPARTMENT_DEPTH,
+        max_departments=DINGTALK_MAX_DEPARTMENTS,
+    )
+    for department in client.iter_departments():
         departments.append(
             {
                 "dept_id": department["dept_id"],
@@ -721,8 +830,15 @@ class DingTalkOAuth2Client(OAuth2Client):
                 **request_kwargs,
             )
             try:
-                data = response.json()
+                data = _require_mapping(
+                    response.json(),
+                    "DingTalk token response was not an object.",
+                )
             except JSONDecodeError as exc:
+                response.raise_for_status()
+                self.logger.warning("Unable to parse dingtalk token", exc=exc)
+                return {"error": _("DingTalk token exchange failed.")}
+            except ValueError as exc:
                 response.raise_for_status()
                 self.logger.warning("Unable to parse dingtalk token", exc=exc)
                 return {"error": _("DingTalk token exchange failed.")}
@@ -764,7 +880,14 @@ class DingTalkOAuth2Client(OAuth2Client):
             self.logger.warning("Unable to fetch dingtalk userinfo", exc=exc)
             return None
 
-        profile = response.json()
+        try:
+            profile = _require_mapping(
+                response.json(),
+                "DingTalk profile response was not an object.",
+            )
+        except (JSONDecodeError, ValueError) as exc:
+            self.logger.warning("Unable to parse dingtalk userinfo", exc=exc)
+            return None
         if corp_id := token.get("corp_id"):
             profile.setdefault("corpId", corp_id)
         self.dingtalk_raw_profile = profile.copy()
@@ -780,33 +903,24 @@ class DingTalkOAuth2Client(OAuth2Client):
     def _get_enhanced_profile(self, union_id: str) -> dict[str, Any]:
         """Fetch optional DingTalk directory fields, returning an empty dict on failure."""
         try:
-            # Reuse the shared, DB/Redis-cached app token so every enhanced-profile login
-            # does not hit DingTalk's rate-limited gettoken endpoint (see C3).
-            app_token = fetch_dingtalk_app_token_cached(self.source)
-
-            user_id_response = self.do_request(
-                "post",
+            user_id_data = self._post_dingtalk_app_json(
                 DINGTALK_GET_BY_UNION_ID_URL,
-                params={"access_token": app_token},
-                json={"unionid": union_id},
+                {"unionid": union_id},
             )
-            user_id_response.raise_for_status()
-            user_id_data = user_id_response.json()
             if self._has_legacy_error(user_id_data):
                 self.logger.warning("Unable to fetch dingtalk user id", response=user_id_data)
                 return {}
-            user_id = user_id_data.get("result", {}).get("userid")
+            user_id_result = user_id_data.get("result", {})
+            if not isinstance(user_id_result, dict):
+                return {}
+            user_id = user_id_result.get("userid")
             if not user_id:
                 return {}
 
-            detail_response = self.do_request(
-                "post",
+            detail_data = self._post_dingtalk_app_json(
                 DINGTALK_USER_DETAIL_URL,
-                params={"access_token": app_token},
-                json={"userid": user_id},
+                {"userid": user_id},
             )
-            detail_response.raise_for_status()
-            detail_data = detail_response.json()
             if self._has_legacy_error(detail_data):
                 self.logger.warning("Unable to fetch dingtalk user detail", response=detail_data)
                 return {}
@@ -820,9 +934,32 @@ class DingTalkOAuth2Client(OAuth2Client):
             return {}
 
         detail = detail_data.get("result", {})
+        if not isinstance(detail, dict):
+            return {}
         if "userid" not in detail:
             detail["userid"] = user_id
         return detail
+
+    def _post_dingtalk_app_json(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
+        for attempt in range(2):
+            app_token = fetch_dingtalk_app_token_cached(self.source, force=attempt > 0)
+            response = self.do_request(
+                "post",
+                url,
+                params={"access_token": app_token},
+                json=payload,
+            )
+            if response.status_code == HTTPStatus.UNAUTHORIZED and attempt == 0:
+                continue
+            response.raise_for_status()
+            data = _require_mapping(
+                response.json(),
+                "DingTalk app-token response was not an object.",
+            )
+            if data.get("errcode") in DINGTALK_INVALID_TOKEN_CODES and attempt == 0:
+                continue
+            return data
+        raise ValueError("DingTalk app token refresh did not recover the request.")
 
     def _get_error(self, data: dict[str, Any]) -> str | None:
         return (
@@ -845,7 +982,7 @@ class DingTalkOAuthRedirect(OAuthRedirect):
 
     def get_additional_parameters(self, source: OAuthSource):  # pragma: no cover
         return {
-            "scope": ["openid", "corpid", "Contact.User.Read"],
+            "scope": DINGTALK_ALLOWLIST_SCOPES,
             "prompt": "consent",
         }
 
@@ -867,7 +1004,7 @@ class DingTalkOAuth2Callback(OAuthCallback):
         # unionId is returned by the base profile and is globally unique + stable, so it is a
         # deterministic identity that does NOT depend on the best-effort directory enhancement
         # (which only supplies userid). Using it keeps the same DingTalk user mapped to one
-        # account across healthy and degraded logins (see B1). userid is only unique within a
+        # account across healthy and degraded logins. userid is only unique within a
         # corp and is therefore used as the human-facing username, not the matching identity.
         return info.get("unionId") or info.get("openId") or None
 
@@ -886,6 +1023,103 @@ class DingTalkType(SourceType):
     profile_url = DINGTALK_PROFILE_URL
     urls_customizable = False
 
+    def oauth_source_policy_result(self, manager, result: PolicyResult) -> PolicyResult:
+        return PolicyResult(False, *(_(message) for message in result.messages))
+
+    def _source_link_denial(self, manager) -> str | None:
+        """Return a deny message when the DingTalk allowlist rejects this login."""
+        _binding, _policy, config = get_dingtalk_allowlist_binding(manager.source)
+        if config is None:
+            if dingtalk_allowlist_has_unparseable_binding(manager.source):
+                Event.new(
+                    EventAction.CONFIGURATION_ERROR,
+                    message=(
+                        "DingTalk allowlist policy exists but its config is unparseable; "
+                        "denying DingTalk source login until it is repaired."
+                    ),
+                    source=manager.source,
+                ).from_http(manager.request)
+                return _(
+                    "DingTalk login failed: the company allowlist is invalid. "
+                    "Contact your administrator."
+                )
+            Event.new(
+                EventAction.CONFIGURATION_ERROR,
+                message=(
+                    "No enabled DingTalk allowlist is configured for this source; "
+                    "denying the DingTalk login. Save an allowlist on the source's "
+                    "DingTalk Allowlist tab to permit sign-ins."
+                ),
+                source=manager.source,
+            ).from_http(manager.request)
+            return _(
+                "DingTalk login failed: no company allowlist is configured. "
+                "Contact your administrator."
+            )
+        userinfo = manager.policy_context.get("oauth_userinfo") or {}
+        marker = build_dingtalk_allowlist_session_marker(
+            config,
+            userinfo,
+            manager.source,
+            manager.identifier,
+        )
+        if not marker:
+            manager.policy_context.pop(DINGTALK_ALLOWLIST_PLAN_CONTEXT, None)
+            return _(
+                "DingTalk login failed: your company or department is not allowed. "
+                "Contact your administrator."
+            )
+        manager.policy_context[DINGTALK_ALLOWLIST_PLAN_CONTEXT] = marker
+        return None
+
+    def _allowlist_denied_response(self, manager) -> HttpResponse | None:
+        denial = self._source_link_denial(manager)
+        if denial is None:
+            return None
+        return manager.error_handler(Exception(denial))
+
+    def _promote_user_to_internal(self, manager, connection) -> None:
+        user = getattr(connection, "user", None)
+        if not user or not user.pk or user.type != UserTypes.EXTERNAL:
+            return
+        user.type = UserTypes.INTERNAL
+        user.save(update_fields=["type"])
+        Event.new(
+            EventAction.MODEL_UPDATED,
+            message=(
+                f"Promoted DingTalk user '{user.username}' from external to internal "
+                "so they can use the user interface."
+            ),
+            source=manager.source,
+        ).from_http(manager.request)
+
+    def oauth_pre_existing_link(self, manager, connection) -> HttpResponse | None:
+        if response := self._allowlist_denied_response(manager):
+            return response
+        self._promote_user_to_internal(manager, connection)
+        return None
+
+    def oauth_pre_auth(self, manager, connection) -> HttpResponse | None:
+        if response := self._allowlist_denied_response(manager):
+            return response
+        self._promote_user_to_internal(manager, connection)
+        return None
+
+    def oauth_pre_enroll(self, manager, connection) -> HttpResponse | None:
+        if response := self._allowlist_denied_response(manager):
+            return response
+        userinfo = manager.policy_context.get("oauth_userinfo") or {}
+        if userinfo.get("userid") or userinfo.get("userId"):
+            return None
+        return manager.error_handler(
+            Exception(
+                _(
+                    "DingTalk login failed: your DingTalk user information is temporarily "
+                    "unavailable. Try again later or contact your administrator."
+                )
+            )
+        )
+
     def get_base_user_properties(
         self, source: OAuthSource, info: dict[str, Any], **kwargs
     ) -> dict[str, Any]:
@@ -897,10 +1131,12 @@ class DingTalkType(SourceType):
         # unique within a corp (it may repeat across corps). When the best-effort directory
         # enhancement did not return a userid, username is left unset so a new enrollment fails
         # closed in the DingTalk source flow (see handle_enroll) rather than provisioning an
-        # account with an unstable derived name (see B2). The stable cross-login matching
+        # account with an unstable derived name. The stable cross-login matching
         # identity is the unionId (see get_user_id).
         username = user_id
         dingtalk = {
+            "source_pk": str(source.pk),
+            "source_slug": source.slug,
             "union_id": info.get("unionId"),
             "open_id": info.get("openId"),
             "user_id": user_id,
@@ -918,7 +1154,7 @@ class DingTalkType(SourceType):
         }
         return {
             "username": username,
-            # B3: DingTalk returns no ``email_verified`` flag and the address may be a user-set
+            # DingTalk returns no ``email_verified`` flag and the address may be a user-set
             # personal mailbox, so DingTalk sources must NOT use EMAIL_LINK/EMAIL_DENY matching
             # (see dingtalk_allowlist.md). email is kept only to populate the profile.
             "email": info.get("email"),
@@ -929,12 +1165,15 @@ class DingTalkType(SourceType):
             "type": UserTypes.INTERNAL,
             "attributes": {
                 "dingtalk": dingtalk,
+                "dingtalk_sources": {
+                    str(source.pk): deepcopy(dingtalk),
+                },
             },
         }
 
 
 def _register_dingtalk_policy_hooks() -> None:
-    """Wire DingTalk into generic policy/login hooks without patching core hot paths (D1/D2).
+    """Wire DingTalk into generic policy/login hooks without patching core hot paths.
 
     The OAuth source-type registry guarantees this module is imported during app startup, so
     registering here connects the hooks for every deployment that loads the DingTalk source.

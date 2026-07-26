@@ -1,9 +1,11 @@
 """login tests"""
 
 from time import sleep
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from django.http import HttpRequest
+from django.http.response import HttpResponse
 from django.urls import reverse
 from django.utils.timezone import now
 
@@ -32,6 +34,8 @@ from authentik.stages.user_login.middleware import (
     logout_extra,
 )
 from authentik.stages.user_login.models import GeoIPBinding, NetworkBinding, UserLoginStage
+from authentik.stages.user_login.signals import user_login_session_finalized
+from authentik.stages.user_login.stage import UserLoginStageView
 
 
 class TestUserLoginStage(FlowTestCase):
@@ -86,16 +90,57 @@ class TestUserLoginStage(FlowTestCase):
         plan = FlowPlan(flow_pk=self.flow.pk.hex, bindings=[self.binding], markers=[StageMarker()])
         plan.context[PLAN_CONTEXT_PENDING_USER] = self.user
         plan.context[DINGTALK_ALLOWLIST_PLAN_CONTEXT] = marker
-        session = self.client.session
-        session[SESSION_KEY_PLAN] = plan
-        session.save()
-
-        response = self.client.get(
-            reverse("authentik_api:flow-executor", kwargs={"flow_slug": self.flow.slug})
+        request = HttpRequest()
+        request.session = self.client.session
+        request.META["REMOTE_ADDR"] = "127.0.0.1"
+        request.COOKIES = {}
+        executor = SimpleNamespace(
+            plan=plan,
+            current_stage=self.stage,
+            flow=self.flow,
+            stage_ok=Mock(return_value=HttpResponse()),
         )
+        view = UserLoginStageView(executor)
+        view.request = request
+
+        response = view.do_login(request)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.client.session[DINGTALK_ALLOWLIST_SESSION_KEY], marker)
+        self.assertEqual(request.session[DINGTALK_ALLOWLIST_SESSION_KEY], marker)
+
+    def test_login_session_finalized_receiver_exception_does_not_abort_login(self):
+        """Post-login extension receivers are best-effort and cannot turn login into a 500."""
+
+        def receiver(**_):
+            raise RuntimeError("receiver failed")
+
+        user_login_session_finalized.connect(
+            receiver,
+            dispatch_uid="authentik_test_login_session_finalized_failure",
+        )
+        self.addCleanup(
+            user_login_session_finalized.disconnect,
+            dispatch_uid="authentik_test_login_session_finalized_failure",
+        )
+        plan = FlowPlan(flow_pk=self.flow.pk.hex, bindings=[self.binding], markers=[StageMarker()])
+        plan.context[PLAN_CONTEXT_PENDING_USER] = self.user
+        request = HttpRequest()
+        request.session = self.client.session
+        request.META["REMOTE_ADDR"] = "127.0.0.1"
+        request.COOKIES = {}
+        executor = SimpleNamespace(
+            plan=plan,
+            current_stage=self.stage,
+            flow=self.flow,
+            stage_ok=Mock(return_value=HttpResponse()),
+        )
+        view = UserLoginStageView(executor)
+        view.request = request
+
+        response = view.do_login(request)
+
+        self.assertEqual(response.status_code, 200)
+        view.executor.stage_ok.assert_called_once()
 
     def test_terminate_other_sessions(self):
         """Test terminate_other_sessions"""

@@ -172,12 +172,19 @@ class UserLoginStageView(ChallengeStageView):
             )
         # Let extensions persist per-login session state (e.g. the DingTalk allowlist marker)
         # without importing app-specific code into this core stage (see user_login.signals).
-        user_login_session_finalized.send(
+        responses = user_login_session_finalized.send_robust(
             sender=self.__class__,
             request=self.request,
             user=user,
             stage_view=self,
         )
+        for receiver, response in responses:
+            if isinstance(response, Exception):
+                self.logger.warning(
+                    "User login session extension failed",
+                    receiver=receiver,
+                    exc=response,
+                )
         self.logger.debug(
             "Logged in",
             backend=backend,
