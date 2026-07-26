@@ -157,7 +157,7 @@ class OAuthSourceFlowManager(SourceFlowManager):
         return engine.build().result
 
     def get_flow(self, **kwargs) -> HttpResponse:
-        # D3: evaluate source-bound policies before deciding the action, but only in this OAuth
+        # Evaluate source-bound policies before deciding the action, but only in this OAuth
         # subclass — the core SourceFlowManager.get_flow is left unmodified (smaller merge
         # surface) and non-OAuth source types (SAML/Plex/...) keep upstream behavior.
         try:

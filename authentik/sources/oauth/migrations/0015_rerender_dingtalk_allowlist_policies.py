@@ -1,4 +1,4 @@
-# D7: This migration previously imported and called live application code
+# This migration previously imported and called live application code
 # (``authentik.sources.oauth.types.dingtalk.render_dingtalk_allowlist_policy``) inside a
 # ``RunPython`` to re-render deployed managed DingTalk allowlist policies. Coupling an immutable
 # migration to mutable render logic makes replays non-deterministic across versions and drags
