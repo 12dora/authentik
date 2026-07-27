@@ -14770,45 +14770,59 @@ Bindings to groups/users are checked against the user of the event.</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.poll.paused">
   <source>DingTalk directory sync is still running, so automatic refresh paused. Use Refresh to check again.</source>
+  <target>钉钉目录同步仍在运行，已暂停自动刷新。请使用“刷新”重新检查。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.sync.completed">
   <source>DingTalk directory sync completed for <x id="0" equiv-text="${event.corpId}"/>.</source>
+  <target>企业 <x id="0" equiv-text="${event.corpId}"/> 的钉钉目录同步已完成。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.sync.warning">
   <source>DingTalk directory sync completed with warnings for <x id="0" equiv-text="${event.corpId}"/>.</source>
+  <target>企业 <x id="0" equiv-text="${event.corpId}"/> 的钉钉目录同步已完成，但存在警告。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.sync.failed">
-  <source>DingTalk directory sync failed for <x id="0" equiv-text="${event.corpId}"/>: <x id="1" equiv-text="${event.detail}"/></source>
+  <source>DingTalk directory sync failed for <x id="0" equiv-text="${event.corpId}"/>: <x id="1" equiv-text="${detail}"/></source>
+  <target>企业 <x id="0" equiv-text="${event.corpId}"/> 的钉钉目录同步失败：<x id="1" equiv-text="${detail}"/></target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.counters.nested-omitted">
   <source>Nested details omitted</source>
+  <target>已省略嵌套详情</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.counters.more-omitted">
   <source><x id="0" equiv-text="${value.length - visibleItems.length}"/> more omitted</source>
+  <target>另有 <x id="0" equiv-text="${value.length - visibleItems.length}"/> 项已省略</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.summary.loading">
   <source>Loading DingTalk directory status.</source>
+  <target>正在加载钉钉目录状态。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.summary.unavailable">
   <source>DingTalk directory status is unavailable.</source>
+  <target>钉钉目录状态不可用。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.summary.stale">
   <source>Previous directory status is shown because refresh failed.</source>
+  <target>刷新失败，显示的是上一次的目录状态。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.summary.poll-paused">
   <source>Automatic refresh paused while the sync is still running.</source>
+  <target>同步仍在运行，已暂停自动刷新。</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.summary.last-refreshed">
   <source>Last refreshed</source>
+  <target>上次刷新</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.delete.running-disabled">
   <source>Cannot delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/> while sync is running</source>
+  <target>同步运行期间无法删除企业 <x id="0" equiv-text="${status.corpId}"/> 的钉钉目录数据</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.delete.read-only-disabled">
   <source>Cannot delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/></source>
+  <target>无法删除企业 <x id="0" equiv-text="${status.corpId}"/> 的钉钉目录数据</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.delete.aria-label">
   <source>Delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/></source>
+  <target>删除企业 <x id="0" equiv-text="${status.corpId}"/> 的钉钉目录数据</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.read-only">
   <source>You can view DingTalk directory status, but you need permission to change this OAuth source before syncing or deleting directory data.</source>
@@ -14816,6 +14830,59 @@ Bindings to groups/users are checked against the user of the event.</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.table.caption">
   <source>DingTalk directory sync status by corp</source>
+  <target>各企业的钉钉目录同步状态</target>
+</trans-unit>
+<trans-unit id="sb365ccab0f270879">
+  <source>Create or bind</source>
+  <target>创建或绑定</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.broker-unavailable">
+  <source>The background task broker is unavailable, so this directory sync could not be queued. Try again later.</source>
+  <target>后台任务代理不可用，无法将此目录同步加入队列。请稍后重试。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.concurrency-limit">
+  <source>Too many DingTalk directory syncs are already running. Try again once one of them finishes.</source>
+  <target>同时运行的钉钉目录同步过多。请等待其中一个完成后重试。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.http-request-failed">
+  <source>Could not reach DingTalk while syncing the directory. Try again later.</source>
+  <target>同步目录时无法连接钉钉。请稍后重试。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.invalid-response">
+  <source>DingTalk returned an invalid directory response. Try again later.</source>
+  <target>钉钉返回了无效的目录响应。请稍后重试。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.payload-limit">
+  <source>The DingTalk directory response was too large to process.</source>
+  <target>钉钉目录响应过大，无法处理。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.run-stale">
+  <source>A newer directory sync replaced this run before it finished.</source>
+  <target>此次运行在完成前已被更新的目录同步取代。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.source-disabled">
+  <source>This DingTalk source is disabled, so the directory sync did not run.</source>
+  <target>此钉钉源已禁用，目录同步未执行。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.source-unavailable">
+  <source>The DingTalk source for this sync is no longer available.</source>
+  <target>此次同步对应的钉钉源已不可用。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.unsupported-source">
+  <source>This source is not a DingTalk source, so the directory sync did not run.</source>
+  <target>此源不是钉钉源，目录同步未执行。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.user-limit">
+  <source>The DingTalk directory holds more users than a sync can process.</source>
+  <target>钉钉目录中的用户数超出单次同步可处理的上限。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.user-detail-failed">
+  <source>Could not load user details from DingTalk while syncing the directory. Try again later.</source>
+  <target>同步目录时无法从钉钉加载用户详情。请稍后重试。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.unknown">
+  <source>DingTalk directory sync failed.</source>
+  <target>钉钉目录同步失败。</target>
 </trans-unit>
 </body>
 </file>

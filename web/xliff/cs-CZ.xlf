@@ -11526,7 +11526,7 @@ Vazby na skupiny/uživatele jsou kontrolovány vůči uživateli události.</tar
   <source>DingTalk directory sync completed with warnings for <x id="0" equiv-text="${event.corpId}"/>.</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.sync.failed">
-  <source>DingTalk directory sync failed for <x id="0" equiv-text="${event.corpId}"/>: <x id="1" equiv-text="${event.detail}"/></source>
+  <source>DingTalk directory sync failed for <x id="0" equiv-text="${event.corpId}"/>: <x id="1" equiv-text="${detail}"/></source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.status.success">
   <source>Success</source>
@@ -11734,6 +11734,45 @@ Vazby na skupiny/uživatele jsou kontrolovány vůči uživateli události.</tar
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.discovery.state-source-mismatch">
   <source>This DingTalk discovery result belongs to a different source. Start discovery again.</source>
+</trans-unit>
+<trans-unit id="sb365ccab0f270879">
+  <source>Create or bind</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.broker-unavailable">
+  <source>The background task broker is unavailable, so this directory sync could not be queued. Try again later.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.concurrency-limit">
+  <source>Too many DingTalk directory syncs are already running. Try again once one of them finishes.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.http-request-failed">
+  <source>Could not reach DingTalk while syncing the directory. Try again later.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.invalid-response">
+  <source>DingTalk returned an invalid directory response. Try again later.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.payload-limit">
+  <source>The DingTalk directory response was too large to process.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.run-stale">
+  <source>A newer directory sync replaced this run before it finished.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.source-disabled">
+  <source>This DingTalk source is disabled, so the directory sync did not run.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.source-unavailable">
+  <source>The DingTalk source for this sync is no longer available.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.unsupported-source">
+  <source>This source is not a DingTalk source, so the directory sync did not run.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.user-limit">
+  <source>The DingTalk directory holds more users than a sync can process.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.user-detail-failed">
+  <source>Could not load user details from DingTalk while syncing the directory. Try again later.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.unknown">
+  <source>DingTalk directory sync failed.</source>
 </trans-unit>
 </body>
 </file>
