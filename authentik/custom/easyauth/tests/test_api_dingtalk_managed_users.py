@@ -54,9 +54,7 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
         self.user.assign_perms_to_managed_role(
             "authentik_sources_oauth.view_oauthsource", self.source
         )
-        self.user.assign_perms_to_managed_role(
-            "authentik_sources_oauth.view_dingtalkdirectoryuser"
-        )
+        self.user.assign_perms_to_managed_role("authentik_sources_oauth.view_dingtalkdirectoryuser")
         self.client.force_authenticate(user=self.user)
 
     def test_success_returns_service_response(self):
@@ -141,8 +139,7 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
         }
 
         with patch(
-            "authentik.custom.easyauth.api.dingtalk_managed_users."
-            "get_dingtalk_managed_users",
+            "authentik.custom.easyauth.api.dingtalk_managed_users.get_dingtalk_managed_users",
             return_value=service_response,
         ) as get_managed_users:
             response = self.client.get(self.url)
@@ -163,8 +160,7 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
         self._login_with_directory_access()
 
         with patch(
-            "authentik.custom.easyauth.api.dingtalk_managed_users."
-            "get_dingtalk_managed_users",
+            "authentik.custom.easyauth.api.dingtalk_managed_users.get_dingtalk_managed_users",
             side_effect=DingTalkManagerNotFound("missing"),
         ):
             response = self.client.get(self.url)
@@ -179,8 +175,7 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
         self.source.save(update_fields=["enabled"])
 
         with patch(
-            "authentik.custom.easyauth.api.dingtalk_managed_users."
-            "get_dingtalk_managed_users",
+            "authentik.custom.easyauth.api.dingtalk_managed_users.get_dingtalk_managed_users",
         ) as get_managed_users:
             response = self.client.get(self.url)
 
@@ -191,8 +186,7 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
         self._login_with_directory_access()
 
         with patch(
-            "authentik.custom.easyauth.api.dingtalk_managed_users."
-            "get_dingtalk_managed_users",
+            "authentik.custom.easyauth.api.dingtalk_managed_users.get_dingtalk_managed_users",
             side_effect=DingTalkSourceUnavailable("source secret detail"),
         ):
             response = self.client.get(self.url)
@@ -205,8 +199,7 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
         self._login_with_directory_access()
 
         with patch(
-            "authentik.custom.easyauth.api.dingtalk_managed_users."
-            "get_dingtalk_managed_users",
+            "authentik.custom.easyauth.api.dingtalk_managed_users.get_dingtalk_managed_users",
             side_effect=DingTalkBindingConflict("conflict"),
         ):
             response = self.client.get(self.url)
@@ -219,8 +212,7 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
         self._login_with_directory_access()
 
         with patch(
-            "authentik.custom.easyauth.api.dingtalk_managed_users."
-            "get_dingtalk_managed_users",
+            "authentik.custom.easyauth.api.dingtalk_managed_users.get_dingtalk_managed_users",
         ) as get_managed_users:
             response = self.client.get(f"{self.url}?page_size=101")
 
@@ -258,8 +250,7 @@ class TestEasyAuthDingTalkManagedUsersAPI(TestCase):
         }
 
         with patch(
-            "authentik.custom.easyauth.api.dingtalk_managed_users."
-            "get_dingtalk_managed_users",
+            "authentik.custom.easyauth.api.dingtalk_managed_users.get_dingtalk_managed_users",
             return_value=service_response,
         ):
             response = self.client.get(self.url)
