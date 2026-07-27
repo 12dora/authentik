@@ -499,6 +499,45 @@ describe("DingTalkAllowlistPanel", () => {
         });
         expect(panel.status.revision).toBe("rev-2");
     });
+
+    it("keeps the managed policy status aligned when the policy name is long", async () => {
+        setAuthentikGlobal();
+        const panel = mountPanel();
+        panel.refreshStatus = vi.fn(async () => {});
+        panel.source = makeSource("dingtalk");
+        await panel.updateComplete;
+        // A grid column narrow enough that the managed policy name cannot share a
+        // line with the badge and the label.
+        panel.style.display = "block";
+        panel.style.width = "20rem";
+        panel.status = {
+            revision: "rev-1",
+            canManage: true,
+            managedPolicy: {
+                _exists: true,
+                pk: "policy-pk",
+                name: "dingtalk-allowlist-dingtalk",
+            },
+            policyBindings: [],
+        } as never;
+        panel.loaded = true;
+        await panel.updateComplete;
+
+        const row = Array.from(
+            panel.shadowRoot!.querySelectorAll<HTMLElement>(".ak-dingtalk-status li"),
+        ).find((item) => item.textContent?.includes("Managed policy exists"))!;
+        const badge = row.querySelector<HTMLElement>("ak-status-label")!;
+        const label = row.querySelector<HTMLElement>("span:not(.ak-dingtalk-muted)")!;
+        const detail = row.querySelector<HTMLElement>(".ak-dingtalk-muted")!;
+
+        expect(detail.textContent).toContain("dingtalk-allowlist-dingtalk");
+        // Badge and label stay on the row's first line; the long name wraps below
+        // instead of dragging them down with its own baseline.
+        expect(badge.getBoundingClientRect().top).toBe(label.getBoundingClientRect().top);
+        expect(label.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+            detail.getBoundingClientRect().top,
+        );
+    });
 });
 
 describe("DingTalkDestructiveActionModal", () => {

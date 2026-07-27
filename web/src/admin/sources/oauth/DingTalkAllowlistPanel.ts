@@ -320,8 +320,20 @@ export class DingTalkAllowlistPanel extends AKElement {
 
             .ak-dingtalk-status li {
                 display: flex;
-                gap: var(--pf-global--spacer--sm);
+                flex-wrap: wrap;
+                gap: var(--pf-global--spacer--xs) var(--pf-global--spacer--sm);
                 align-items: baseline;
+            }
+
+            /* The detail slot holds an inline button with the managed policy name. Once
+               that name is too long for the column the button wraps, and because an
+               inline-block takes its baseline from its *last* line, baseline alignment
+               would drag the badge and the label down a row. Giving the detail its own
+               flex box keeps the row's baseline on the first line, and letting the row
+               wrap moves the name onto its own line instead of squeezing the label. */
+            .ak-dingtalk-status li > .ak-dingtalk-muted {
+                display: flex;
+                min-width: 0;
             }
 
             .ak-dingtalk-muted {
