@@ -219,9 +219,7 @@ class TestDingTalkDocumentationLinks(SimpleTestCase):
     def test_backtick_doc_paths_exist(self):
         root = Path(__file__).resolve().parents[4]
         docs = [
-            root / "docs/dingtalk-allowlist-runbook.md",
-            root / "docs/dingtalk-oauth-downstream-mappings.md",
-            root / "docs/dingtalk-directory-org-service.md",
+            root / "docs/dingtalk.md",
         ]
         missing = []
         for doc in docs:
