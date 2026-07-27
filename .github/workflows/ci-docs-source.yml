@@ -2,9 +2,7 @@
 name: CI - Source code docs
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 env:
   POSTGRES_DB: authentik

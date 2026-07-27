@@ -2,11 +2,6 @@
 name: CI - AWS cfn
 
 on:
-  push:
-    branches:
-      - main
-      - next
-      - version-*
   pull_request:
     branches:
       - main

@@ -238,3 +238,6 @@ source_docs/
 ### Docker ###
 tests/openid_conformance/exports/*.zip
 compose.override.yml
+
+### vitest ###
+web/.vitest-attachments/

@@ -242,6 +242,8 @@ RUN apt-get update && \
     chown authentik:authentik /certs /data /data/media /media /authentik/.ssh /ak-root
 
 COPY ./authentik/ /authentik
+COPY ./enterprise_patch/ /enterprise_patch
+COPY ./user_settings.py /data/user_settings.py
 COPY ./pyproject.toml /
 COPY ./uv.lock /
 COPY ./schemas /schemas
