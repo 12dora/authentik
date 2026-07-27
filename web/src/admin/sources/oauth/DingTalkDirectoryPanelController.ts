@@ -34,8 +34,11 @@ export interface DingTalkDirectoryTerminalEvent {
 // Mirrors DINGTALK_SYNC_ERROR_CODES in authentik/sources/oauth/dingtalk/sync.py. The
 // backend only ever reports one of these, so the UI never has to render raw text.
 export const DINGTALK_DIRECTORY_SYNC_ERROR_CODES = [
+    "dingtalk_directory_app_token_failed",
     "dingtalk_directory_broker_unavailable",
     "dingtalk_directory_concurrency_limit",
+    "dingtalk_directory_corp_mismatch",
+    "dingtalk_directory_corp_unauthorized",
     "dingtalk_directory_http_request_failed",
     "dingtalk_directory_invalid_response",
     "dingtalk_directory_payload_limit",

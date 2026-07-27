@@ -98,6 +98,23 @@ threshold, organization context should be marked stale. Stale data can still be
 returned so applications can make a local policy decision without forcing token
 issuance to depend on DingTalk availability.
 
+## Sync Failure Codes
+
+A failed sync stores a stable `error_code`, which the admin interface renders as a
+localized message. The codes that point at configuration rather than a transient fault:
+
+- `dingtalk_directory_corp_unauthorized` — the DingTalk app is not authorized for that
+  company. Authorize it in the DingTalk developer console.
+- `dingtalk_directory_corp_mismatch` — DingTalk did not confirm the requested company for
+  these app credentials. The directory endpoints are keyed only by the app token, so the
+  sync stops here rather than writing one company's directory into another's cache.
+  Check that the configured `corp_id` is the company this app is installed in.
+- `dingtalk_directory_app_token_failed` — the app token request failed. Check the source's
+  AppKey and AppSecret.
+- `dingtalk_directory_invalid_response` — DingTalk returned a payload the sync could not
+  parse. This is the catch-all; check the worker logs for the redacted detail and the
+  `error_correlation_id`.
+
 ## Rollout Checklist
 
 1. Confirm DingTalk app OpenAPI permissions.

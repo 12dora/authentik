@@ -25,7 +25,14 @@ from authentik.sources.oauth.models import (
     DingTalkDirectoryUserStage,
     OAuthSource,
 )
-from authentik.sources.oauth.types.dingtalk import fetch_dingtalk_org_auth_info
+from authentik.sources.oauth.types.dingtalk import (
+    DINGTALK_CORP_ID_ECHO_KEYS,
+    DingTalkAppTokenError,
+    DingTalkDepartmentCorpUnavailable,
+    DingTalkDepartmentLoadFailed,
+    extract_dingtalk_corp_ids,
+    fetch_dingtalk_org_auth_info,
+)
 
 LOGGER = get_logger()
 
@@ -34,8 +41,11 @@ DINGTALK_MAX_RAW_PAYLOAD_BYTES = 50 * 1024 * 1024
 DINGTALK_STAGE_BATCH_SIZE = 500
 DINGTALK_MAX_CONCURRENT_SYNCS = 4
 DINGTALK_CONCURRENCY_TIMEOUT = 15 * 60
+DINGTALK_SYNC_ERROR_APP_TOKEN_FAILED = "dingtalk_directory_app_token_failed"
 DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE = "dingtalk_directory_broker_unavailable"
 DINGTALK_SYNC_ERROR_CONCURRENCY_LIMIT = "dingtalk_directory_concurrency_limit"
+DINGTALK_SYNC_ERROR_CORP_MISMATCH = "dingtalk_directory_corp_mismatch"
+DINGTALK_SYNC_ERROR_CORP_UNAUTHORIZED = "dingtalk_directory_corp_unauthorized"
 DINGTALK_SYNC_ERROR_HTTP_REQUEST_FAILED = "dingtalk_directory_http_request_failed"
 DINGTALK_SYNC_ERROR_INVALID_RESPONSE = "dingtalk_directory_invalid_response"
 DINGTALK_SYNC_ERROR_PAYLOAD_LIMIT = "dingtalk_directory_payload_limit"
@@ -48,8 +58,11 @@ DINGTALK_SYNC_ERROR_USER_DETAIL_FAILED = "dingtalk_directory_user_detail_failed"
 DINGTALK_SYNC_ERROR_UNKNOWN = "dingtalk_directory_sync_failed"
 DINGTALK_SYNC_ERROR_CODES = frozenset(
     {
+        DINGTALK_SYNC_ERROR_APP_TOKEN_FAILED,
         DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE,
         DINGTALK_SYNC_ERROR_CONCURRENCY_LIMIT,
+        DINGTALK_SYNC_ERROR_CORP_MISMATCH,
+        DINGTALK_SYNC_ERROR_CORP_UNAUTHORIZED,
         DINGTALK_SYNC_ERROR_HTTP_REQUEST_FAILED,
         DINGTALK_SYNC_ERROR_INVALID_RESPONSE,
         DINGTALK_SYNC_ERROR_PAYLOAD_LIMIT,
@@ -110,29 +123,64 @@ def _bounded_error_params(params: dict[str, Any] | None) -> dict[str, Any]:
     return bounded
 
 
+def _http_error_params(exc: BaseException) -> dict[str, Any]:
+    status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    return {"status_code": status_code} if status_code is not None else {}
+
+
+# Failures that carry an operator-facing (and, for the corp one, translated) message.
+# Match them by type: substring matching would misclassify them under a non-English
+# locale, and would lump a bad app secret in with "DingTalk sent something unparseable".
+_SYNC_ERROR_BY_TYPE: tuple[tuple[type[Exception], str], ...] = (
+    (DingTalkDepartmentCorpUnavailable, DINGTALK_SYNC_ERROR_CORP_UNAUTHORIZED),
+    (DingTalkAppTokenError, DINGTALK_SYNC_ERROR_APP_TOKEN_FAILED),
+)
+
+# Failures raised as plain ValueErrors inside this package, matched on their own wording.
+_SYNC_ERROR_BY_MESSAGE: tuple[tuple[tuple[str, ...], str, dict[str, Any]], ...] = (
+    (
+        ("did not report a corp identity",),
+        DINGTALK_SYNC_ERROR_CORP_MISMATCH,
+        {"reason": "unverified"},
+    ),
+    (
+        ("reported a different corp identity",),
+        DINGTALK_SYNC_ERROR_CORP_MISMATCH,
+        {"reason": "mismatch"},
+    ),
+    (("concurrency budget",), DINGTALK_SYNC_ERROR_CONCURRENCY_LIMIT, {}),
+    (("user limit",), DINGTALK_SYNC_ERROR_USER_LIMIT, {}),
+    (("payload limit",), DINGTALK_SYNC_ERROR_PAYLOAD_LIMIT, {}),
+    (("user detail failed",), DINGTALK_SYNC_ERROR_USER_DETAIL_FAILED, {}),
+    (
+        ("no longer current", "deleted before it started"),
+        DINGTALK_SYNC_ERROR_RUN_STALE,
+        {},
+    ),
+    (("not a DingTalk OAuth source",), DINGTALK_SYNC_ERROR_UNSUPPORTED_SOURCE, {}),
+    (("source is disabled",), DINGTALK_SYNC_ERROR_SOURCE_DISABLED, {}),
+)
+
+
 def classify_dingtalk_sync_error(exc: Exception) -> tuple[str, dict[str, Any]]:
     """Return stable public error metadata for a DingTalk sync failure."""
     if isinstance(exc, RequestException):
-        status_code = getattr(getattr(exc, "response", None), "status_code", None)
-        params = {"status_code": status_code} if status_code is not None else {}
-        return DINGTALK_SYNC_ERROR_HTTP_REQUEST_FAILED, params
+        return DINGTALK_SYNC_ERROR_HTTP_REQUEST_FAILED, _http_error_params(exc)
+    for exc_type, error_code in _SYNC_ERROR_BY_TYPE:
+        if isinstance(exc, exc_type):
+            return error_code, {}
+    # The org lookup wraps its cause, so read through it rather than reporting a
+    # transport failure as an unparseable response.
+    if isinstance(exc, DingTalkDepartmentLoadFailed) and isinstance(
+        exc.__cause__, RequestException
+    ):
+        return DINGTALK_SYNC_ERROR_HTTP_REQUEST_FAILED, _http_error_params(exc.__cause__)
     if not isinstance(exc, ValueError):
         return DINGTALK_SYNC_ERROR_UNKNOWN, {"exception_type": type(exc).__name__}
     message = str(exc)
-    if "concurrency budget" in message:
-        return DINGTALK_SYNC_ERROR_CONCURRENCY_LIMIT, {}
-    if "user limit" in message:
-        return DINGTALK_SYNC_ERROR_USER_LIMIT, {}
-    if "payload limit" in message:
-        return DINGTALK_SYNC_ERROR_PAYLOAD_LIMIT, {}
-    if "user detail failed" in message:
-        return DINGTALK_SYNC_ERROR_USER_DETAIL_FAILED, {}
-    if "no longer current" in message or "deleted before it started" in message:
-        return DINGTALK_SYNC_ERROR_RUN_STALE, {}
-    if "not a DingTalk OAuth source" in message:
-        return DINGTALK_SYNC_ERROR_UNSUPPORTED_SOURCE, {}
-    if "source is disabled" in message:
-        return DINGTALK_SYNC_ERROR_SOURCE_DISABLED, {}
+    for fragments, error_code, params in _SYNC_ERROR_BY_MESSAGE:
+        if any(fragment in message for fragment in fragments):
+            return error_code, dict(params)
     return DINGTALK_SYNC_ERROR_INVALID_RESPONSE, {}
 
 
@@ -316,21 +364,26 @@ def normalize_dingtalk_user(raw: dict[str, Any], corp_id: str) -> dict[str, Any]
 
 
 def _verify_sync_corp(source: OAuthSource, corp_id: str, client: DingTalkDirectoryClient) -> None:
+    """Confirm the app credentials really speak for the corp this run writes into.
+
+    The directory endpoints used below are keyed only by the app token — none of them
+    takes a corp_id — so a token bound to corp B would happily fill corp A's cache rows.
+    This check is the only thing standing between that and the per-tenant isolation the
+    directory contract promises, so an unverifiable identity fails the run.
+    """
     org_info = fetch_dingtalk_org_auth_info(source, corp_id, session=client.session)
     raw = org_info.get("raw") if isinstance(org_info.get("raw"), dict) else {}
-    result = raw.get("result") if isinstance(raw.get("result"), dict) else {}
-    verified_corp_id = (
-        result.get("corpId")
-        or result.get("corp_id")
-        or result.get("authCorpId")
-        or result.get("auth_corp_id")
-        or raw.get("corpId")
-        or raw.get("corp_id")
-    )
-    if not verified_corp_id:
-        raise ValueError("DingTalk organization verification did not include corp identity.")
-    if str(verified_corp_id) != corp_id:
-        raise ValueError("DingTalk organization verification returned a different corp_id.")
+    verified_corp_ids = extract_dingtalk_corp_ids(raw)
+    if not verified_corp_ids:
+        # Some app types only echo back the corp the request asked about. DingTalk
+        # answering at all for that targetCorpId already means the app is authorized for
+        # it, so accept the echo rather than failing over a response shape — but only
+        # once the response has stated no corp identity of its own to check against.
+        verified_corp_ids = extract_dingtalk_corp_ids(raw, keys=DINGTALK_CORP_ID_ECHO_KEYS)
+    if not verified_corp_ids:
+        raise ValueError("DingTalk organization verification did not report a corp identity.")
+    if corp_id not in verified_corp_ids:
+        raise ValueError("DingTalk organization verification reported a different corp identity.")
 
 
 def _iter_departments(client: DingTalkDirectoryClient) -> Iterator[dict[str, Any]]:

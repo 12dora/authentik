@@ -11475,6 +11475,15 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>Search for <x id="0" equiv-text="${pluralNoun}"/>...</source>
   <note from="lit-localize">Placeholder text for the search input, where the entity plural is interpolated.</note>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.app-token-failed">
+  <source>Could not get an app access token from DingTalk. Check the AppKey and AppSecret on this source.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.corp-mismatch">
+  <source>DingTalk did not confirm this company for the app credentials on this source, so the sync stopped before writing any directory data. Check that the company ID belongs to the company this DingTalk app is installed in.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.corp-unauthorized">
+  <source>This DingTalk application is not authorized for that company. Authorize it in the DingTalk developer console, then sync again.</source>
+</trans-unit>
 </body>
 </file>
 </xliff>

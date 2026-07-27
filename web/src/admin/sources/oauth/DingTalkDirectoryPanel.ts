@@ -539,6 +539,11 @@ export class DingTalkDirectoryPanel extends AKElement {
     // so the table and the notifications never surface `dingtalk_directory_*` verbatim.
     private localizeSyncError(code: DingTalkDirectorySyncErrorCode | null): string {
         switch (code) {
+            case "dingtalk_directory_app_token_failed":
+                return msg(
+                    "Could not get an app access token from DingTalk. Check the AppKey and AppSecret on this source.",
+                    { id: "sources.oauth.dingtalk-directory.sync-error.app-token-failed" },
+                );
             case "dingtalk_directory_broker_unavailable":
                 return msg(
                     "The background task broker is unavailable, so this directory sync could not be queued. Try again later.",
@@ -548,6 +553,16 @@ export class DingTalkDirectoryPanel extends AKElement {
                 return msg(
                     "Too many DingTalk directory syncs are already running. Try again once one of them finishes.",
                     { id: "sources.oauth.dingtalk-directory.sync-error.concurrency-limit" },
+                );
+            case "dingtalk_directory_corp_mismatch":
+                return msg(
+                    "DingTalk did not confirm this company for the app credentials on this source, so the sync stopped before writing any directory data. Check that the company ID belongs to the company this DingTalk app is installed in.",
+                    { id: "sources.oauth.dingtalk-directory.sync-error.corp-mismatch" },
+                );
+            case "dingtalk_directory_corp_unauthorized":
+                return msg(
+                    "This DingTalk application is not authorized for that company. Authorize it in the DingTalk developer console, then sync again.",
+                    { id: "sources.oauth.dingtalk-directory.sync-error.corp-unauthorized" },
                 );
             case "dingtalk_directory_http_request_failed":
                 return msg(

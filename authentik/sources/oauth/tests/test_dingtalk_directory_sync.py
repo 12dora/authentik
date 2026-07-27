@@ -13,12 +13,16 @@ from structlog.testing import capture_logs
 from authentik.core.tests.utils import create_test_user
 from authentik.sources.oauth.dingtalk.selectors import get_dingtalk_org_context
 from authentik.sources.oauth.dingtalk.sync import (
+    DINGTALK_SYNC_ERROR_APP_TOKEN_FAILED,
     DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE,
+    DINGTALK_SYNC_ERROR_CORP_MISMATCH,
+    DINGTALK_SYNC_ERROR_CORP_UNAUTHORIZED,
     DINGTALK_SYNC_ERROR_HTTP_REQUEST_FAILED,
     DINGTALK_SYNC_ERROR_INVALID_RESPONSE,
     DINGTALK_SYNC_ERROR_SOURCE_DISABLED,
     _publish_snapshot,
     _start_sync_run,
+    classify_dingtalk_sync_error,
     finalize_dingtalk_directory_sync_error,
     queue_dingtalk_directory_sync,
     safe_dingtalk_sync_error,
@@ -36,8 +40,20 @@ from authentik.sources.oauth.models import (
 )
 from authentik.sources.oauth.tasks import dingtalk_directory_sync as dingtalk_directory_sync_task
 from authentik.sources.oauth.tasks import dingtalk_directory_sync_all
+from authentik.sources.oauth.types.dingtalk import (
+    DINGTALK_CORP_ID_ECHO_KEYS,
+    DingTalkAppTokenError,
+    DingTalkDepartmentCorpUnavailable,
+    DingTalkDepartmentLoadFailed,
+    extract_dingtalk_corp_ids,
+)
 
-ORG_AUTH_CORP = {"raw": {"result": {"corpId": "CORP"}}, "label": "Example"}
+# Mirrors what /v1.0/contact/organizations/authInfos actually returns: the corp identity
+# is nested under an envelope and spelled `corpid`, not `result.corpId`.
+ORG_AUTH_CORP = {
+    "raw": {"auth_org_info": {"corpid": "CORP", "corp_name": "Example"}},
+    "label": "Example",
+}
 
 
 class TestDingTalkDirectoryModels(TestCase):
@@ -200,6 +216,67 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertIsNotNone(status.error_correlation_id)
         self.assertEqual(status.generation, 7)
         self.assertIsNone(status.last_success_at)
+
+    @patch("authentik.sources.oauth.dingtalk.sync.fetch_dingtalk_org_auth_info")
+    @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
+    def test_corp_verification_accepts_every_shape_dingtalk_reports_the_corp_in(
+        self, client_cls, org_auth_mock
+    ):
+        """authInfos nests and spells the corp id differently per API generation and app type."""
+        client_cls.return_value.iter_departments.return_value = []
+        client_cls.return_value.iter_department_users.return_value = []
+        for raw in [
+            {"auth_org_info": {"corpid": "CORP"}},
+            {"authCorpInfo": {"corpid": "CORP", "corpName": "Example"}},
+            {"authInfos": [{"targetCorpId": "CORP", "contactName": "Example"}]},
+            {"result": {"corpId": "CORP"}},
+            {"corp_id": "CORP"},
+        ]:
+            with self.subTest(raw=raw):
+                org_auth_mock.return_value = {"raw": raw, "label": "Example"}
+
+                sync_dingtalk_directory(self.source, corp_id="CORP")
+
+                status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
+                self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.SUCCESS)
+
+    @patch("authentik.sources.oauth.dingtalk.sync.fetch_dingtalk_org_auth_info")
+    @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
+    def test_authorization_and_credential_failures_are_reported_distinctly(
+        self, client_cls, org_auth_mock
+    ):
+        """These used to collapse into "DingTalk returned an invalid directory response"."""
+        client_cls.return_value.iter_departments.return_value = []
+        for exc, expected in [
+            (
+                DingTalkDepartmentCorpUnavailable("not authorized"),
+                DINGTALK_SYNC_ERROR_CORP_UNAUTHORIZED,
+            ),
+            (
+                DingTalkAppTokenError("app token request failed."),
+                DINGTALK_SYNC_ERROR_APP_TOKEN_FAILED,
+            ),
+        ]:
+            with self.subTest(error=type(exc).__name__):
+                org_auth_mock.side_effect = exc
+
+                with self.assertRaises(ValueError):
+                    sync_dingtalk_directory(self.source, corp_id="CORP")
+
+                status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
+                self.assertEqual(status.error_code, expected)
+
+    def test_org_lookup_transport_failure_is_reported_as_an_http_failure(self):
+        """DingTalkDepartmentLoadFailed wraps the real cause; keep the cause's meaning."""
+        response = Response()
+        response.status_code = 503
+        exc = DingTalkDepartmentLoadFailed("DingTalk organization lookup failed.")
+        exc.__cause__ = HTTPError(response=response)
+
+        code, params = classify_dingtalk_sync_error(exc)
+
+        self.assertEqual(code, DINGTALK_SYNC_ERROR_HTTP_REQUEST_FAILED)
+        self.assertEqual(params, {"status_code": 503})
 
     def test_out_of_order_run_cannot_publish_over_newer_snapshot(self):
         first_started = now()
@@ -477,28 +554,39 @@ class TestDingTalkDirectorySync(TestCase):
     @patch("authentik.sources.oauth.dingtalk.sync.fetch_dingtalk_org_auth_info")
     @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
     def test_corp_verification_mismatch_does_not_publish(self, client_cls, org_auth_mock):
-        org_auth_mock.return_value = {"raw": {"result": {"corpId": "OTHER"}}}
+        # The echoed targetCorpId is the value this request sent, so it must not vouch
+        # for a response that names a different corp as the authorized one.
+        org_auth_mock.return_value = {
+            "raw": {
+                "auth_org_info": {"corpid": "OTHER"},
+                "authInfos": [{"targetCorpId": "CORP"}],
+            }
+        }
         client_cls.return_value.iter_departments.return_value = []
 
-        with self.assertRaisesMessage(ValueError, "different corp_id"):
+        with self.assertRaisesMessage(ValueError, "different corp identity"):
             sync_dingtalk_directory(self.source, corp_id="CORP")
 
         status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
         self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.ERROR)
+        self.assertEqual(status.error_code, DINGTALK_SYNC_ERROR_CORP_MISMATCH)
+        self.assertEqual(status.error_params["reason"], "mismatch")
         self.assertEqual(status.generation, 0)
         self.assertFalse(DingTalkDirectoryUser.objects.filter(corp_id="CORP").exists())
 
     @patch("authentik.sources.oauth.dingtalk.sync.fetch_dingtalk_org_auth_info")
     @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
     def test_corp_verification_requires_response_identity(self, client_cls, org_auth_mock):
-        org_auth_mock.return_value = {"raw": {"result": {"corpName": "Example"}}}
+        org_auth_mock.return_value = {"raw": {"authUserInfo": {"userId": "USER"}}}
         client_cls.return_value.iter_departments.return_value = []
 
-        with self.assertRaisesMessage(ValueError, "did not include corp identity"):
+        with self.assertRaisesMessage(ValueError, "did not report a corp identity"):
             sync_dingtalk_directory(self.source, corp_id="CORP")
 
         status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
         self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.ERROR)
+        self.assertEqual(status.error_code, DINGTALK_SYNC_ERROR_CORP_MISMATCH)
+        self.assertEqual(status.error_params["reason"], "unverified")
 
     @patch("authentik.sources.oauth.dingtalk.sync.DINGTALK_MAX_SYNC_USERS", 0)
     @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
@@ -635,6 +723,46 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertEqual(status.error, DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE)
         self.assertEqual(status.error_code, DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE)
         self.assertIsNotNone(status.error_correlation_id)
+
+
+class TestDingTalkCorpIdExtraction(TestCase):
+    def test_collects_every_spelling_and_nesting_of_the_corp_id(self):
+        self.assertEqual(
+            extract_dingtalk_corp_ids(
+                {
+                    "authCorpInfo": {"corpid": "A"},
+                    "result": {"auth_corp_id": "B"},
+                }
+            ),
+            {"A", "B"},
+        )
+
+    def test_ignores_the_echoed_request_corp_unless_asked_for_it(self):
+        """The echo is the value we sent, so it must not vouch for a contradicting response."""
+        raw = {"authCorpInfo": {"corpid": "REAL"}, "authInfos": [{"targetCorpId": "REQUESTED"}]}
+
+        self.assertEqual(extract_dingtalk_corp_ids(raw), {"REAL"})
+        self.assertEqual(
+            extract_dingtalk_corp_ids(raw, keys=DINGTALK_CORP_ID_ECHO_KEYS), {"REQUESTED"}
+        )
+
+    def test_normalizes_numeric_ids_and_ignores_non_identifier_values(self):
+        self.assertEqual(
+            extract_dingtalk_corp_ids(
+                {"corpId": 12345, "nested": {"corp_id": True, "other": {"corpid": ""}}}
+            ),
+            {"12345"},
+        )
+
+    def test_stops_walking_beyond_the_depth_bound(self):
+        deep: dict = {"corpid": "DEEP"}
+        for _ in range(12):
+            deep = {"nested": deep}
+
+        self.assertEqual(extract_dingtalk_corp_ids(deep), set())
+
+    def test_returns_empty_for_payloads_without_a_corp_identity(self):
+        self.assertEqual(extract_dingtalk_corp_ids({"authUserInfo": {"userId": "USER"}}), set())
 
 
 class TestDingTalkOrgContext(TestCase):

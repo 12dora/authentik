@@ -209,6 +209,21 @@ describe("dingtalkDirectorySyncErrorCode", () => {
             ),
         ).toBe("dingtalk_directory_sync_failed");
     });
+
+    it.each([
+        "dingtalk_directory_app_token_failed",
+        "dingtalk_directory_corp_mismatch",
+        "dingtalk_directory_corp_unauthorized",
+    ])(
+        // These name a specific thing the operator has to go fix, so collapsing them into
+        // the generic code would put the admin back to guessing.
+        "keeps the actionable %s code instead of collapsing it",
+        (errorCode) => {
+            expect(
+                dingtalkDirectorySyncErrorCode(makeSyncStatus("corp-a", "error", { errorCode })),
+            ).toBe(errorCode);
+        },
+    );
 });
 
 describe("DINGTALK_DIRECTORY_SYNC_DESTROY_CONTRACT", () => {

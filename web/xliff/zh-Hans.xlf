@@ -13061,6 +13061,18 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>Search for <x id="0" equiv-text="${pluralNoun}"/>...</source>
   <note from="lit-localize">Placeholder text for the search input, where the entity plural is interpolated.</note>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.app-token-failed">
+  <source>Could not get an app access token from DingTalk. Check the AppKey and AppSecret on this source.</source>
+  <target>无法从钉钉获取应用访问令牌。请检查此源配置的 AppKey 与 AppSecret。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.corp-mismatch">
+  <source>DingTalk did not confirm this company for the app credentials on this source, so the sync stopped before writing any directory data. Check that the company ID belongs to the company this DingTalk app is installed in.</source>
+  <target>钉钉未能为此源的应用凭据确认该企业，同步已在写入任何目录数据前停止。请确认企业 ID 属于安装了此钉钉应用的企业。</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.corp-unauthorized">
+  <source>This DingTalk application is not authorized for that company. Authorize it in the DingTalk developer console, then sync again.</source>
+  <target>此钉钉应用未获得该企业的授权。请先在钉钉开发者后台完成授权，然后重新同步。</target>
+</trans-unit>
 </body>
 </file>
 </xliff>

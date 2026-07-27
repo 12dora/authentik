@@ -62,6 +62,19 @@ DINGTALK_ALLOWLIST_SESSION_KEY = "authentik/sources/oauth/dingtalk/allowlist"
 DINGTALK_ALLOWLIST_PLAN_CONTEXT = "authentik/sources/oauth/dingtalk/allowlist/pending"
 DINGTALK_ALLOWLIST_STATE_SALT = "authentik.sources.oauth.dingtalk.allowlist"
 DINGTALK_INVALID_TOKEN_CODES = {40014, 42001}
+# Keys under which DingTalk states which corp a response is actually about.
+DINGTALK_CORP_ID_KEYS = (
+    "corpId",
+    "corpid",
+    "corp_id",
+    "authCorpId",
+    "authCorpid",
+    "auth_corp_id",
+)
+# Keys that merely echo the corp the request asked about. Weaker evidence, so only
+# consulted when the response states no corp identity of its own.
+DINGTALK_CORP_ID_ECHO_KEYS = ("targetCorpId", "target_corp_id")
+DINGTALK_CORP_ID_MAX_DEPTH = 8
 # DingTalk app tokens are valid for 7200s; refresh slightly early to avoid edge expiry.
 DINGTALK_APP_TOKEN_CACHE_TTL = 7000
 DINGTALK_APP_TOKEN_LEASE_TTL = 30
@@ -115,6 +128,37 @@ def _redact_dingtalk_detail(value: Any) -> str:
 
 def _normalize_id_list(value: Any) -> list[str]:
     return normalize_dingtalk_id_list(value)
+
+
+def extract_dingtalk_corp_ids(data: Any, keys: tuple[str, ...] = DINGTALK_CORP_ID_KEYS) -> set[str]:
+    """Collect every corp identifier a DingTalk organization response reports.
+
+    The org endpoints spell the corp identity differently per API generation
+    (`corpid` on the v1.0 contact APIs, `corpId`/`corp_id` on the legacy oapi ones) and
+    nest it under a different envelope per app type (`authCorpInfo`, `auth_org_info`,
+    `authInfos[]`, `result`, ...). Walk the whole payload instead of guessing one path,
+    the way _extract_dingtalk_corp_label already does for the display name.
+    """
+    found: set[str] = set()
+
+    def walk(value: Any, depth: int) -> None:
+        if depth > DINGTALK_CORP_ID_MAX_DEPTH:
+            return
+        if isinstance(value, dict):
+            for key in keys:
+                corp_id = value.get(key)
+                if isinstance(corp_id, bool) or not isinstance(corp_id, str | int):
+                    continue
+                if str(corp_id):
+                    found.add(str(corp_id))
+            for nested in value.values():
+                walk(nested, depth + 1)
+        elif isinstance(value, list | tuple):
+            for nested in value:
+                walk(nested, depth + 1)
+
+    walk(data, 0)
+    return found
 
 
 def _extract_dingtalk_corp_label(data: dict[str, Any]) -> str:
