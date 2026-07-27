@@ -43,7 +43,7 @@ request, then hard-refresh the browser when the user is looking at an already-op
 
 ```bash
 curl -fsSL -H 'Cache-Control: no-cache' \
-  https://auth.jiefakj.com/static/dist/admin/AdminInterface-2026.8.0-rc1.js \
+  https://auth.jiefakj.com/static/dist/admin/AdminInterface-2026.5.6.js \
   | rg 'src/admin/sources/chunks'
 ```
 
