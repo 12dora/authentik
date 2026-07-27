@@ -199,7 +199,7 @@ export class BoundPoliciesList<T extends PolicyBinding = PolicyBinding> extends 
                 bindingTarget: this.target,
             })}
         >
-            ${msg("Create or bind...")}
+            ${msg("Create or bind")}
         </button>`;
     }
 
