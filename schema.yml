@@ -34709,7 +34709,6 @@ components:
       - authentik.tasks.schedules
       - authentik.brands
       - authentik.blueprints
-      - authentik.custom.easyauth
       - authentik.enterprise.audit
       - authentik.enterprise.endpoints.connectors.agent
       - authentik.enterprise.endpoints.connectors.fleet
@@ -34727,6 +34726,7 @@ components:
       - authentik.enterprise.stages.authenticator_endpoint_gdtc
       - authentik.enterprise.stages.mtls
       - authentik.enterprise.stages.source
+      - authentik.custom.easyauth
       type: string
     AppleChallengeResponseRequest:
       type: object
@@ -38448,9 +38448,15 @@ components:
           nullable: true
         error:
           type: string
+          readOnly: true
         error_code:
           type: string
-        error_params: {}
+          readOnly: true
+        error_params:
+          type: object
+          additionalProperties:
+            type: string
+          readOnly: true
         error_correlation_id:
           type: string
           format: uuid
@@ -38461,6 +38467,9 @@ components:
       required:
       - corp_id
       - counters
+      - error
+      - error_code
+      - error_params
       - status
     DingTalkDirectorySyncStatusStatusEnum:
       enum:

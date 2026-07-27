@@ -542,10 +542,6 @@
 <trans-unit id="sd9b15395dd103f80">
   <source>Sort by "<x id="0" equiv-text="${label}"/>"</source>
 </trans-unit>
-<trans-unit id="s7bc8c327f1f7c82c">
-  <source>No objects found.</source>
-  <target>Объекты не найдены.</target>
-</trans-unit>
 <trans-unit id="sfd44ce578f643145">
   <source>Failed to fetch objects.</source>
   <target>Не удалось получить объекты.</target>
@@ -1204,9 +1200,6 @@
 </trans-unit>
 <trans-unit id="s972540f502b0f4dc">
   <source>Application Name</source>
-</trans-unit>
-<trans-unit id="s704091f8e3dbd721">
-  <source>The name displayed in the application library.</source>
 </trans-unit>
 <trans-unit id="s91f70424f5d5d23e">
   <source>Slug</source>
@@ -2254,9 +2247,6 @@
 </trans-unit>
 <trans-unit id="s24d7ac2fc280ca5e">
   <source>Authenticate SCIM requests using a static token.</source>
-</trans-unit>
-<trans-unit id="s0e1641692e0dac94">
-  <source>OAuth</source>
 </trans-unit>
 <trans-unit id="s1c34cb0a4cccc041">
   <source>Authenticate SCIM requests using OAuth.</source>
@@ -3469,25 +3459,9 @@ doesn't pass when either or both of the selected options are equal or above the 
   <source>EntityID/Issuer</source>
   <target>Идентификатор объекта/эмитент</target>
 </trans-unit>
-<trans-unit id="scd2984ee5552643a">
-  <source>SSO URL (Post)</source>
-  <target>URL единого входа (публикация)</target>
-</trans-unit>
-<trans-unit id="saa79b47f60c66458">
-  <source>SSO URL (Redirect)</source>
-  <target>URL единого входа (перенаправление)</target>
-</trans-unit>
 <trans-unit id="s2da51a6287118ba8">
   <source>SSO URL (IdP-initiated Login)</source>
   <target>SSO URL (инициируемый IDP вход)</target>
-</trans-unit>
-<trans-unit id="s0a57e911e457302b">
-  <source>SLO URL (Post)</source>
-  <target>URL-адрес SLO (сообщение)</target>
-</trans-unit>
-<trans-unit id="s1e7308bb1ca323e1">
-  <source>SLO URL (Redirect)</source>
-  <target>URL-адрес SLO (сообщение)</target>
 </trans-unit>
 <trans-unit id="sd2c58d7c6dddc515">
   <source>SAML Metadata</source>
@@ -5381,10 +5355,6 @@ doesn't pass when either or both of the selected options are equal or above the 
 <trans-unit id="sfcebd18506f1e535">
   <source>Flow</source>
   <target>Поток</target>
-</trans-unit>
-<trans-unit id="sa84a7fd11ba85e88">
-  <source>When selected, the invite will only be usable with the flow. By default the invite is accepted on all flows with invitation stages.</source>
-  <target>Если выбран этот пункт, приглашение можно будет использовать только в этом потоке. По умолчанию приглашение принимается во всех потоках с этапами приглашения.</target>
 </trans-unit>
 <trans-unit id="sd18b18f91b804c3f">
   <source>Custom attributes</source>
@@ -7520,14 +7490,8 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>Overall license status</source>
   <target>Общий статус лицензии</target>
 </trans-unit>
-<trans-unit id="sc4804358f202968c">
-  <source>Internal user usage</source>
-</trans-unit>
 <trans-unit id="s087d6f07b52b30ec">
   <source><x id="0" equiv-text="${internalUserPercentage &lt; Infinity ? internalUserPercentage : &quot;∞&quot;}"/>%</source>
-</trans-unit>
-<trans-unit id="sae72e1569d34fb02">
-  <source>External user usage</source>
 </trans-unit>
 <trans-unit id="s2e109263b73c12d5">
   <source>Licenses</source>
@@ -9510,12 +9474,6 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sdfe21d69a2da53f4">
   <source>e.g. my-application</source>
 </trans-unit>
-<trans-unit id="s96d43986e69a9db8">
-  <source>The publisher is shown in the application library.</source>
-</trans-unit>
-<trans-unit id="s4107487a961394e2">
-  <source>The description is shown in the application library and may provide additional information about the application to end users.</source>
-</trans-unit>
 <trans-unit id="sfafe0cba4a679e37">
   <source>Select Groups</source>
 </trans-unit>
@@ -10320,15 +10278,6 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="s4fd2fe9adfd426e9">
   <source>Select an option...</source>
 </trans-unit>
-<trans-unit id="s4a45bb66596356ce">
-  <source>Choose <x id="0" equiv-text="${this.verboseName}"/> Type</source>
-</trans-unit>
-<trans-unit id="sdec65ee663d8a048">
-  <source>Choose type</source>
-</trans-unit>
-<trans-unit id="s32db18dac74db6c3">
-  <source><x id="0" equiv-text="${entityLabel}"/> Details</source>
-</trans-unit>
 <trans-unit id="s195ea6447a6b5486">
   <source>Cancel wizard</source>
 </trans-unit>
@@ -10345,17 +10294,9 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>Wizard</source>
   <note from="lit-localize">ARIA label for the creation wizard when no entity singular is provided.</note>
 </trans-unit>
-<trans-unit id="wizard.ariaLabel.entity-singular">
-  <source>New <x id="0" equiv-text="${verboseName}"/> Wizard</source>
-  <note from="lit-localize">ARIA label for the creation wizard, where the entity singular is interpolated.</note>
-</trans-unit>
 <trans-unit id="wizard.header.default">
   <source>Create New Entity</source>
   <note from="lit-localize">Header for the creation wizard when no entity singular is provided.</note>
-</trans-unit>
-<trans-unit id="wizard.header.entity-singular">
-  <source>Create New <x id="0" equiv-text="${verboseName}"/></source>
-  <note from="lit-localize">Header for the creation wizard, where the entity singular is interpolated.</note>
 </trans-unit>
 <trans-unit id="form.submitting">
   <source><x id="0" equiv-text="${submittingVerb} ${verboseName}"/>...</source>
@@ -10441,9 +10382,6 @@ Bindings to groups/users are checked against the user of the event.</source>
 </trans-unit>
 <trans-unit id="s2b9ad6a5bc47ea5d">
   <source>Create or bind...</source>
-</trans-unit>
-<trans-unit id="s9ec971c7789af83a">
-  <source>Bind New Stage</source>
 </trans-unit>
 <trans-unit id="s0bc6ba00a01970db">
   <source>Select the type of stage you want to create.</source>
@@ -10731,15 +10669,6 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="s02b73793e5b4e1ba">
   <source>This flag is deprecated.</source>
 </trans-unit>
-<trans-unit id="s8655c52824caac63">
-  <source>If checked, the launch URL will open in a new browser tab or window from the user's application library.</source>
-</trans-unit>
-<trans-unit id="s9eda7101f63a8652">
-  <source>Hide from My applications</source>
-</trans-unit>
-<trans-unit id="s30f30e9c42594a33">
-  <source>If checked, this application will not be shown on the user's My applications page.</source>
-</trans-unit>
 <trans-unit id="sc98037ccab57d329">
   <source>No preference: the browser may offer any available authenticator</source>
 </trans-unit>
@@ -10755,83 +10684,17 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="s1baea1b8ac34d554">
   <source>New Invitation</source>
 </trans-unit>
-<trans-unit id="s03eef6107e28d042">
-  <source>New Invitation options</source>
-</trans-unit>
-<trans-unit id="s0832ff81b9665e6f">
-  <source>Opens the new invitation wizard and binds the invitation to an existing enrollment flow.</source>
-</trans-unit>
-<trans-unit id="sc0819dc3d82d9320">
-  <source>with Existing Enrollment Flow...</source>
-</trans-unit>
-<trans-unit id="s79108cb25e7bf07b">
-  <source>Opens the new invitation wizard, which will create a new enrollment flow and invitation stage.</source>
-</trans-unit>
-<trans-unit id="sb7809157a3ccf613">
-  <source>with New Enrollment Flow and Invitation Stage...</source>
-</trans-unit>
-<trans-unit id="seb418067e7d6c6e2">
-  <source>Create a new invitation with an enrollment flow.</source>
-</trans-unit>
 <trans-unit id="sfd74a380e957d0d3">
   <source>Enrollment Flow</source>
 </trans-unit>
 <trans-unit id="scc869d556216d748">
   <source>Invitation Details</source>
 </trans-unit>
-<trans-unit id="se1fba44a9b284052">
-  <source>Invitation Link</source>
-</trans-unit>
-<trans-unit id="s967a2db7049dc90e">
-  <source><x id="0" equiv-text="${step}"/> failed</source>
-</trans-unit>
-<trans-unit id="s971d4cc0ecd106b7">
-  <source>Importing enrollment flow blueprint</source>
-</trans-unit>
 <trans-unit id="sf3b89a70e20af6c8">
   <source>Blueprint validation failed</source>
 </trans-unit>
 <trans-unit id="sa04b7204708f4f74">
-  <source>Flow with slug "<x id="0" equiv-text="${slugToLookup}"/>" not found after import</source>
-</trans-unit>
-<trans-unit id="s3354be88ad29d171">
-  <source>Creating invitation</source>
-</trans-unit>
-<trans-unit id="s07f41353777196ea">
-  <source>The flow selected in the previous step. The invitation will be bound to this flow.</source>
-</trans-unit>
-<trans-unit id="s7209a11f97da9aff">
-  <source>No invitation available to send</source>
-</trans-unit>
-<trans-unit id="s2772d8285b905006">
-  <source>Failed to queue invitation emails</source>
-</trans-unit>
-<trans-unit id="s3b7910ab9c47a2e3">
-  <source>No enrollment flows with invitation stages found</source>
-</trans-unit>
-<trans-unit id="sa3ca03297e00591c">
-  <source>You can create a new enrollment flow and invitation stage right here, or cancel and bind an invitation stage to an existing flow manually.</source>
-</trans-unit>
-<trans-unit id="s06db43e56ca76be8">
-  <source>Create a new enrollment flow</source>
-</trans-unit>
-<trans-unit id="s8acc687c55e8ccbf">
-  <source>Only enrollment flows that have an invitation stage bound to them are listed here.</source>
-</trans-unit>
-<trans-unit id="s5b3bafd8ffe553ec">
-  <source>Flow name</source>
-</trans-unit>
-<trans-unit id="s699cd34b0dcb4c56">
-  <source>Name for the new enrollment flow.</source>
-</trans-unit>
-<trans-unit id="s8fb6d1bb698d32a0">
-  <source>Flow slug</source>
-</trans-unit>
-<trans-unit id="s0211c07612cf8c97">
-  <source>Invitation stage name</source>
-</trans-unit>
-<trans-unit id="s42b97ef63fb1a795">
-  <source>Name for the new invitation stage.</source>
+  <source>Flow with slug "<x id="0" equiv-text="${data.slug}"/>" not found after import</source>
 </trans-unit>
 <trans-unit id="saaa9fd0d3ebc35aa">
   <source>Enrolled users are created as external (e.g. customers, guests). New users will be placed under users/external.</source>
@@ -10841,9 +10704,6 @@ Bindings to groups/users are checked against the user of the event.</source>
 </trans-unit>
 <trans-unit id="sc1358130ac327120">
   <source>If enabled, the stage will jump to the next stage when no invitation is given. If disabled, the flow will be cancelled without a valid invitation.</source>
-</trans-unit>
-<trans-unit id="s09fdd952c6eaf7da">
-  <source>No invitation was created.</source>
 </trans-unit>
 <trans-unit id="s00febd85a4889bb1">
   <source>Redirect the user to a static URL or another flow, optionally with all gathered context.</source>
@@ -10857,20 +10717,77 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="se2f00b2619675217">
   <source>Failed to load element</source>
 </trans-unit>
-<trans-unit id="s1cf2298d92c327a6">
-  <source>My Applications</source>
+<trans-unit id="s2736fa38f8fb1b04">
+  <source>The name displayed in the Application Dashboard.</source>
 </trans-unit>
-<trans-unit id="s2656433a3b1f7e86">
-  <source>My applications</source>
+<trans-unit id="sb8bbbd3b5cd45ad2">
+  <source>If checked, the launch URL will open in a new browser tab or window from the user's Application Dashboard.</source>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.departments.table.aria-label">
-  <source>DingTalk department hierarchy</source>
+<trans-unit id="s55272b9955f1d985">
+  <source>Hide from Application Dashboard</source>
 </trans-unit>
-<trans-unit id="sources.oauth.view.error.load">
-  <source>Failed to load OAuth source.</source>
+<trans-unit id="s4e8256e5793952d7">
+  <source>If checked, this application will not be shown on the user's Application Dashboard.</source>
 </trans-unit>
-<trans-unit id="common.actions.retry">
-  <source>Retry</source>
+<trans-unit id="s7d9707524fb7e539">
+  <source>The publisher is shown in the Application Dashboard.</source>
+</trans-unit>
+<trans-unit id="sf04a246ad842c3cf">
+  <source>The description is shown in the Application Dashboard and may provide additional information about the application to end users.</source>
+</trans-unit>
+<trans-unit id="s4891ccdb173626ba">
+  <source>Internal user usage (<x id="0" equiv-text="${currentInternalUsers}"/>/<x id="1" equiv-text="${licensedInternalUsers}"/>)</source>
+</trans-unit>
+<trans-unit id="scad748da438c56d4">
+  <source>External user usage (<x id="0" equiv-text="${currentExternalUsers}"/>/<x id="1" equiv-text="${licensedExternalUsers}"/>)</source>
+</trans-unit>
+<trans-unit id="sb365ccab0f270879">
+  <source>Create or bind</source>
+</trans-unit>
+<trans-unit id="s71fed01f96762c78">
+  <source>Connection Token</source>
+</trans-unit>
+<trans-unit id="s2a27b0acaaccd6b1">
+  <source>Connection Tokens</source>
+</trans-unit>
+<trans-unit id="sac974f7c36f0c5c1">
+  <source>SAML Endpoint</source>
+</trans-unit>
+<trans-unit id="sfb0aa7e424580866">
+  <source>SAML provider endpoint. Use this URL for SP configuration.</source>
+</trans-unit>
+<trans-unit id="s7cbd6ddbb3cdbda4">
+  <source>OAuth (Silent)</source>
+</trans-unit>
+<trans-unit id="sf74719393c9d600b">
+  <source>OAuth (Interactive)</source>
+</trans-unit>
+<trans-unit id="s364366c872ccd349">
+  <source>Authenticate SCIM requests using OAuth, interactively authorized.</source>
+</trans-unit>
+<trans-unit id="s67dbb822a17bf6fc">
+  <source>OAuth Token last updated</source>
+</trans-unit>
+<trans-unit id="sb586db2f11959745">
+  <source>OAuth Token expires</source>
+</trans-unit>
+<trans-unit id="s4011de0d7365d106">
+  <source>OAuth Status</source>
+</trans-unit>
+<trans-unit id="s169a1a1dce3987b8">
+  <source>Authenticated</source>
+</trans-unit>
+<trans-unit id="s02e7dfce69646f50">
+  <source>No token saved</source>
+</trans-unit>
+<trans-unit id="sde2c41117de5db9d">
+  <source>(Re-)authenticate</source>
+</trans-unit>
+<trans-unit id="s13c4adf0d185f12e">
+  <source>OAuth Callback URL</source>
+</trans-unit>
+<trans-unit id="s633e3919f46a8cd3">
+  <source>View details of role "<x id="0" equiv-text="${item.name}"/>"</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.status.departments.label">
   <source>Last department fetch</source>
@@ -10884,8 +10801,11 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-allowlist.status.unknown">
   <source>Unknown</source>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.failed">
-  <source>DingTalk discovery failed.</source>
+<trans-unit id="sources.oauth.dingtalk-allowlist.read-only">
+  <source>You can view this DingTalk allowlist, but you need permission to change this OAuth source before editing or applying changes.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.read-only.toast">
+  <source>You do not have permission to change this DingTalk allowlist.</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.discovery.missing-corp-id">
   <source>DingTalk discovery did not return a company ID.</source>
@@ -10914,6 +10834,9 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-allowlist.discovery.popup-blocked">
   <source>The DingTalk discovery popup was blocked. Allow popups for this site and try again.</source>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.failed">
+  <source>DingTalk discovery failed.</source>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.status.good.loaded">
   <source>Loaded</source>
 </trans-unit>
@@ -10926,8 +10849,50 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-allowlist.save.success">
   <source>DingTalk allowlist saved and applied.</source>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.remove.header">
+  <source>Remove DingTalk allowlist</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.remove.body">
+  <source>This deletes the managed allowlist policy and all of its flow bindings. All DingTalk logins will then be denied until a new allowlist is saved and applied.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.remove.action">
+  <source>Remove allowlist</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.remove.success">
+  <source>DingTalk allowlist policy and bindings removed.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.remove.error">
+  <source>Failed to remove the DingTalk allowlist policy.</source>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.departments.unauthorized-corp">
   <source>DingTalk departments can only be loaded for a company authorized by this DingTalk application. Edit the company label manually, or bind/authorize this company in the DingTalk developer console before loading departments.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.load-failed">
+  <source>Could not fetch DingTalk departments. Try again later.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.response-invalid">
+  <source>DingTalk returned an invalid department response. Try again later.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.state-invalid">
+  <source>DingTalk discovery expired or could not be verified. Try again.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.state-expired">
+  <source>DingTalk discovery expired. Start discovery again.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.state-replayed">
+  <source>This DingTalk discovery result was already used. Start discovery again.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.state-source-mismatch">
+  <source>This DingTalk discovery result belongs to a different source. Start discovery again.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.missing-code">
+  <source>DingTalk discovery did not return an authorization code. Try again.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.load-failed">
+  <source>DingTalk discovery failed. Try again later.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.response-invalid">
+  <source>DingTalk returned an invalid discovery response. Try again.</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.status.source-enabled">
   <source>Source enabled</source>
@@ -10971,6 +10936,9 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-allowlist.empty.body">
   <source>Discover a company or add one manually to build the allowlist.</source>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.table.caption">
+  <source>DingTalk allowlist companies</source>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.table.company">
   <source>Company</source>
 </trans-unit>
@@ -10985,6 +10953,9 @@ Bindings to groups/users are checked against the user of the event.</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.company.label.aria-label">
   <source>Company label for <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.company.allow-all.aria-label">
+  <source>Allow full company access for <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.company.allow-all">
   <source>Allow full company</source>
@@ -11004,11 +10975,20 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-allowlist.departments.placeholder">
   <source>IDs separated by commas or spaces</source>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.add.aria-label">
+  <source>Add departments for <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.departments.add">
   <source>Add departments</source>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.select.aria-label">
+  <source>Select departments for <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.departments.select">
   <source>Select departments…</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.company.remove.aria-label">
+  <source>Remove <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
 </trans-unit>
 <trans-unit id="common.actions.remove">
   <source>Remove</source>
@@ -11036,21 +11016,6 @@ Bindings to groups/users are checked against the user of the event.</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.partial-failures.title">
   <source>Some DingTalk status checks failed.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.remove.success">
-  <source>DingTalk allowlist policy and bindings removed.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.remove.error">
-  <source>Failed to remove the DingTalk allowlist policy.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.remove.action">
-  <source>Remove allowlist</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.remove.header">
-  <source>Remove DingTalk allowlist</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.remove.body">
-  <source>This deletes the managed allowlist policy and all of its flow bindings. All DingTalk logins will then be denied until a new allowlist is saved and applied.</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.title">
   <source>DingTalk Allowlist</source>
@@ -11112,6 +11077,9 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-allowlist.departments.invert">
   <source>Invert selection</source>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-allowlist.departments.table.aria-label">
+  <source>DingTalk department hierarchy</source>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.department.allowed">
   <source>Allowed</source>
 </trans-unit>
@@ -11145,6 +11113,21 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-directory.sync.not-queued">
   <source>This corp's directory sync is already running or was not queued.</source>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.header">
+  <source>Delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.body">
+  <source>This deletes the sync record and all cached departments and users for <x id="0" equiv-text="${status.corpId}"/>. Lookups that rely on the cached directory will return no data until the next sync completes.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete">
+  <source>Delete</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.success">
+  <source>Deleted DingTalk directory sync record for <x id="0" equiv-text="${status.corpId}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.error">
+  <source>Failed to delete DingTalk directory data.</source>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.sync.completed">
   <source>DingTalk directory sync completed for <x id="0" equiv-text="${event.corpId}"/>.</source>
 </trans-unit>
@@ -11153,6 +11136,42 @@ Bindings to groups/users are checked against the user of the event.</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.sync.failed">
   <source>DingTalk directory sync failed for <x id="0" equiv-text="${event.corpId}"/>: <x id="1" equiv-text="${detail}"/></source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.broker-unavailable">
+  <source>The background task broker is unavailable, so this directory sync could not be queued. Try again later.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.concurrency-limit">
+  <source>Too many DingTalk directory syncs are already running. Try again once one of them finishes.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.http-request-failed">
+  <source>Could not reach DingTalk while syncing the directory. Try again later.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.invalid-response">
+  <source>DingTalk returned an invalid directory response. Try again later.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.payload-limit">
+  <source>The DingTalk directory response was too large to process.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.run-stale">
+  <source>A newer directory sync replaced this run before it finished.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.source-disabled">
+  <source>This DingTalk source is disabled, so the directory sync did not run.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.source-unavailable">
+  <source>The DingTalk source for this sync is no longer available.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.unsupported-source">
+  <source>This source is not a DingTalk source, so the directory sync did not run.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.user-limit">
+  <source>The DingTalk directory holds more users than a sync can process.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.user-detail-failed">
+  <source>Could not load user details from DingTalk while syncing the directory. Try again later.</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.sync-error.unknown">
+  <source>DingTalk directory sync failed.</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.status.success">
   <source>Success</source>
@@ -11183,6 +11202,9 @@ Bindings to groups/users are checked against the user of the event.</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.counters.more-omitted">
   <source><x id="0" equiv-text="${value.length - visibleItems.length}"/> more omitted</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.error.empty">
+  <source>-</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.summary.loading">
   <source>Loading DingTalk directory status.</source>
@@ -11226,23 +11248,11 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-directory.delete.running-disabled">
   <source>Cannot delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/> while sync is running</source>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.delete.read-only-disabled">
+  <source>Cannot delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/></source>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.delete.aria-label">
   <source>Delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/></source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.delete">
-  <source>Delete</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.delete.success">
-  <source>Deleted DingTalk directory sync record for <x id="0" equiv-text="${status.corpId}"/></source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.delete.error">
-  <source>Failed to delete DingTalk directory data.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.delete.header">
-  <source>Delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/></source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.delete.body">
-  <source>This deletes the sync record and all cached departments and users for <x id="0" equiv-text="${status.corpId}"/>. Lookups that rely on the cached directory will return no data until the next sync completes.</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.error.retry">
   <source>Use Refresh to try again.</source>
@@ -11277,14 +11287,20 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-directory.table.actions">
   <source>Actions</source>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.error.empty">
-  <source>-</source>
-</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.title">
   <source>DingTalk directory sync</source>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.read-only">
+  <source>You can view DingTalk directory status, but you need permission to change this OAuth source before syncing or deleting directory data.</source>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.schedules.title">
   <source>Schedules</source>
+</trans-unit>
+<trans-unit id="sources.oauth.view.error.load">
+  <source>Failed to load OAuth source.</source>
+</trans-unit>
+<trans-unit id="common.actions.retry">
+  <source>Retry</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-allowlist.tab">
   <source>DingTalk Allowlist</source>
@@ -11292,11 +11308,86 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-directory.tab">
   <source>DingTalk Directory</source>
 </trans-unit>
+<trans-unit id="sc1fc93e04011152f">
+  <source>New Stage</source>
+</trans-unit>
 <trans-unit id="scc2e420c54dc8089">
   <source>Bind existing stage</source>
 </trans-unit>
+<trans-unit id="s2be14ff0704995c7">
+  <source>Throttling settings</source>
+</trans-unit>
+<trans-unit id="s05b71dc850552880">
+  <source>Email OTP throttling factor</source>
+</trans-unit>
+<trans-unit id="s55c0221c9247ad7d">
+  <source>SMS OTP throttling factor</source>
+</trans-unit>
+<trans-unit id="sd63868fff5022ef6">
+  <source>TOTP throttling factor</source>
+</trans-unit>
+<trans-unit id="s89361efde7c66054">
+  <source>Static OTP throttling factor</source>
+</trans-unit>
+<trans-unit id="s0502740c80377fe0">
+  <source>Enrollment Flows</source>
+</trans-unit>
+<trans-unit id="s36d3e9e28a1b4ffd">
+  <source>Successfully created enrollment flow with invitation stage.</source>
+</trans-unit>
+<trans-unit id="seb916cadb4a7c437">
+  <source>Type a name for the new enrollment flow...</source>
+</trans-unit>
+<trans-unit id="sba43d2c76afbf380">
+  <source>Flow Slug</source>
+</trans-unit>
+<trans-unit id="sc0b5b66c35a4c34f">
+  <source>Internal flow name used in URLs.</source>
+</trans-unit>
+<trans-unit id="s6e59fc2534d00751">
+  <source>e.g. my-enrollment-flow</source>
+</trans-unit>
+<trans-unit id="se53244cd28aeccd7">
+  <source>Invitation Stage Name</source>
+</trans-unit>
+<trans-unit id="s82c71ab0a2d18257">
+  <source>Type a name for the stage...</source>
+</trans-unit>
+<trans-unit id="s10dd794d4839378e">
+  <source>Select an enrollment flow.</source>
+</trans-unit>
+<trans-unit id="sece0e7e9d7ad08bf">
+  <source>e.g. my-invite</source>
+</trans-unit>
+<trans-unit id="s0bce09e0fcbb5931">
+  <source>Create a new enrollment flow with invitation stage...</source>
+</trans-unit>
+<trans-unit id="s6d4209fcf153eda5">
+  <source>The enrollment flow the invitation link will use. The flow should have an invitation stage bound to it for the invitation to be accepted.</source>
+</trans-unit>
+<trans-unit id="s0d66a3b9441ea7f4">
+  <source>Invitation Stage</source>
+</trans-unit>
+<trans-unit id="se40fbacec016aa65">
+  <source>Invitation Stages</source>
+</trans-unit>
+<trans-unit id="sb401ca35f1d61eed">
+  <source>e.g. invitation-stage</source>
+</trans-unit>
 <trans-unit id="s5386dae4609f411c">
   <source>Allow Show Password</source>
+</trans-unit>
+<trans-unit id="s3162a5abea92514e">
+  <source>View Credentials</source>
+</trans-unit>
+<trans-unit id="sb5cad46bad03dc19">
+  <source>Unknown action</source>
+</trans-unit>
+<trans-unit id="scc03df1c8a965428">
+  <source>Custom action</source>
+</trans-unit>
+<trans-unit id="s08670bea6a90a4e0">
+  <source>Unknown user type</source>
 </trans-unit>
 <trans-unit id="s01167737884b54a2">
   <source>unread</source>
@@ -11304,101 +11395,85 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="s49e763aed00877a8">
   <source>Main</source>
 </trans-unit>
+<trans-unit id="sd2e443fc08b24046">
+  <source>Access Token</source>
+</trans-unit>
+<trans-unit id="s0c1fba42c6e31a0f">
+  <source>Access Tokens</source>
+</trans-unit>
+<trans-unit id="s113536ad62a8b179">
+  <source>Refresh Token</source>
+</trans-unit>
+<trans-unit id="se61cf29ea4a4d3fe">
+  <source>Refresh Tokens</source>
+</trans-unit>
+<trans-unit id="s8dfeaf9950df0ffa">
+  <source>object</source>
+</trans-unit>
+<trans-unit id="s26d3ea846b0765cb">
+  <source>objects</source>
+</trans-unit>
+<trans-unit id="s7d041f0b6a10e8ea">
+  <source>Consents</source>
+</trans-unit>
+<trans-unit id="s8fd7c31e67f73d4c">
+  <source>Reputation score</source>
+</trans-unit>
+<trans-unit id="s88c83ac92bfb1f6c">
+  <source>You've logged out of <x id="0" equiv-text="${challenge.applicationName}"/>. You can log out of your authentik account.</source>
+</trans-unit>
+<trans-unit id="sa5c3a21cbc762ce9">
+  <source>You've logged out of <x id="0" equiv-text="${challenge.applicationName}"/>.</source>
+</trans-unit>
 <trans-unit id="flow.identification.email-or-username">
   <source>Email or username</source>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.read-only">
-  <source>You can view this DingTalk allowlist, but you need permission to change this OAuth source before editing or applying changes.</source>
+<trans-unit id="s92c038a5e1dade49">
+  <source>Application Dashboard</source>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.read-only.toast">
-  <source>You do not have permission to change this DingTalk allowlist.</source>
+<trans-unit id="wizard.ariaLabel.verbose-name.one">
+  <source>New <x id="0" equiv-text="${verboseName}"/> Wizard</source>
+  <note from="lit-localize">ARIA label for the creation wizard, where the entity singular is interpolated.</note>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.table.caption">
-  <source>DingTalk allowlist companies</source>
+<trans-unit id="tokens.clipboard-copy.description">
+  <source><x id="0" equiv-text="${formatIntentLabel(intent)}"/> token for <x id="1" equiv-text="${userObj.username}"/></source>
+  <note from="lit-localize">Description for a clipboard copy action for tokens, with the token intent and username as variables.</note>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.delete.read-only-disabled">
-  <source>Cannot delete DingTalk directory data for <x id="0" equiv-text="${status.corpId}"/></source>
+<trans-unit id="table.emptyState.default">
+  <source>No <x id="0" equiv-text="${pluralNoun}"/> found.</source>
+  <note from="lit-localize">Empty state message when no objects are found, where the entity plural is interpolated.</note>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.read-only">
-  <source>You can view DingTalk directory status, but you need permission to change this OAuth source before syncing or deleting directory data.</source>
+<trans-unit id="table.emptyState.search">
+  <source>No <x id="0" equiv-text="${singularNoun}"/> matches "<x id="1" equiv-text="${truncateWords(this.search, 50)}"/>"</source>
+  <note from="lit-localize">Empty state message when no objects match the search query, where the entity singular is interpolated, followed by the search query truncated to 50 characters.</note>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.departments.load-failed">
-  <source>Could not fetch DingTalk departments. Try again later.</source>
+<trans-unit id="wizard.step.choose-type.generic">
+  <source>Choose type</source>
+  <note from="lit-localize">Generic label for the initial step in the creation wizard where the type of the entity being created is selected, used when no singular entity name is provided.</note>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.departments.response-invalid">
-  <source>DingTalk returned an invalid department response. Try again later.</source>
+<trans-unit id="wizard.header.verbose-name.one">
+  <source>Create New <x id="0" equiv-text="${verboseName}"/></source>
+  <note from="lit-localize">Header for the creation wizard, where the entity singular is interpolated.</note>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.state-invalid">
-  <source>DingTalk discovery expired or could not be verified. Try again.</source>
+<trans-unit id="tokens.copy-button.label">
+  <source>Copy token</source>
+  <note from="lit-localize">Label for a button that copies a token to the clipboard.</note>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.missing-code">
-  <source>DingTalk discovery did not return an authorization code. Try again.</source>
+<trans-unit id="tokens.copy-button.entity-label">
+  <source>Token</source>
+  <note from="lit-localize">Label for a token entity, used in clipboard copy success messages.</note>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.load-failed">
-  <source>DingTalk discovery failed. Try again later.</source>
+<trans-unit id="wizard.step.choose-type">
+  <source>Choose <x id="0" equiv-text="${this.verboseName}"/> Type</source>
+  <note from="lit-localize">Label for the initial step in the creation wizard where the type of the entity being created is selected. The placeholder {entity} is replaced with the singular name of the entity, for example 'Choose User Type' or 'Choose Group Type'.</note>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.response-invalid">
-  <source>DingTalk returned an invalid discovery response. Try again.</source>
+<trans-unit id="wizard.step.details">
+  <source><x id="0" equiv-text="${entityLabel}"/> Details</source>
+  <note from="lit-localize">Label for the step in the creation wizard where the details of the entity being created are filled in. The placeholder {entity} is replaced with the name of the entity type, for example 'User Details' or 'Group Details'.</note>
 </trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.company.allow-all.aria-label">
-  <source>Allow full company access for <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.departments.add.aria-label">
-  <source>Add departments for <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.departments.select.aria-label">
-  <source>Select departments for <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.company.remove.aria-label">
-  <source>Remove <x id="0" equiv-text="${companyName}"/> (<x id="1" equiv-text="${company.corpId}"/>)</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.state-expired">
-  <source>DingTalk discovery expired. Start discovery again.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.state-replayed">
-  <source>This DingTalk discovery result was already used. Start discovery again.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-allowlist.discovery.state-source-mismatch">
-  <source>This DingTalk discovery result belongs to a different source. Start discovery again.</source>
-</trans-unit>
-<trans-unit id="sb365ccab0f270879">
-  <source>Create or bind</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.sync-error.broker-unavailable">
-  <source>The background task broker is unavailable, so this directory sync could not be queued. Try again later.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.sync-error.concurrency-limit">
-  <source>Too many DingTalk directory syncs are already running. Try again once one of them finishes.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.sync-error.http-request-failed">
-  <source>Could not reach DingTalk while syncing the directory. Try again later.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.sync-error.invalid-response">
-  <source>DingTalk returned an invalid directory response. Try again later.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.sync-error.payload-limit">
-  <source>The DingTalk directory response was too large to process.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.sync-error.run-stale">
-  <source>A newer directory sync replaced this run before it finished.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.sync-error.source-disabled">
-  <source>This DingTalk source is disabled, so the directory sync did not run.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.sync-error.source-unavailable">
-  <source>The DingTalk source for this sync is no longer available.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.sync-error.unsupported-source">
-  <source>This source is not a DingTalk source, so the directory sync did not run.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.sync-error.user-limit">
-  <source>The DingTalk directory holds more users than a sync can process.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.sync-error.user-detail-failed">
-  <source>Could not load user details from DingTalk while syncing the directory. Try again later.</source>
-</trans-unit>
-<trans-unit id="sources.oauth.dingtalk-directory.sync-error.unknown">
-  <source>DingTalk directory sync failed.</source>
+<trans-unit id="table.search.placeholder">
+  <source>Search for <x id="0" equiv-text="${pluralNoun}"/>...</source>
+  <note from="lit-localize">Placeholder text for the search input, where the entity plural is interpolated.</note>
 </trans-unit>
 </body>
 </file>

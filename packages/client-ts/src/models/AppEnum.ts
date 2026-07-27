@@ -81,7 +81,6 @@ export const AppEnum = {
     AuthentikTasksSchedules: "authentik.tasks.schedules",
     AuthentikBrands: "authentik.brands",
     AuthentikBlueprints: "authentik.blueprints",
-    AuthentikCustomEasyauth: "authentik.custom.easyauth",
     AuthentikEnterpriseAudit: "authentik.enterprise.audit",
     AuthentikEnterpriseEndpointsConnectorsAgent: "authentik.enterprise.endpoints.connectors.agent",
     AuthentikEnterpriseEndpointsConnectorsFleet: "authentik.enterprise.endpoints.connectors.fleet",
@@ -101,6 +100,7 @@ export const AppEnum = {
         "authentik.enterprise.stages.authenticator_endpoint_gdtc",
     AuthentikEnterpriseStagesMtls: "authentik.enterprise.stages.mtls",
     AuthentikEnterpriseStagesSource: "authentik.enterprise.stages.source",
+    AuthentikCustomEasyauth: "authentik.custom.easyauth",
     UnknownDefaultOpenApi: "11184809",
 } as const;
 export type AppEnum = (typeof AppEnum)[keyof typeof AppEnum];
