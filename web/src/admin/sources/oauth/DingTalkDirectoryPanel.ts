@@ -120,7 +120,12 @@ export class DingTalkDirectoryPanel extends AKElement {
                 margin-block-start: 1.6rem;
             }
 
-            .ak-dingtalk-directory-summary {
+            /* The summary renders inside a \`pf-c-content\` card body, whose \`ul\` and
+               \`li + li\` rules outrank a bare class selector. Left alone they add a
+               top margin to every tile after the first, which — inside a stretched
+               grid row — makes those tiles shorter than the first one. Match their
+               specificity so all tiles keep the same box. */
+            ul.ak-dingtalk-directory-summary {
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
                 gap: var(--pf-global--spacer--sm);
@@ -129,11 +134,12 @@ export class DingTalkDirectoryPanel extends AKElement {
                 list-style: none;
             }
 
-            .ak-dingtalk-directory-summary-item {
+            .ak-dingtalk-directory-summary .ak-dingtalk-directory-summary-item {
                 display: grid;
                 row-gap: var(--pf-global--spacer--xs);
                 align-content: start;
                 min-width: 0;
+                margin: 0;
                 padding: var(--pf-global--spacer--sm);
                 border: 1px solid var(--pf-global--BorderColor--100);
                 border-radius: 4px;
@@ -182,6 +188,14 @@ export class DingTalkDirectoryPanel extends AKElement {
 
             .ak-dingtalk-directory-poll-paused {
                 margin-block-start: var(--pf-global--spacer--sm);
+            }
+
+            /* ak-timestamp stacks its label, elapsed time and absolute datetime as
+               blocks. Here they are a single sentence, so keep them on one line. */
+            .ak-dingtalk-directory-last-refreshed ak-timestamp::part(label),
+            .ak-dingtalk-directory-last-refreshed ak-timestamp::part(elapsed),
+            .ak-dingtalk-directory-last-refreshed ak-timestamp::part(datetime) {
+                display: inline;
             }
 
             .ak-dingtalk-directory-field-error {
@@ -697,11 +711,12 @@ export class DingTalkDirectoryPanel extends AKElement {
                   </p>`
                 : nothing}
             ${this.lastStatusLoadedAt
-                ? html`<p class="ak-dingtalk-directory-muted">
-                      ${msg("Last refreshed", {
-                          id: "sources.oauth.dingtalk-directory.summary.last-refreshed",
-                      })}
-                      ${this.renderTimestamp(this.lastStatusLoadedAt)}
+                ? html`<p class="ak-dingtalk-directory-muted ak-dingtalk-directory-last-refreshed">
+                      <ak-timestamp .timestamp=${this.lastStatusLoadedAt} datetime
+                          >${msg("Last refreshed", {
+                              id: "sources.oauth.dingtalk-directory.summary.last-refreshed",
+                          })}</ak-timestamp
+                      >
                   </p>`
                 : nothing}`;
     }

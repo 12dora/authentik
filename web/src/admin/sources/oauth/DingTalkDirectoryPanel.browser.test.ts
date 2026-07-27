@@ -120,6 +120,16 @@ function makePanel(client: Partial<DingTalkDirectoryClient>): DingTalkDirectoryP
     return panel;
 }
 
+// The PatternFly base stylesheet that defines the global spacers is not loaded in
+// component tests, so rules built on them (such as `.pf-c-content li + li`) compute
+// to zero and layout bugs they cause cannot reproduce. Supply the ones this panel
+// depends on to match what the admin interface renders with.
+function applyPatternFlySpacers(panel: DingTalkDirectoryPanel): void {
+    panel.style.setProperty("--pf-global--spacer--xs", "0.25rem");
+    panel.style.setProperty("--pf-global--spacer--sm", "0.5rem");
+    panel.style.setProperty("--pf-global--spacer--md", "1rem");
+}
+
 async function settled(panel: DingTalkDirectoryPanel): Promise<void> {
     await panel.updateComplete;
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -280,6 +290,55 @@ describe("DingTalkDirectoryPanel", () => {
         expect(vi.mocked(showMessage).mock.calls).toHaveLength(2);
         expect(vi.mocked(showMessage).mock.calls[0]?.[0].level).toBe(MessageLevel.warning);
         expect(vi.mocked(showMessage).mock.calls[1]?.[0].level).toBe(MessageLevel.error);
+    });
+
+    it("gives every summary tile the same height", async () => {
+        const panel = makePanel({
+            status: async () => ({
+                sourceSlug: "source-a",
+                canChange: true,
+                sync: [makeSyncStatus("corp-a", "success"), makeSyncStatus("corp-b", "error")],
+            }),
+        });
+        applyPatternFlySpacers(panel);
+        await settled(panel);
+
+        const tiles = Array.from(
+            panel.shadowRoot!.querySelectorAll<HTMLElement>(".ak-dingtalk-directory-summary-item"),
+        );
+
+        expect(tiles.length).toBeGreaterThan(1);
+        expect(tiles.map((tile) => getComputedStyle(tile).marginTop)).toEqual(
+            tiles.map(() => "0px"),
+        );
+        expect(new Set(tiles.map((tile) => tile.getBoundingClientRect().height)).size).toBe(1);
+    });
+
+    it("keeps the last refreshed label, elapsed time, and datetime on one line", async () => {
+        const panel = makePanel({
+            status: async () => ({
+                sourceSlug: "source-a",
+                canChange: true,
+                sync: [makeSyncStatus("corp-a", "success")],
+            }),
+        });
+        await settled(panel);
+
+        const timestamp = panel.shadowRoot!.querySelector(
+            ".ak-dingtalk-directory-last-refreshed ak-timestamp",
+        )!;
+        const parts = ["label", "elapsed", "datetime"].map(
+            (part) => timestamp.shadowRoot!.querySelector<HTMLElement>(`[part="${part}"]`)!,
+        );
+        const boxes = parts.map((part) => part.getBoundingClientRect());
+
+        expect(parts.every(Boolean)).toBe(true);
+        expect(timestamp.textContent).toContain("Last refreshed");
+        // Same line: every part's vertical range overlaps every other one's. The
+        // datetime renders in a smaller font, so the tops themselves differ.
+        expect(Math.max(...boxes.map((box) => box.top))).toBeLessThan(
+            Math.min(...boxes.map((box) => box.bottom)),
+        );
     });
 
     it("keeps directory status visible but disables sync and delete when canChange is false", async () => {
