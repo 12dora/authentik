@@ -3,7 +3,6 @@
 from unittest.mock import MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 
-from django.test import RequestFactory
 from django.urls import reverse
 from django.utils import translation
 from django.utils.timezone import now
@@ -11,13 +10,21 @@ from django.utils.timezone import now
 from authentik.blueprints.tests import apply_blueprint
 from authentik.common.oauth.constants import SCOPE_OFFLINE_ACCESS, SCOPE_OPENID, TOKEN_TYPE
 from authentik.core.models import Application
-from authentik.core.tests.utils import create_test_admin_user, create_test_brand, create_test_flow
+from authentik.core.tests.utils import (
+    RequestFactory,
+    create_test_admin_user,
+    create_test_brand,
+    create_test_flow,
+    create_test_user,
+)
 from authentik.events.models import Event, EventAction
 from authentik.flows.models import FlowStageBinding
 from authentik.flows.stage import PLAN_CONTEXT_PENDING_USER_IDENTIFIER
 from authentik.flows.views.executor import SESSION_KEY_PLAN
 from authentik.lib.generators import generate_id
 from authentik.lib.utils.time import timedelta_from_string
+from authentik.policies.expression.models import ExpressionPolicy
+from authentik.policies.models import PolicyBinding
 from authentik.providers.oauth2.errors import AuthorizeError, ClientIdError, RedirectUriError
 from authentik.providers.oauth2.models import (
     AccessToken,
@@ -29,7 +36,14 @@ from authentik.providers.oauth2.models import (
     ScopeMapping,
 )
 from authentik.providers.oauth2.tests.utils import OAuthTestCase
-from authentik.providers.oauth2.views.authorize import OAuthAuthorizationParams
+from authentik.providers.oauth2.views.authorize import (
+    AuthorizationFlowInitView,
+    OAuthAuthorizationParams,
+)
+from authentik.sources.oauth.types.dingtalk import (
+    DINGTALK_DENY_NO_PERMISSION,
+    render_dingtalk_allowlist_policy,
+)
 from authentik.stages.dummy.models import DummyStage
 from authentik.stages.password.stage import PLAN_CONTEXT_METHOD
 
@@ -352,6 +366,50 @@ class TestAuthorize(OAuthTestCase):
             timedelta_from_string(provider.access_code_validity).total_seconds(),
             delta=5,
         )
+
+    def test_full_code_denies_dingtalk_protected_app_without_allowlist_marker(self):
+        """Protected OIDC applications deny logged-in sessions without DingTalk allowlist marker."""
+        flow = create_test_flow()
+        provider = OAuth2Provider.objects.create(
+            name=generate_id(),
+            client_id="test",
+            authorization_flow=flow,
+            redirect_uris=[RedirectURI(RedirectURIMatchingMode.STRICT, "foo://localhost")],
+            grant_types=[GrantType.AUTHORIZATION_CODE],
+        )
+        application = Application.objects.create(name="app", slug="app", provider=provider)
+        policy = ExpressionPolicy.objects.create(
+            name="require-dingtalk-allowlist-marker",
+            expression=render_dingtalk_allowlist_policy(
+                {"companies": [{"corp_id": "CORP_ALLOWED", "allow_all": True}]}
+            ),
+        )
+        PolicyBinding.objects.create(target=application, policy=policy, order=0)
+        user = create_test_user("dingtalk-app-denied")
+        request = self.factory.get(
+            reverse("authentik_providers_oauth2:authorize"),
+            data={
+                "response_type": "code",
+                "client_id": "test",
+                "state": generate_id(),
+                "redirect_uri": "foo://localhost",
+            },
+            user=user,
+        )
+
+        with patch(
+            "authentik.providers.oauth2.views.authorize.get_login_event",
+            MagicMock(return_value=Event(action=EventAction.LOGIN, created=now())),
+        ):
+            response = AuthorizationFlowInitView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        response.render()
+        content = response.content.decode()
+        self.assertIn(DINGTALK_DENY_NO_PERMISSION, content)
+        self.assertNotIn("sign in through DingTalk before accessing this app", content)
+        self.assertNotIn("required DingTalk source", content)
+        self.assertFalse(AuthorizationCode.objects.filter(user=user).exists())
 
     @apply_blueprint("system/providers-oauth2.yaml")
     def test_full_implicit(self):

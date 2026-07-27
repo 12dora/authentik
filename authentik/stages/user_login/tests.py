@@ -1,9 +1,11 @@
 """login tests"""
 
 from time import sleep
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from django.http import HttpRequest
+from django.http.response import HttpResponse
 from django.urls import reverse
 from django.utils.timezone import now
 
@@ -21,6 +23,10 @@ from authentik.flows.views.executor import NEXT_ARG_NAME, SESSION_KEY_PLAN
 from authentik.lib.generators import generate_id
 from authentik.lib.utils.time import timedelta_from_string
 from authentik.root.middleware import ClientIPMiddleware
+from authentik.sources.oauth.types.dingtalk import (
+    DINGTALK_ALLOWLIST_PLAN_CONTEXT,
+    DINGTALK_ALLOWLIST_SESSION_KEY,
+)
 from authentik.stages.user_login.middleware import (
     SESSION_KEY_BINDING_NET,
     BoundSessionMiddleware,
@@ -28,6 +34,8 @@ from authentik.stages.user_login.middleware import (
     logout_extra,
 )
 from authentik.stages.user_login.models import GeoIPBinding, NetworkBinding, UserLoginStage
+from authentik.stages.user_login.signals import user_login_session_finalized
+from authentik.stages.user_login.stage import UserLoginStageView
 
 
 class TestUserLoginStage(FlowTestCase):
@@ -70,6 +78,69 @@ class TestUserLoginStage(FlowTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertStageRedirects(response, reverse("authentik_core:root-redirect"))
+
+    def test_dingtalk_allowlist_marker_is_persisted_after_login(self):
+        """DingTalk allowlist evidence is written to the post-login session."""
+        marker = {
+            "source_slug": "dingtalk",
+            "corp_id": "CORP_ALLOWED",
+            "dept_ids": ["10"],
+            "user_pk": self.user.pk,
+        }
+        plan = FlowPlan(flow_pk=self.flow.pk.hex, bindings=[self.binding], markers=[StageMarker()])
+        plan.context[PLAN_CONTEXT_PENDING_USER] = self.user
+        plan.context[DINGTALK_ALLOWLIST_PLAN_CONTEXT] = marker
+        request = HttpRequest()
+        request.session = self.client.session
+        request.META["REMOTE_ADDR"] = "127.0.0.1"
+        request.COOKIES = {}
+        executor = SimpleNamespace(
+            plan=plan,
+            current_stage=self.stage,
+            flow=self.flow,
+            stage_ok=Mock(return_value=HttpResponse()),
+        )
+        view = UserLoginStageView(executor)
+        view.request = request
+
+        response = view.do_login(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(request.session[DINGTALK_ALLOWLIST_SESSION_KEY], marker)
+
+    def test_login_session_finalized_receiver_exception_does_not_abort_login(self):
+        """Post-login extension receivers are best-effort and cannot turn login into a 500."""
+
+        def receiver(**_):
+            raise RuntimeError("receiver failed")
+
+        user_login_session_finalized.connect(
+            receiver,
+            dispatch_uid="authentik_test_login_session_finalized_failure",
+        )
+        self.addCleanup(
+            user_login_session_finalized.disconnect,
+            dispatch_uid="authentik_test_login_session_finalized_failure",
+        )
+        plan = FlowPlan(flow_pk=self.flow.pk.hex, bindings=[self.binding], markers=[StageMarker()])
+        plan.context[PLAN_CONTEXT_PENDING_USER] = self.user
+        request = HttpRequest()
+        request.session = self.client.session
+        request.META["REMOTE_ADDR"] = "127.0.0.1"
+        request.COOKIES = {}
+        executor = SimpleNamespace(
+            plan=plan,
+            current_stage=self.stage,
+            flow=self.flow,
+            stage_ok=Mock(return_value=HttpResponse()),
+        )
+        view = UserLoginStageView(executor)
+        view.request = request
+
+        response = view.do_login(request)
+
+        self.assertEqual(response.status_code, 200)
+        view.executor.stage_ok.assert_called_once()
 
     def test_terminate_other_sessions(self):
         """Test terminate_other_sessions"""

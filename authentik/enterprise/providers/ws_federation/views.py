@@ -49,12 +49,12 @@ class WSFedEntryView(PolicyAccessView):
                 self.req = SignOutRequest.parse(self.request)
             else:
                 raise RequestValidationError(
-                    bad_request_message(self.request, "Invalid WS-Federation action")
+                    bad_request_message(self.request, _("Invalid WS-Federation action"))
                 )
         except ValueError as exc:
             LOGGER.warning("Invalid WS-Fed request", exc=exc)
             raise RequestValidationError(
-                bad_request_message(self.request, "Invalid WS-Federation request")
+                bad_request_message(self.request, _("Invalid WS-Federation request"))
             ) from None
 
     def resolve_provider_application(self):
@@ -66,7 +66,7 @@ class WSFedEntryView(PolicyAccessView):
         elif self.action == WS_FED_ACTION_SIGN_OUT:
             return self.ws_fed_sign_out()
         else:
-            return HttpResponse("Unsupported WS-Federation action", status=400)
+            return HttpResponse(_("Unsupported WS-Federation action"), status=400)
 
     def ws_fed_sign_in(self) -> HttpResponse:
         planner = FlowPlanner(self.provider.authorization_flow)
@@ -156,7 +156,7 @@ class WSFedFlowFinalView(ChallengeStageView):
                 "component": "ak-stage-autosubmit",
                 "title": self.executor.plan.context.get(
                     PLAN_CONTEXT_TITLE,
-                    _("Redirecting to {app}...".format_map({"app": application.name})),
+                    _("Redirecting to %(app)s...") % {"app": application.name},
                 ),
                 "url": sign_in_req.wreply,
                 "attrs": response,

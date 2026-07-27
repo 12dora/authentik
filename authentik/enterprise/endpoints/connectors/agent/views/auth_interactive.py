@@ -2,6 +2,7 @@ from hashlib import sha256
 from hmac import compare_digest
 
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, QueryDict
+from django.utils.translation import gettext as _
 
 from authentik.common.oauth.constants import QS_LOGIN_HINT
 from authentik.endpoints.connectors.agent.auth import (
@@ -55,13 +56,13 @@ class AgentInteractiveAuth(EnterprisePolicyAccessView):
     def get(self, request: HttpRequest, *args, **kwargs) -> HttpResponse:
         device_token_hash = request.headers.get("X-Authentik-Platform-Auth-DTH")
         if not device_token_hash:
-            return HttpResponseBadRequest("Invalid device token")
+            return HttpResponseBadRequest(_("Invalid device token"))
         if not compare_digest(
             device_token_hash, sha256(self.auth_token.device_token.key.encode()).hexdigest()
         ):
-            return HttpResponseBadRequest("Invalid device token")
+            return HttpResponseBadRequest(_("Invalid device token"))
         if not self.connector.authorization_flow:
-            return HttpResponseBadRequest("No authorization flow configured")
+            return HttpResponseBadRequest(_("No authorization flow configured"))
 
         planner = FlowPlanner(self.connector.authorization_flow)
         planner.allow_empty_flows = True
@@ -98,7 +99,7 @@ class AgentAuthFulfillmentStage(StageView):
             jti=str(auth_token.identifier),
         )
         if not token or not exp:
-            return self.executor.stage_invalid("Failed to generate token")
+            return self.executor.stage_invalid(_("Failed to generate token"))
         auth_token.user = request.user
         auth_token.token = token
         auth_token.expires = exp

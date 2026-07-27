@@ -108,6 +108,7 @@ TENANT_APPS = [
     "authentik.sources.kerberos",
     "authentik.sources.ldap",
     "authentik.sources.oauth",
+    "authentik.custom",
     "authentik.sources.plex",
     "authentik.sources.saml",
     "authentik.sources.scim",

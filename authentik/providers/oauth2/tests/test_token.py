@@ -21,6 +21,8 @@ from authentik.core.models import Application
 from authentik.core.tests.utils import create_test_admin_user, create_test_flow
 from authentik.events.models import Event, EventAction
 from authentik.lib.generators import generate_id, generate_key
+from authentik.policies.expression.models import ExpressionPolicy
+from authentik.policies.models import PolicyBinding
 from authentik.providers.oauth2.errors import TokenError
 from authentik.providers.oauth2.models import (
     AccessToken,
@@ -35,6 +37,7 @@ from authentik.providers.oauth2.models import (
 from authentik.providers.oauth2.tests.utils import OAuthTestCase
 from authentik.providers.oauth2.utils import extract_client_auth
 from authentik.providers.oauth2.views.token import TokenParams
+from authentik.sources.oauth.types.dingtalk import render_dingtalk_allowlist_policy
 
 
 class TestToken(OAuthTestCase):
@@ -205,6 +208,114 @@ class TestToken(OAuthTestCase):
             },
         )
         self.validate_jwt(access, provider)
+
+    @apply_blueprint("system/providers-oauth2.yaml")
+    def test_auth_code_dingtalk_protected_app_does_not_issue_refresh_token(self):
+        """DingTalk-protected applications do not issue offline refresh tokens."""
+        provider = OAuth2Provider.objects.create(
+            name=generate_id(),
+            authorization_flow=create_test_flow(),
+            grant_types=[GrantType.AUTHORIZATION_CODE, GrantType.REFRESH_TOKEN],
+            redirect_uris=[RedirectURI(RedirectURIMatchingMode.STRICT, "http://local.invalid")],
+            signing_key=self.keypair,
+        )
+        provider.property_mappings.set(
+            ScopeMapping.objects.filter(
+                managed__in=[
+                    "goauthentik.io/providers/oauth2/scope-openid",
+                    "goauthentik.io/providers/oauth2/scope-offline_access",
+                ]
+            )
+        )
+        self.app.provider = provider
+        self.app.save()
+        policy = ExpressionPolicy.objects.create(
+            name="require-dingtalk-allowlist-marker",
+            expression=render_dingtalk_allowlist_policy(
+                {"companies": [{"corp_id": "CORP_ALLOWED", "allow_all": True}]}
+            ),
+        )
+        PolicyBinding.objects.create(target=self.app, policy=policy, order=0)
+        header = b64encode(f"{provider.client_id}:{provider.client_secret}".encode()).decode()
+        user = create_test_admin_user()
+        code = AuthorizationCode.objects.create(
+            code="foobar",
+            provider=provider,
+            user=user,
+            auth_time=timezone.now(),
+            _scope="offline_access",
+        )
+
+        response = self.client.post(
+            reverse("authentik_providers_oauth2:token"),
+            data={
+                "grant_type": GRANT_TYPE_AUTHORIZATION_CODE,
+                "code": code.code,
+                "redirect_uri": "http://local.invalid",
+            },
+            HTTP_AUTHORIZATION=f"Basic {header}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertNotIn("refresh_token", body)
+        self.assertFalse(RefreshToken.objects.filter(user=user, provider=provider).exists())
+
+    @apply_blueprint("system/providers-oauth2.yaml")
+    def test_refresh_token_dingtalk_protected_app_rejects_historical_refresh_token(self):
+        """DingTalk-protected applications reject previously-issued refresh tokens."""
+        provider = OAuth2Provider.objects.create(
+            name=generate_id(),
+            authorization_flow=create_test_flow(),
+            grant_types=[GrantType.REFRESH_TOKEN],
+            redirect_uris=[RedirectURI(RedirectURIMatchingMode.STRICT, "http://local.invalid")],
+            signing_key=self.keypair,
+        )
+        provider.property_mappings.set(
+            ScopeMapping.objects.filter(
+                managed__in=[
+                    "goauthentik.io/providers/oauth2/scope-openid",
+                    "goauthentik.io/providers/oauth2/scope-offline_access",
+                ]
+            )
+        )
+        self.app.provider = provider
+        self.app.save()
+        policy = ExpressionPolicy.objects.create(
+            name="require-dingtalk-allowlist-marker",
+            expression=render_dingtalk_allowlist_policy(
+                {"companies": [{"corp_id": "CORP_ALLOWED", "allow_all": True}]}
+            ),
+        )
+        PolicyBinding.objects.create(target=self.app, policy=policy, order=0)
+        header = b64encode(f"{provider.client_id}:{provider.client_secret}".encode()).decode()
+        user = create_test_admin_user()
+        token = RefreshToken.objects.create(
+            provider=provider,
+            user=user,
+            token=generate_id(),
+            _id_token=dumps({}),
+            auth_time=timezone.now(),
+            _scope="offline_access",
+        )
+
+        response = self.client.post(
+            reverse("authentik_providers_oauth2:token"),
+            data={
+                "grant_type": GRANT_TYPE_REFRESH_TOKEN,
+                "refresh_token": token.token,
+                "redirect_uri": "http://local.invalid",
+            },
+            HTTP_AUTHORIZATION=f"Basic {header}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertEqual(body["error"], "invalid_grant")
+        self.assertFalse(AccessToken.objects.filter(user=user, provider=provider).exists())
+        self.assertEqual(RefreshToken.objects.filter(user=user, provider=provider).count(), 1)
+        token.refresh_from_db()
+        self.assertFalse(token.revoked)
 
     def test_auth_code_enc(self):
         """test request param"""

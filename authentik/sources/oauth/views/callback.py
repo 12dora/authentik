@@ -11,10 +11,17 @@ from django.shortcuts import redirect
 from django.utils.timezone import now
 from django.utils.translation import gettext as _
 from django.views.generic import View
+from guardian.shortcuts import get_anonymous_user
 from structlog.stdlib import get_logger
 
 from authentik.core.sources.flow_manager import SourceFlowManager
 from authentik.events.models import Event, EventAction
+from authentik.flows.exceptions import FlowNonApplicableException
+from authentik.flows.planner import PLAN_CONTEXT_SOURCE
+from authentik.policies.engine import PolicyEngine
+from authentik.policies.exceptions import PolicyEngineException
+from authentik.policies.types import PolicyResult
+from authentik.policies.utils import delete_none_values
 from authentik.sources.oauth.clients.base import BaseOAuthClient
 from authentik.sources.oauth.models import (
     GroupOAuthSourceConnection,
@@ -22,6 +29,7 @@ from authentik.sources.oauth.models import (
     UserOAuthSourceConnection,
 )
 from authentik.sources.oauth.views.base import OAuthClientMixin
+from authentik.stages.prompt.stage import PLAN_CONTEXT_PROMPT
 
 LOGGER = get_logger()
 
@@ -114,13 +122,10 @@ class OAuthCallback(OAuthClientMixin, View):
         LOGGER.warning("Authentication Failure", reason=reason)
         messages.error(
             self.request,
-            _(
-                "Authentication failed: {reason}".format_map(
-                    {
-                        "reason": reason,
-                    }
-                )
-            ),
+            # Translate the template first, then interpolate: wrapping the already-formatted
+            # string in _() would look up a per-reason msgid that is never in the catalog, so
+            # the message would always fall back to English.
+            _("Authentication failed: {reason}").format(reason=reason),
         )
         return redirect(self.get_error_redirect(self.source, reason))
 
@@ -130,6 +135,58 @@ class OAuthSourceFlowManager(SourceFlowManager):
 
     user_connection_type = UserOAuthSourceConnection
     group_connection_type = GroupOAuthSourceConnection
+
+    def source_type(self):
+        from authentik.sources.oauth.types.registry import registry
+
+        return registry.find_type(self.source.provider_type)()
+
+    def source_policy_result(self) -> PolicyResult:
+        """Evaluate policies bound directly to the source before deciding the source action."""
+        user = self.request.user if self.request.user.is_authenticated else get_anonymous_user()
+        engine = PolicyEngine(self.source, user, self.request)
+        engine.use_cache = False
+        engine.request.context.update(self.policy_context)
+        engine.request.context.update(
+            {
+                PLAN_CONTEXT_SOURCE: self.source,
+                PLAN_CONTEXT_PROMPT: delete_none_values(self.user_properties),
+                "prompt_data": delete_none_values(self.user_properties),
+            }
+        )
+        return engine.build().result
+
+    def get_flow(self, **kwargs) -> HttpResponse:
+        # Evaluate source-bound policies before deciding the action, but only in this OAuth
+        # subclass — the core SourceFlowManager.get_flow is left unmodified (smaller merge
+        # surface) and non-OAuth source types (SAML/Plex/...) keep upstream behavior.
+        try:
+            source_policy_result = self.source_policy_result()
+        except PolicyEngineException as exc:
+            self._logger.warning("failed to evaluate source policy", exc=exc)
+            source_policy_result = PolicyResult(False, str(exc))
+        if not source_policy_result.passing:
+            source_policy_result = self.source_type().oauth_source_policy_result(
+                self,
+                source_policy_result,
+            )
+            return self.error_handler(FlowNonApplicableException(source_policy_result))
+        return super().get_flow(**kwargs)
+
+    def handle_existing_link(self, connection: UserOAuthSourceConnection) -> HttpResponse:
+        if response := self.source_type().oauth_pre_existing_link(self, connection):
+            return response
+        return super().handle_existing_link(connection)
+
+    def handle_auth(self, connection: UserOAuthSourceConnection) -> HttpResponse:
+        if response := self.source_type().oauth_pre_auth(self, connection):
+            return response
+        return super().handle_auth(connection)
+
+    def handle_enroll(self, connection: UserOAuthSourceConnection) -> HttpResponse:
+        if response := self.source_type().oauth_pre_enroll(self, connection):
+            return response
+        return super().handle_enroll(connection)
 
     def update_user_connection(
         self,

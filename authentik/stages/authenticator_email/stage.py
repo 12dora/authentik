@@ -56,7 +56,7 @@ class AuthenticatorEmailChallengeResponse(ChallengeResponse):
         """Check"""
         if "code" not in attrs:
             if "email" not in attrs:
-                raise ValidationError("email required")
+                raise ValidationError(_("email required"))
             self.device.email = attrs["email"]
             self.stage.validate_and_send(attrs["email"])
             return super().validate(attrs)
@@ -148,7 +148,7 @@ class AuthenticatorEmailStageView(ChallengeStageView):
                 _("The user already has an email address registered for MFA.")
             )
         if PLAN_CONTEXT_EMAIL_DEVICE not in self.executor.plan.context:
-            device = EmailDevice(user=user, confirmed=False, stage=stage, name="Email Device")
+            device = EmailDevice(user=user, confirmed=False, stage=stage, name=_("Email Device"))
             valid_secs: int = timedelta_from_string(stage.token_expiry).total_seconds()
             device.generate_token(valid_secs=valid_secs, commit=False)
             self.executor.plan.context[PLAN_CONTEXT_EMAIL_DEVICE] = device

@@ -14,6 +14,7 @@ from authentik.core.models import Group, User
 from authentik.lib.utils.reflection import class_to_path
 from authentik.policies.apps import HIST_POLICIES_ENGINE_TOTAL_TIME, HIST_POLICIES_EXECUTION_TIME
 from authentik.policies.exceptions import PolicyEngineException
+from authentik.policies.hooks import apply_policy_request_processors
 from authentik.policies.models import Policy, PolicyBinding, PolicyBindingModel, PolicyEngineMode
 from authentik.policies.process import PolicyProcess, cache_key
 from authentik.policies.types import PolicyRequest, PolicyResult
@@ -187,6 +188,9 @@ class PolicyEngine(_PolicyEngineBase):
         self.request.obj = pbm
         if request:
             self.request.set_http_request(request)
+        # Let extensions augment the request context (e.g. DingTalk allowlist evidence) without
+        # importing app-specific code into this core hot path (see authentik.policies.hooks).
+        apply_policy_request_processors(self.request)
         self.__dynamic_results: list[PolicyResult] = []
         self.__static_result: PolicyResult | None = None
 
@@ -350,6 +354,11 @@ class FilterPolicyEngine(_PolicyEngineBase):
                 request.obj = self.__pbm
                 if self.__http_request:
                     request.set_http_request(self.__http_request)
+                # Same extension hook as PolicyEngine: every evaluated PolicyRequest must see
+                # the same augmented context, or policies relying on it (e.g. the DingTalk
+                # allowlist) would evaluate differently depending on which engine ran them.
+                # Safe for _prefetch_cache: cache_key() only reads .http_request and .user.
+                apply_policy_request_processors(request)
                 all_results = self._evaluate_dynamic_bindings(
                     dynamic_bindings, request, prefetched_cache
                 )

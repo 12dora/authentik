@@ -28,6 +28,7 @@ from authentik.stages.user_login.middleware import (
     SESSION_KEY_BINDING_NET,
 )
 from authentik.stages.user_login.models import UserLoginStage
+from authentik.stages.user_login.signals import user_login_session_finalized
 from authentik.tenants.utils import get_unique_identifier
 
 COOKIE_NAME_KNOWN_DEVICE = "authentik_device"
@@ -169,6 +170,21 @@ class UserLoginStageView(ChallengeStageView):
                 user,
                 backend=backend,
             )
+        # Let extensions persist per-login session state (e.g. the DingTalk allowlist marker)
+        # without importing app-specific code into this core stage (see user_login.signals).
+        responses = user_login_session_finalized.send_robust(
+            sender=self.__class__,
+            request=self.request,
+            user=user,
+            stage_view=self,
+        )
+        for receiver, response in responses:
+            if isinstance(response, Exception):
+                self.logger.warning(
+                    "User login session extension failed",
+                    receiver=receiver,
+                    exc=response,
+                )
         self.logger.debug(
             "Logged in",
             backend=backend,

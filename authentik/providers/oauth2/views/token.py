@@ -53,6 +53,8 @@ from authentik.events.signals import get_login_event
 from authentik.flows.planner import PLAN_CONTEXT_APPLICATION
 from authentik.lib.utils.time import timedelta_from_string
 from authentik.policies.engine import PolicyEngine
+from authentik.policies.expression.models import ExpressionPolicy
+from authentik.policies.models import PolicyBinding
 from authentik.providers.oauth2.errors import DeviceCodeError, TokenError, UserAuthError
 from authentik.providers.oauth2.id_token import IDToken
 from authentik.providers.oauth2.models import (
@@ -76,6 +78,28 @@ from authentik.sources.oauth.models import OAuthSource
 from authentik.stages.password.stage import PLAN_CONTEXT_METHOD, PLAN_CONTEXT_METHOD_ARGS
 
 LOGGER = get_logger()
+DINGTALK_ALLOWLIST_MARKER = "# authentik-managed-dingtalk-allowlist"
+
+
+def provider_has_dingtalk_allowlist_policy(provider: OAuth2Provider) -> bool:
+    """Return true when this provider's application has an enabled DingTalk allowlist binding."""
+    application = Application.objects.filter(provider=provider).first()
+    if not application:
+        return False
+    bindings = PolicyBinding.objects.filter(
+        target_id=application.pbm_uuid,
+        enabled=True,
+        policy__isnull=False,
+    )
+    binding_list = list(bindings)
+    policies = ExpressionPolicy.objects.in_bulk(
+        [binding.policy_id for binding in binding_list if binding.policy_id]
+    )
+    for binding in binding_list:
+        policy = policies.get(binding.policy_id)
+        if policy and DINGTALK_ALLOWLIST_MARKER in policy.expression:
+            return True
+    return False
 
 
 @dataclass(slots=True)
@@ -668,7 +692,10 @@ class TokenView(View):
             "id_token": access_token.id_token.to_jwt(self.provider),
         }
 
-        if SCOPE_OFFLINE_ACCESS in self.params.authorization_code.scope:
+        if (
+            SCOPE_OFFLINE_ACCESS in self.params.authorization_code.scope
+            and not provider_has_dingtalk_allowlist_policy(self.provider)
+        ):
             refresh_token_expiry = now + timedelta_from_string(self.provider.refresh_token_validity)
             refresh_token = RefreshToken(
                 user=self.params.authorization_code.user,
@@ -700,6 +727,8 @@ class TokenView(View):
             raise TokenError("invalid_scope")
         if SCOPE_OFFLINE_ACCESS not in self.params.scope:
             raise TokenError("invalid_scope")
+        if provider_has_dingtalk_allowlist_policy(self.provider):
+            raise TokenError("invalid_grant")
         now = timezone.now()
         access_token_expiry = now + timedelta_from_string(self.provider.access_token_validity)
         access_token = AccessToken(
@@ -818,7 +847,10 @@ class TokenView(View):
             "id_token": access_token.id_token.to_jwt(self.provider),
         }
 
-        if SCOPE_OFFLINE_ACCESS in self.params.device_code.scope:
+        if (
+            SCOPE_OFFLINE_ACCESS in self.params.device_code.scope
+            and not provider_has_dingtalk_allowlist_policy(self.provider)
+        ):
             refresh_token_expiry = now + timedelta_from_string(self.provider.refresh_token_validity)
             refresh_token = RefreshToken(
                 user=self.params.device_code.user,

@@ -2,6 +2,7 @@
 
 import re
 import traceback
+from copy import deepcopy
 from datetime import datetime
 from enum import StrEnum
 from hashlib import sha256
@@ -147,6 +148,13 @@ class AttributesMixin(models.Model):
         final_attributes = {}
         MERGE_LIST_UNIQUE.merge(final_attributes, self.attributes)
         MERGE_LIST_UNIQUE.merge(final_attributes, properties.get("attributes", {}))
+        current_dingtalk_sources = (self.attributes or {}).get("dingtalk_sources")
+        next_dingtalk_sources = properties.get("attributes", {}).get("dingtalk_sources")
+        if isinstance(current_dingtalk_sources, dict) and isinstance(next_dingtalk_sources, dict):
+            final_attributes["dingtalk_sources"] = {
+                **deepcopy(current_dingtalk_sources),
+                **deepcopy(next_dingtalk_sources),
+            }
         if self.attributes != final_attributes:
             self.attributes = final_attributes
             needs_update = True

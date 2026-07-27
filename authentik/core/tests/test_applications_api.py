@@ -6,13 +6,21 @@ from django.urls import reverse
 from rest_framework.test import APITestCase
 
 from authentik.core.models import Application
-from authentik.core.tests.utils import create_test_admin_user, create_test_flow
+from authentik.core.tests.utils import create_test_admin_user, create_test_flow, create_test_user
 from authentik.lib.generators import generate_id
 from authentik.policies.dummy.models import DummyPolicy
+from authentik.policies.expression.models import ExpressionPolicy
 from authentik.policies.models import PolicyBinding
 from authentik.providers.oauth2.models import OAuth2Provider, RedirectURI, RedirectURIMatchingMode
 from authentik.providers.proxy.models import ProxyProvider
 from authentik.providers.saml.models import SAMLProvider
+from authentik.sources.oauth.models import OAuthSource
+from authentik.sources.oauth.types.dingtalk import (
+    DINGTALK_ALLOWLIST_SESSION_KEY,
+    DINGTALK_DENY_NO_PERMISSION,
+    dingtalk_allowlist_config_hash,
+    render_dingtalk_allowlist_policy,
+)
 
 
 class TestApplicationsAPI(APITestCase):
@@ -79,6 +87,197 @@ class TestApplicationsAPI(APITestCase):
         body = loads(response.content.decode())
         self.assertEqual(body["passing"], False)
         self.assertEqual(body["messages"], ["dummy"])
+
+    def bind_dingtalk_marker_policy(self):
+        """Bind a policy that requires a DingTalk allowlist marker in policy context."""
+        config = {"companies": [{"corp_id": "CORP_ALLOWED", "allow_all": True}]}
+        source = OAuthSource.objects.create(
+            name="DingTalk",
+            slug="dingtalk",
+            provider_type="dingtalk",
+            enabled=True,
+        )
+        policy = ExpressionPolicy.objects.create(
+            name="require-dingtalk-allowlist-marker",
+            expression=render_dingtalk_allowlist_policy(
+                config,
+                source_slug=source.slug,
+                source_pk=str(source.pk),
+            ),
+        )
+        PolicyBinding.objects.create(target=self.allowed, policy=policy, order=0)
+        return config, source
+
+    def assert_no_precise_dingtalk_denial(self, body):
+        response_text = str(body)
+        for precise in [
+            "钉钉登录失败：请通过允许的钉钉组织登录后访问此应用。",
+            "company is not allowed",
+            "department is not allowed",
+            "sign in through DingTalk before accessing this app",
+            "required DingTalk source",
+        ]:
+            self.assertNotIn(precise, response_text)
+
+    def test_check_access_denies_protected_app_without_dingtalk_allowlist_session_marker(self):
+        """Protected applications deny non-DingTalk or non-allowlisted sessions."""
+        self.bind_dingtalk_marker_policy()
+        plain_user = create_test_user()
+        self.client.force_login(plain_user)
+
+        response = self.client.get(
+            reverse(
+                "authentik_api:application-check-access",
+                kwargs={"slug": self.allowed.slug},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = loads(response.content.decode())
+        self.assertEqual(body["passing"], False)
+
+    def test_check_access_reports_deny_message_for_user_without_marker(self):
+        """Superusers testing access for a plain user see the DingTalk deny message."""
+        self.bind_dingtalk_marker_policy()
+        plain_user = create_test_user()
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.get(
+            reverse(
+                "authentik_api:application-check-access",
+                kwargs={"slug": self.allowed.slug},
+            ),
+            {"for_user": plain_user.pk},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = loads(response.content.decode())
+        self.assertEqual(body["passing"], False)
+        self.assertEqual(body["messages"], [DINGTALK_DENY_NO_PERMISSION])
+        self.assert_no_precise_dingtalk_denial(body)
+        self.assertIn("missing_session_marker", str(body["log_messages"]))
+        self.assertIn("no_permission", str(body["log_messages"]))
+
+    def test_check_access_reports_zh_hans_dingtalk_deny_message_for_user_without_marker(self):
+        """DingTalk check_access denial follows the active locale."""
+        self.bind_dingtalk_marker_policy()
+        plain_user = create_test_user()
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.get(
+            reverse(
+                "authentik_api:application-check-access",
+                kwargs={"slug": self.allowed.slug},
+            ),
+            {"for_user": plain_user.pk},
+            HTTP_ACCEPT_LANGUAGE="zh-Hans",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = loads(response.content.decode())
+        self.assertEqual(body["passing"], False)
+        self.assertEqual(body["messages"], ["您没有继续操作的权限，请联系管理员。"])
+        self.assert_no_precise_dingtalk_denial(body)
+        self.assertIn("missing_session_marker", str(body["log_messages"]))
+        self.assertIn("no_permission", str(body["log_messages"]))
+
+    def test_check_access_allows_protected_app_for_superuser_without_marker(self):
+        """Superusers keep access to protected applications without a DingTalk session."""
+        self.bind_dingtalk_marker_policy()
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse(
+                "authentik_api:application-check-access",
+                kwargs={"slug": self.allowed.slug},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = loads(response.content.decode())
+        self.assertEqual(body["passing"], True)
+
+    def test_check_access_allows_protected_app_with_dingtalk_allowlist_session_marker(self):
+        """Protected applications allow sessions with a matching DingTalk allowlist marker."""
+        config, source = self.bind_dingtalk_marker_policy()
+        plain_user = create_test_user()
+        self.client.force_login(plain_user)
+        session = self.client.session
+        session[DINGTALK_ALLOWLIST_SESSION_KEY] = {
+            "source_slug": source.slug,
+            "source_pk": str(source.pk),
+            "corp_id": "CORP_ALLOWED",
+            "dept_ids": ["10"],
+            "user_pk": plain_user.pk,
+            "config_hash": dingtalk_allowlist_config_hash(config),
+        }
+        session.save()
+
+        response = self.client.get(
+            reverse(
+                "authentik_api:application-check-access",
+                kwargs={"slug": self.allowed.slug},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = loads(response.content.decode())
+        self.assertEqual(body["passing"], True)
+
+    def test_check_access_denies_marker_from_different_dingtalk_source(self):
+        """Protected applications bind DingTalk markers to the source that issued them."""
+        config, source = self.bind_dingtalk_marker_policy()
+        other_source = OAuthSource.objects.create(
+            name="Other DingTalk",
+            slug="dingtalk-other",
+            provider_type="dingtalk",
+            enabled=True,
+        )
+        plain_user = create_test_user()
+        self.client.force_login(plain_user)
+        session = self.client.session
+        session[DINGTALK_ALLOWLIST_SESSION_KEY] = {
+            "source_slug": other_source.slug,
+            "source_pk": str(other_source.pk),
+            "corp_id": "CORP_ALLOWED",
+            "dept_ids": ["10"],
+            "user_pk": plain_user.pk,
+            "config_hash": dingtalk_allowlist_config_hash(config),
+        }
+        session.save()
+
+        response = self.client.get(
+            reverse(
+                "authentik_api:application-check-access",
+                kwargs={"slug": self.allowed.slug},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = loads(response.content.decode())
+        self.assertEqual(body["passing"], False)
+
+    def test_list_includes_protected_app_for_superuser_without_marker(self):
+        """The user library still lists marker-protected apps for superusers."""
+        self.bind_dingtalk_marker_policy()
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("authentik_api:application-list"))
+
+        self.assertEqual(response.status_code, 200)
+        body = loads(response.content.decode())
+        self.assertIn(self.allowed.slug, [app["slug"] for app in body["results"]])
+
+    def test_list_excludes_protected_app_for_plain_user_without_marker(self):
+        """The user library hides marker-protected apps from non-DingTalk sessions."""
+        self.bind_dingtalk_marker_policy()
+        self.client.force_login(create_test_user())
+
+        response = self.client.get(reverse("authentik_api:application-list"))
+
+        self.assertEqual(response.status_code, 200)
+        body = loads(response.content.decode())
+        self.assertNotIn(self.allowed.slug, [app["slug"] for app in body["results"]])
 
     def test_list(self):
         """Test list operation without superuser_full_list"""

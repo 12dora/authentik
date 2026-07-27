@@ -97,6 +97,61 @@ class TestSourceFlowManager(TestCase):
         response = flow_manager.get_flow()
         self.assertEqual(response.status_code, 302)
 
+    def bind_deny_policy_to_source(self):
+        """Bind a source-level policy that denies the source result."""
+        policy = ExpressionPolicy.objects.create(
+            name="source-deny", expression='ak_message("source denied"); return False'
+        )
+        PolicyBinding.objects.create(policy=policy, target=self.source, order=0)
+
+    def test_source_policy_denies_unauthenticated_enroll_before_flow(self):
+        """Source-level policies deny new user enrollment before entering source flow."""
+        self.bind_deny_policy_to_source()
+        request = self.request_factory.get("/", user=AnonymousUser())
+        flow_manager = OAuthSourceFlowManager(
+            self.source, request, self.identifier, {"info": {}}, {}
+        )
+
+        response = flow_manager.get_flow()
+
+        self.assertIsInstance(response, AccessDeniedResponse)
+        self.assertEqual(response.error_message, "source denied")
+
+    def test_source_policy_denies_unauthenticated_auth_before_flow(self):
+        """Source-level policies deny existing connection auth before entering source flow."""
+        UserOAuthSourceConnection.objects.create(
+            user=get_anonymous_user(), source=self.source, identifier=self.identifier
+        )
+        self.bind_deny_policy_to_source()
+        request = self.request_factory.get("/", user=AnonymousUser())
+        flow_manager = OAuthSourceFlowManager(
+            self.source, request, self.identifier, {"info": {}}, {}
+        )
+
+        response = flow_manager.get_flow()
+
+        self.assertIsInstance(response, AccessDeniedResponse)
+        self.assertEqual(response.error_message, "source denied")
+
+    def test_source_policy_denies_authenticated_link_before_save(self):
+        """Source-level policies deny authenticated source links before saving connections."""
+        self.bind_deny_policy_to_source()
+        user = User.objects.create(username="foo", email="foo@bar.baz")
+        request = self.request_factory.get("/", user=user)
+        flow_manager = OAuthSourceFlowManager(
+            self.source, request, self.identifier, {"info": {}}, {}
+        )
+
+        response = flow_manager.get_flow()
+
+        self.assertIsInstance(response, AccessDeniedResponse)
+        self.assertEqual(response.error_message, "source denied")
+        self.assertFalse(
+            UserOAuthSourceConnection.objects.filter(
+                source=self.source, identifier=self.identifier
+            ).exists()
+        )
+
     def test_unauthenticated_link(self):
         """Test un-authenticated user linking"""
         flow_manager = OAuthSourceFlowManager(
@@ -255,3 +310,97 @@ class TestSourceFlowManager(TestCase):
         self.assertIsInstance(response, AccessDeniedResponse)
 
         self.assertEqual(response.error_message, "foo")
+
+    def test_source_bound_policy_denies_oauth_callback_before_action(self):
+        """Source-bound policies deny all OAuth callback actions before decision side effects."""
+        info = {
+            "sub": self.identifier,
+            "email": "oauth-user@example.com",
+            "name": "OAuth User",
+            "nickname": "oauth-user",
+            "username": "oauth-user",
+        }
+        policy = ExpressionPolicy.objects.create(
+            name="deny-source-oauth",
+            expression="""
+userinfo = request.context.get("oauth_userinfo", {})
+prompt_data = request.context.get("prompt_data", {})
+source = request.context.get("source")
+if (
+    userinfo.get("sub") != "test-identifier"
+    or prompt_data.get("username") != "oauth-user"
+    or source != request.obj
+):
+    ak_message("missing oauth source context")
+    return True
+ak_message("source policy denied")
+return False
+""".replace("test-identifier", self.identifier),
+        )
+        PolicyBinding.objects.create(policy=policy, target=self.source, order=0)
+
+        cases = (
+            ("enroll", AnonymousUser(), False),
+            ("auth", AnonymousUser(), True),
+            ("link", User.objects.create(username="link-user", email="link@example.com"), False),
+        )
+        for action, user, create_connection in cases:
+            with self.subTest(action=action):
+                UserOAuthSourceConnection.objects.filter(source=self.source).delete()
+                old_connection = None
+                connection_count = UserOAuthSourceConnection.objects.filter(
+                    source=self.source
+                ).count()
+                if create_connection:
+                    old_user = User.objects.create(
+                        username="auth-user",
+                        email="auth@example.com",
+                    )
+                    old_connection = UserOAuthSourceConnection.objects.create(
+                        user=old_user,
+                        source=self.source,
+                        identifier=self.identifier,
+                        access_token="OLD_ACCESS_TOKEN",
+                        refresh_token="OLD_REFRESH_TOKEN",
+                    )
+                    connection_count += 1
+                request = self.request_factory.get("/", user=user)
+                flow_manager = OAuthSourceFlowManager(
+                    self.source,
+                    request,
+                    self.identifier,
+                    {"info": info},
+                    {"oauth_userinfo": info},
+                )
+
+                response = flow_manager.get_flow(access_token="NEW_ACCESS_TOKEN")
+
+                self.assertIsInstance(response, AccessDeniedResponse)
+                self.assertEqual(response.error_message, "source policy denied")
+                self.assertFalse(
+                    UserOAuthSourceConnection.objects.filter(
+                        source=self.source,
+                        access_token="NEW_ACCESS_TOKEN",
+                    ).exists()
+                )
+                if old_connection is not None:
+                    old_connection.refresh_from_db()
+                    self.assertEqual(
+                        UserOAuthSourceConnection.objects.filter(
+                            source=self.source
+                        ).count(),
+                        connection_count,
+                    )
+                    self.assertEqual(old_connection.user_id, old_user.pk)
+                    self.assertEqual(old_connection.source_id, self.source.pk)
+                    self.assertEqual(old_connection.identifier, self.identifier)
+                    self.assertEqual(old_connection.access_token, "OLD_ACCESS_TOKEN")
+                    self.assertEqual(old_connection.refresh_token, "OLD_REFRESH_TOKEN")
+                if action == "link":
+                    self.assertFalse(
+                        UserOAuthSourceConnection.objects.filter(
+                            source=self.source,
+                            user=user,
+                            identifier=self.identifier,
+                        ).exists()
+                    )

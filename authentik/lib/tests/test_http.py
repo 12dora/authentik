@@ -1,9 +1,13 @@
 """Test HTTP Helpers"""
 
+from unittest.mock import patch
+
 from django.test import RequestFactory, TestCase
+from requests_mock import Mocker
 
 from authentik.core.models import Token, TokenIntents, UserTypes
 from authentik.core.tests.utils import create_test_admin_user
+from authentik.lib.utils.http import DebugSession
 from authentik.lib.views import bad_request_message
 from authentik.root.middleware import ClientIPMiddleware
 
@@ -80,3 +84,47 @@ class TestHTTP(TestCase):
             },
         )
         self.assertEqual(ClientIPMiddleware.get_client_ip(request), "1.2.3.4")
+
+    @patch("authentik.lib.utils.http.LOGGER")
+    def test_debug_session_redacts_sensitive_request_and_response_values(self, logger):
+        """Debug HTTP logging keeps events but redacts credentials, tokens, and bodies."""
+        with Mocker() as mocker:
+            mocker.post(
+                "https://example.invalid/token",
+                json={"access_token": "RESPONSE_ACCESS_TOKEN", "name": "Ada"},
+                headers={"Authorization": "Bearer RESPONSE_TOKEN"},
+            )
+            session = DebugSession()
+            response = session.post(
+                "https://example.invalid/token"
+                "?appsecret=APP_SECRET&access_token=APP_TOKEN&safe=value",
+                headers={
+                    "Authorization": "Bearer REQUEST_TOKEN",
+                    "x-acs-dingtalk-access-token": "DINGTALK_USER_TOKEN",
+                    "x-request-id": "safe-id",
+                },
+                json={
+                    "clientSecret": "CLIENT_SECRET",
+                    "code": "AUTH_CODE",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(logger.debug.call_count, 2)
+        log_output = " ".join(str(call) for call in logger.debug.call_args_list)
+        self.assertIn("HTTP request sent", log_output)
+        self.assertIn("HTTP response received", log_output)
+        self.assertIn("safe=value", log_output)
+        self.assertIn("x-request-id", log_output)
+        for secret in [
+            "APP_SECRET",
+            "APP_TOKEN",
+            "REQUEST_TOKEN",
+            "DINGTALK_USER_TOKEN",
+            "CLIENT_SECRET",
+            "AUTH_CODE",
+            "RESPONSE_ACCESS_TOKEN",
+            "RESPONSE_TOKEN",
+            "Ada",
+        ]:
+            self.assertNotIn(secret, log_output)
