@@ -25,7 +25,7 @@ import {
     UserFieldsEnum,
 } from "@goauthentik/api";
 
-import { kebabCase } from "change-case";
+import { capitalCase, kebabCase } from "change-case";
 import { match } from "ts-pattern";
 
 import { msg, str } from "@lit/localize";
@@ -56,10 +56,44 @@ export const OR_LIST_FORMATTERS: Intl.ListFormat = new Intl.ListFormat("default"
     type: "disjunction",
 });
 
-const UI_FIELDS: { [key: string]: string } = {
-    [UserFieldsEnum.Username]: msg("Username"),
-    [UserFieldsEnum.Email]: msg("Email"),
-    [UserFieldsEnum.Upn]: msg("UPN"),
+/**
+ * INTENTIONAL UPSTREAM DEVIATION — keep on merges from `upstream/main`.
+ *
+ * Upstream authentik builds identification-field labels from a `UI_FIELDS`
+ * constant and always renders them through `OR_LIST_FORMATTERS`. This fork
+ * instead collapses the common `[Email, Username]` pair into a single, naturally
+ * phrased translation unit ("Email or username") so it reads well in every
+ * locale (notably zh) instead of being machine-joined. This behavior is
+ * deliberate and is covered by `IdentificationStage.browser.test.ts` — do not
+ * "restore" upstream list-formatting for that pair.
+ *
+ * The `flow.identification.email-or-username` message id is likewise kept stable
+ * on purpose: it is the shared lookup key for this string across every catalog in
+ * `src/locales/` and `xliff/`. Renaming it (e.g. to add the `.label` role suffix
+ * from `AGENTS.md`) would be a bulk catalog migration that orphans the existing
+ * translations — see `AGENTS.md` ("do not do bulk renames"). Any future rename
+ * must go through `extract-locales` + re-translation, not an id edit alone.
+ */
+export const identificationFieldLabel = (fields: UserFieldsEnum[]): string => {
+    if (
+        fields.length === 2 &&
+        fields.includes(UserFieldsEnum.Email) &&
+        fields.includes(UserFieldsEnum.Username)
+    ) {
+        return msg("Email or username", {
+            id: "flow.identification.email-or-username",
+        });
+    }
+
+    const labels: Partial<Record<UserFieldsEnum, string>> = {
+        [UserFieldsEnum.Username]: msg("Username"),
+        [UserFieldsEnum.Email]: msg("Email"),
+        [UserFieldsEnum.Upn]: msg("UPN"),
+    };
+
+    // For fields we have no explicit label for, humanize the raw enum value
+    // (e.g. "phone-number" -> "Phone Number") instead of leaking the enum token.
+    return OR_LIST_FORMATTERS.format(fields.map((field) => labels[field] ?? capitalCase(field)));
 };
 
 const sortLoginSources = (a: LoginSource, b: LoginSource) =>
@@ -340,7 +374,7 @@ export class IdentificationStage extends BaseStage<
         const { flowDesignation, passwordFields, passwordlessUrl, primaryAction, userFields } =
             challenge;
 
-        const fields = (userFields || []).sort();
+        const fields = [...(userFields || [])].sort() as UserFieldsEnum[];
         if (fields.length === 0) {
             return html`<p>${msg("Select one of the options below to continue.")}</p>`;
         }
@@ -353,7 +387,7 @@ export class IdentificationStage extends BaseStage<
 
         const offerRecovery = flowDesignation === FlowDesignationEnum.Recovery;
         const type = fields.length === 1 && fields[0] === UserFieldsEnum.Email ? "email" : "text";
-        const label = OR_LIST_FORMATTERS.format(fields.map((f) => UI_FIELDS[f]));
+        const label = identificationFieldLabel(fields);
 
         // prettier-ignore
         return html`${offerRecovery ? this.renderRecoveryMessage() : nothing}

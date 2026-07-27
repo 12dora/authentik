@@ -38,6 +38,9 @@ export class ScheduleList extends Table<Schedule> {
     order = "next_run";
 
     @property()
+    actorName?: string;
+
+    @property()
     relObjAppLabel?: string;
     @property()
     relObjModel?: string;
@@ -56,6 +59,7 @@ export class ScheduleList extends Table<Schedule> {
                   : undefined;
         return new TasksApi(DEFAULT_CONFIG).tasksSchedulesList({
             ...(await this.defaultEndpointConfig()),
+            actorName: this.actorName,
             relObjContentTypeAppLabel: this.relObjAppLabel,
             relObjContentTypeModel: this.relObjModel,
             relObjId: this.relObjId,

@@ -3,6 +3,8 @@ import "weakmap-polyfill";
 import "core-js/actual/object/assign";
 import "@webcomponents/template";
 
+import { fallbackMessageForLanguage, type FallbackMessageKey } from "./fallbackLocale.ts";
+
 import {
     type AccessDeniedChallenge,
     type AuthenticatorValidationChallenge,
@@ -74,7 +76,7 @@ class SimpleFlowExecutor {
     submit(data: { [key: string]: unknown } | FormData) {
         $("button[type=submit]").addClass("disabled")
             .html(`<span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-                <span role="status">Loading...</span>`);
+                <span role="status">${fallbackMessage("loading")}</span>`);
         let finalData: { [key: string]: unknown } = {};
         if (data instanceof FormData) {
             finalData = {};
@@ -120,7 +122,10 @@ class SimpleFlowExecutor {
             default:
                 new AccessDeniedStage(this, {
                     component: "ak-stage-access-denied",
-                    errorMessage: "Unsupported stage: " + this.challenge?.component,
+                    errorMessage: fallbackMessage(
+                        "unsupportedStage",
+                        this.challenge?.component ?? "",
+                    ),
                     pendingUser: "",
                     pendingUserAvatar: "",
                 }).render();
@@ -172,13 +177,30 @@ class LoadingStage extends Stage<FlowInfoChallenge> {
     render() {
         return html`<div class="d-flex justify-content-center">
             <div class="spinner-border spinner-border-md" role="status">
-                <span class="sr-only">Loading...</span>
+                <span class="sr-only">${fallbackMessage("loading")}</span>
             </div>
         </div>`;
     }
 }
 
 const IS_INVALID = "is-invalid";
+
+// The SFE deliberately does NOT depend on `@lit/localize` (it only pulls in
+// `lit-html@1.4.1`), so every user-visible string is routed through this small
+// fallback table instead. `{0}`, `{1}`, ... placeholders are substituted with the
+// positional arguments passed to `fallbackMessage`. The `default` (English) values
+// must stay byte-for-byte identical to the previously hardcoded strings so that
+// non-zh and Traditional Chinese users see no change; the `zhHans` values mirror authentik's
+// Simplified Chinese catalog.
+function fallbackMessage(key: FallbackMessageKey, ...args: string[]): string {
+    const language = (
+        window.navigator.languages?.[0] ||
+        window.navigator.language ||
+        ""
+    ).toLowerCase();
+
+    return fallbackMessageForLanguage(language, key, ...args);
+}
 
 class IdentificationStage extends Stage<IdentificationChallenge> {
     render() {
@@ -194,7 +216,7 @@ class IdentificationStage extends Stage<IdentificationChallenge> {
                 <img class="mb-4 brand-icon" src="${ak().brand.branding_logo}" alt="" />
                 <h1 class="h3 mb-3 fw-normal text-center">${this.challenge?.flowInfo?.title}</h1>
                 ${this.challenge.applicationPre
-                    ? html`<p>Log in to continue to ${this.challenge.applicationPre}.</p>`
+                    ? html`<p>${fallbackMessage("loginPrelude", this.challenge.applicationPre)}</p>`
                     : nothing}
                 <div class="form-label-group my-3 has-validation">
                     <input
@@ -202,7 +224,7 @@ class IdentificationStage extends Stage<IdentificationChallenge> {
                         autofocus
                         class="form-control"
                         name="uid_field"
-                        placeholder="Email / Username"
+                        placeholder=${fallbackMessage("identifier")}
                     />
                 </div>
                 ${this.challenge.passwordFields
@@ -213,7 +235,7 @@ class IdentificationStage extends Stage<IdentificationChallenge> {
                                   ? IS_INVALID
                                   : ""}"
                               name="password"
-                              placeholder="Password"
+                              placeholder=${fallbackMessage("password")}
                           />
                           ${this.renderInputError("password")}
                       </div>`
@@ -246,7 +268,7 @@ class PasswordStage extends Stage<PasswordChallenge> {
                         type="text"
                         readonly
                         class="form-control-plaintext"
-                        value="Welcome, ${this.challenge?.pendingUser}."
+                        value=${fallbackMessage("welcome", this.challenge?.pendingUser ?? "")}
                     />
                 </div>
                 <div class="form-label-group my-3 has-validation">
@@ -255,11 +277,13 @@ class PasswordStage extends Stage<PasswordChallenge> {
                         autofocus
                         class="form-control ${this.error("password").length > 0 ? IS_INVALID : ""}"
                         name="password"
-                        placeholder="Password"
+                        placeholder=${fallbackMessage("password")}
                     />
                     ${this.renderInputError("password")}
                 </div>
-                <button class="btn btn-primary w-100 py-2" type="submit">Continue</button>
+                <button class="btn btn-primary w-100 py-2" type="submit">
+                    ${fallbackMessage("continue")}
+                </button>
             </form>`,
         );
         $("#password-form input").trigger("focus");
@@ -283,7 +307,7 @@ class AutosubmitStage extends Stage<AutosubmitChallenge> {
                 })}
                 <div class="d-flex justify-content-center">
                     <div class="spinner-border" role="status">
-                        <span class="sr-only">Loading...</span>
+                        <span class="sr-only">${fallbackMessage("loading")}</span>
                     </div>
                 </div>
             </form>`,
@@ -421,19 +445,19 @@ class AuthenticatorValidateStage extends Stage<AuthenticatorValidationChallenge>
                 <img class="mb-4 brand-icon" src="${ak().brand.branding_logo}" alt="" />
                 <h1 class="h3 mb-3 fw-normal text-center">${this.challenge?.flowInfo?.title}</h1>
                 ${challenges.length > 0
-                    ? html`<p>Select an authentication method.</p>`
-                    : html`<p>No compatible authentication method available</p>`}
+                    ? html`<p>${fallbackMessage("selectAuthMethod")}</p>`
+                    : html`<p>${fallbackMessage("noCompatibleAuthMethod")}</p>`}
                 ${challenges.map((challenge) => {
                     let label = undefined;
                     switch (challenge.deviceClass) {
                         case "static":
-                            label = "Recovery keys";
+                            label = fallbackMessage("recoveryKeys");
                             break;
                         case "totp":
-                            label = "Traditional authenticator";
+                            label = fallbackMessage("traditionalAuthenticator");
                             break;
                         case "webauthn":
-                            label = "Security key";
+                            label = fallbackMessage("securityKey");
                             break;
                     }
                     if (!label) {
@@ -474,12 +498,14 @@ class AuthenticatorValidateStage extends Stage<AuthenticatorValidationChallenge>
                         autofocus
                         class="form-control ${this.error("code").length > 0 ? IS_INVALID : ""}"
                         name="code"
-                        placeholder="Please enter your code"
+                        placeholder=${fallbackMessage("enterCode")}
                         autocomplete="one-time-code"
                     />
                     ${this.renderInputError("code")}
                 </div>
-                <button class="btn btn-primary w-100 py-2" type="submit">Continue</button>
+                <button class="btn btn-primary w-100 py-2" type="submit">
+                    ${fallbackMessage("continue")}
+                </button>
             </form>`,
         );
         $("#totp-form input").trigger("focus");
@@ -492,7 +518,7 @@ class AuthenticatorValidateStage extends Stage<AuthenticatorValidationChallenge>
                 <h1 class="h3 mb-3 fw-normal text-center">${this.challenge?.flowInfo?.title}</h1>
                 <div class="d-flex justify-content-center">
                     <div class="spinner-border" role="status">
-                        <span class="sr-only">Loading...</span>
+                        <span class="sr-only">${fallbackMessage("loading")}</span>
                     </div>
                 </div>
             </form>
@@ -536,7 +562,7 @@ class AccessDeniedStage extends Stage<AccessDeniedChallenge> {
             html`<form id="access-denied">
                 <img class="mb-4 brand-icon" src="${ak().brand.branding_logo}" alt="" />
                 <h1 class="h3 mb-3 fw-normal text-center">${this.challenge?.flowInfo?.title}</h1>
-                <p>${this.challenge.errorMessage ?? "Access denied."}</p>
+                <p>${this.challenge.errorMessage ?? fallbackMessage("accessDenied")}</p>
             </form>`,
         );
     }

@@ -79,7 +79,7 @@ export class AKStageWizard extends CreateWizard {
             <ak-radio
                 .options=${[
                     {
-                        label: "Bind existing stage",
+                        label: msg("Bind existing stage"),
                         description: msg("Bind an existing stage to this flow."),
                         value: true,
                     },

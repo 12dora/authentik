@@ -185,7 +185,7 @@ export class AKPageNavbar
 
     render(): TemplateResult {
         return html`<slot></slot>
-            <div role="banner" aria-label="Main" class="main-content">
+            <div role="banner" aria-label=${msg("Main")} class="main-content">
                 ${this.renderBrand()}
                 <slot name="toggle"></slot>
 

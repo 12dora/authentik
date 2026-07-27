@@ -1,0 +1,415 @@
+import type { DingTalkDirectoryClient } from "./DingTalkDirectoryApi";
+import type { DingTalkDirectoryPanel } from "./DingTalkDirectoryPanel";
+import type { DingTalkDirectorySyncStatus } from "./DingTalkDirectoryPanelController";
+
+import { MessageLevel } from "#common/messages";
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const showMessage = vi.hoisted(() => vi.fn());
+
+vi.mock("#elements/messages/MessageContainer", () => ({
+    showMessage,
+}));
+
+vi.mock("#elements/tasks/ScheduleList", () => {
+    if (!customElements.get("ak-schedule-list")) {
+        customElements.define("ak-schedule-list", class ScheduleList extends HTMLElement {});
+    }
+    return {};
+});
+
+vi.mock("#common/api/config", () => ({
+    DEFAULT_CONFIG: {},
+}));
+
+vi.mock("#common/errors/network", () => ({
+    parseAPIResponseError: async (error: unknown) => error,
+    pluckErrorDetail: (error: unknown) => (error instanceof Error ? error.message : String(error)),
+}));
+
+vi.mock("@goauthentik/api", () => ({
+    CapabilitiesEnum: {
+        CanDebug: "can_debug",
+    },
+    Configuration: class Configuration {
+        public constructor(init?: object) {
+            Object.assign(this, init);
+        }
+    },
+    FlowLayoutEnum: {
+        ContentLeft: "content_left",
+        ContentRight: "content_right",
+        Stacked: "stacked",
+    },
+    SourcesApi: class SourcesApi {},
+    UiThemeEnum: {
+        Automatic: "automatic",
+        Dark: "dark",
+        Light: "light",
+    },
+}));
+
+vi.mock("#common/global", () => ({
+    docLink: (url: string | URL) => String(url),
+    globalAK: () => ({
+        api: {
+            base: "/",
+            relBase: "/",
+        },
+        brand: {
+            uiFooterLinks: [],
+        },
+        build: "",
+        config: {
+            capabilities: [],
+        },
+        locale: "en",
+        versionFamily: "",
+        versionSubdomain: "",
+    }),
+}));
+
+vi.mock("#common/sentry/index", () => ({
+    SentryIgnoredError: class SentryIgnoredError extends Error {},
+}));
+
+vi.mock("#elements/entities/used-by", () => ({
+    usedByLabel: () => "",
+}));
+
+function makeSyncStatus(
+    corpId: string,
+    status: string,
+    overrides: Partial<DingTalkDirectorySyncStatus> = {},
+): DingTalkDirectorySyncStatus {
+    return {
+        corpId,
+        status,
+        startedAt: null,
+        finishedAt: null,
+        error: "",
+        counters: {},
+        ...overrides,
+    };
+}
+
+async function registerDingTalkDirectoryPanel(): Promise<void> {
+    await import("./DingTalkDirectoryPanel");
+}
+
+function makePanel(client: Partial<DingTalkDirectoryClient>): DingTalkDirectoryPanel {
+    const panel = document.createElement(
+        "ak-source-oauth-dingtalk-directory",
+    ) as DingTalkDirectoryPanel;
+
+    Object.assign(panel, {
+        api: {
+            status: async () => ({ sourceSlug: "source-a", canChange: true, sync: [] }),
+            sync: async (_sourceSlug: string, request: { corpId: string }) => ({
+                queued: true,
+                corpId: request.corpId,
+            }),
+            destroy: async () => undefined,
+            ...client,
+        },
+        source: { slug: "source-a" },
+    });
+
+    document.body.append(panel);
+    return panel;
+}
+
+// The PatternFly base stylesheet that defines the global spacers is not loaded in
+// component tests, so rules built on them (such as `.pf-c-content li + li`) compute
+// to zero and layout bugs they cause cannot reproduce. Supply the ones this panel
+// depends on to match what the admin interface renders with.
+function applyPatternFlySpacers(panel: DingTalkDirectoryPanel): void {
+    panel.style.setProperty("--pf-global--spacer--xs", "0.25rem");
+    panel.style.setProperty("--pf-global--spacer--sm", "0.5rem");
+    panel.style.setProperty("--pf-global--spacer--md", "1rem");
+}
+
+async function settled(panel: DingTalkDirectoryPanel): Promise<void> {
+    await panel.updateComplete;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await panel.updateComplete;
+}
+
+describe("DingTalkDirectoryPanel", () => {
+    beforeEach(async () => {
+        await registerDingTalkDirectoryPanel();
+        vi.mocked(showMessage).mockClear();
+        document.body.replaceChildren();
+    });
+
+    it("renders loading summary instead of zero metrics before status has loaded", async () => {
+        const panel = makePanel({
+            status: () => new Promise(() => undefined),
+        });
+
+        await panel.updateComplete;
+
+        expect(panel.shadowRoot?.textContent).toContain("Loading DingTalk directory status.");
+        expect(panel.shadowRoot?.textContent).not.toContain("Corp sync records");
+    });
+
+    it("marks old metrics as stale when an explicit refresh fails after data loaded", async () => {
+        let fail = false;
+        const panel = makePanel({
+            status: async () => {
+                if (fail) {
+                    throw new Error("network failed");
+                }
+                return {
+                    sourceSlug: "source-a",
+                    canChange: true,
+                    sync: [makeSyncStatus("corp-a", "success")],
+                };
+            },
+        });
+        await settled(panel);
+        fail = true;
+
+        const refresh = panel.shadowRoot?.querySelector("ak-spinner-button");
+        await expect(refresh!.callAction!()).rejects.toThrow("network failed");
+        await settled(panel);
+
+        expect(panel.shadowRoot?.textContent).toContain(
+            "Previous directory status is shown because refresh failed.",
+        );
+        expect(panel.shadowRoot?.textContent).toContain("corp-a");
+    });
+
+    it("submits Enter and button paths through one pending sync action", async () => {
+        let syncCalls = 0;
+        let resolveSync: (() => void) | undefined;
+        const panel = makePanel({
+            sync: async (_sourceSlug, request) => {
+                syncCalls += 1;
+                await new Promise<void>((resolve) => {
+                    resolveSync = resolve;
+                });
+                return { queued: true, corpId: request.corpId };
+            },
+        });
+        Object.assign(panel, { loaded: true });
+        await settled(panel);
+
+        const input = panel.shadowRoot?.querySelector<HTMLInputElement>(
+            "#dingtalk-directory-corp-id",
+        );
+        const form = panel.shadowRoot?.querySelector("form");
+        const button = panel.shadowRoot?.querySelector<HTMLButtonElement>('button[type="submit"]');
+        input!.value = "corp-a";
+        input!.dispatchEvent(new InputEvent("input", { bubbles: true }));
+
+        form!.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+        button!.click();
+        await settled(panel);
+
+        expect(syncCalls).toBe(1);
+        expect(button?.disabled).toBe(true);
+
+        resolveSync?.();
+        await settled(panel);
+
+        expect(syncCalls).toBe(1);
+    });
+
+    it("routes empty corp submission to field error and toast", async () => {
+        const panel = makePanel({});
+        Object.assign(panel, { loaded: true });
+        await settled(panel);
+
+        panel
+            .shadowRoot!.querySelector("form")!
+            .dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+        await settled(panel);
+
+        const input = panel.shadowRoot?.querySelector<HTMLInputElement>(
+            "#dingtalk-directory-corp-id",
+        );
+        expect(input?.getAttribute("aria-invalid")).toBe("true");
+        expect(panel.shadowRoot?.textContent).toContain(
+            "Corp ID is required to queue a DingTalk directory sync.",
+        );
+        expect(vi.mocked(showMessage).mock.calls.at(-1)?.[0].level).toBe(MessageLevel.error);
+    });
+
+    it("disables delete for running rows and gives terminal rows unique names", async () => {
+        const panel = makePanel({
+            status: async () => ({
+                sourceSlug: "source-a",
+                canChange: true,
+                sync: [makeSyncStatus("corp-a", "running"), makeSyncStatus("corp-b", "success")],
+            }),
+        });
+        await settled(panel);
+
+        const disabledDelete = panel.shadowRoot?.querySelector<HTMLButtonElement>(
+            'button[aria-label*="corp-a"]',
+        );
+        const enabledDelete = panel.shadowRoot?.querySelector<HTMLButtonElement>(
+            'button[aria-label*="corp-b"]',
+        );
+
+        expect(disabledDelete?.disabled).toBe(true);
+        expect(enabledDelete?.disabled).toBe(false);
+        expect(panel.shadowRoot?.querySelector("table")?.getAttribute("role")).toBeNull();
+        expect(panel.shadowRoot?.querySelector("caption")?.textContent).toContain(
+            "DingTalk directory sync status by corp",
+        );
+    });
+
+    it("announces terminal refresh outcomes once", async () => {
+        const panel = makePanel({
+            status: async () => ({
+                sourceSlug: "source-a",
+                canChange: true,
+                sync: [
+                    {
+                        ...makeSyncStatus("corp-a", "success", {
+                            counters: { warnings: ["partial detail failure"] },
+                        }),
+                        generation: 1,
+                    },
+                    {
+                        ...makeSyncStatus("corp-b", "error", { error: "provider denied" }),
+                        generation: 1,
+                    },
+                ],
+            }),
+        });
+        await settled(panel);
+        vi.mocked(showMessage).mockClear();
+
+        await panel.shadowRoot?.querySelector("ak-spinner-button")?.callAction?.();
+        await panel.shadowRoot?.querySelector("ak-spinner-button")?.callAction?.();
+
+        expect(vi.mocked(showMessage).mock.calls).toHaveLength(2);
+        expect(vi.mocked(showMessage).mock.calls[0]?.[0].level).toBe(MessageLevel.warning);
+        expect(vi.mocked(showMessage).mock.calls[1]?.[0].level).toBe(MessageLevel.error);
+    });
+
+    it("gives every summary tile the same height", async () => {
+        const panel = makePanel({
+            status: async () => ({
+                sourceSlug: "source-a",
+                canChange: true,
+                sync: [makeSyncStatus("corp-a", "success"), makeSyncStatus("corp-b", "error")],
+            }),
+        });
+        applyPatternFlySpacers(panel);
+        await settled(panel);
+
+        const tiles = Array.from(
+            panel.shadowRoot!.querySelectorAll<HTMLElement>(".ak-dingtalk-directory-summary-item"),
+        );
+
+        expect(tiles.length).toBeGreaterThan(1);
+        expect(tiles.map((tile) => getComputedStyle(tile).marginTop)).toEqual(
+            tiles.map(() => "0px"),
+        );
+        expect(new Set(tiles.map((tile) => tile.getBoundingClientRect().height)).size).toBe(1);
+    });
+
+    it("keeps the last refreshed label, elapsed time, and datetime on one line", async () => {
+        const panel = makePanel({
+            status: async () => ({
+                sourceSlug: "source-a",
+                canChange: true,
+                sync: [makeSyncStatus("corp-a", "success")],
+            }),
+        });
+        await settled(panel);
+
+        const timestamp = panel.shadowRoot!.querySelector(
+            ".ak-dingtalk-directory-last-refreshed ak-timestamp",
+        )!;
+        const parts = ["label", "elapsed", "datetime"].map(
+            (part) => timestamp.shadowRoot!.querySelector<HTMLElement>(`[part="${part}"]`)!,
+        );
+
+        const boxes = parts.map((part) => part.getBoundingClientRect());
+
+        expect(parts.every(Boolean)).toBe(true);
+        expect(timestamp.textContent).toContain("Last refreshed");
+        // Same line: every part's vertical range overlaps every other one's. The
+        // datetime renders in a smaller font, so the tops themselves differ.
+        expect(Math.max(...boxes.map((box) => box.top))).toBeLessThan(
+            Math.min(...boxes.map((box) => box.bottom)),
+        );
+    });
+
+    it("localizes sync error codes instead of showing the raw contract value", async () => {
+        const panel = makePanel({
+            status: async () => ({
+                sourceSlug: "source-a",
+                canChange: true,
+                sync: [
+                    makeSyncStatus("corp-a", "error", {
+                        error: "dingtalk_directory_invalid_response",
+                        errorCode: "dingtalk_directory_invalid_response",
+                    }),
+                ],
+            }),
+        });
+        await settled(panel);
+
+        const summary = panel.shadowRoot!.querySelector("details > summary")!;
+
+        expect(summary.textContent).toContain("DingTalk returned an invalid directory response.");
+        expect(summary.textContent).not.toContain("dingtalk_directory_invalid_response");
+    });
+
+    it("localizes unknown sync errors in the failure notification", async () => {
+        const panel = makePanel({
+            status: async () => ({
+                sourceSlug: "source-a",
+                canChange: true,
+                sync: [
+                    {
+                        ...makeSyncStatus("corp-a", "error", { error: "provider denied" }),
+                        generation: 1,
+                    },
+                ],
+            }),
+        });
+        await settled(panel);
+        vi.mocked(showMessage).mockClear();
+
+        await panel.shadowRoot?.querySelector("ak-spinner-button")?.callAction?.();
+
+        const message = vi.mocked(showMessage).mock.calls.at(-1)?.[0].message;
+        expect(message).toContain("DingTalk directory sync failed.");
+        expect(message).not.toContain("provider denied");
+    });
+
+    it("keeps directory status visible but disables sync and delete when canChange is false", async () => {
+        const panel = makePanel({
+            status: async () => ({
+                sourceSlug: "source-a",
+                canChange: false,
+                sync: [makeSyncStatus("corp-a", "success")],
+            }),
+        });
+        await settled(panel);
+
+        expect(panel.shadowRoot?.textContent).toContain(
+            "You can view DingTalk directory status, but you need permission",
+        );
+        expect(
+            panel.shadowRoot?.querySelector<HTMLInputElement>("#dingtalk-directory-corp-id")
+                ?.disabled,
+        ).toBe(true);
+        expect(
+            panel.shadowRoot?.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled,
+        ).toBe(true);
+        expect(
+            panel.shadowRoot?.querySelector<HTMLButtonElement>('button[aria-label*="corp-a"]')
+                ?.disabled,
+        ).toBe(true);
+        expect(panel.shadowRoot?.textContent).toContain("corp-a");
+    });
+});

@@ -1,0 +1,318 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+const allowlistPanel = readFileSync(
+    resolve(import.meta.dirname, "../../src/admin/sources/oauth/DingTalkAllowlistPanel.ts"),
+    "utf8",
+);
+
+const departmentPicker = readFileSync(
+    resolve(import.meta.dirname, "../../src/admin/sources/oauth/DingTalkDepartmentPickerModal.ts"),
+    "utf8",
+);
+
+const allowlistApi = readFileSync(
+    resolve(import.meta.dirname, "../../src/admin/sources/oauth/DingTalkAllowlistApi.ts"),
+    "utf8",
+);
+
+const directoryPanel = readFileSync(
+    resolve(import.meta.dirname, "../../src/admin/sources/oauth/DingTalkDirectoryPanel.ts"),
+    "utf8",
+);
+
+const zhHans = readFileSync(resolve(import.meta.dirname, "../../xliff/zh-Hans.xlf"), "utf8");
+
+describe("DingTalkAllowlistPanel localization and controls", () => {
+    it("has Simplified Chinese translations for every DingTalk allowlist message id", () => {
+        const ids = Array.from(
+            `${allowlistPanel}\n${departmentPicker}`.matchAll(
+                /id:\s*"([^"]*sources\.oauth\.dingtalk-allowlist[^"]*)"/gu,
+            ),
+            (match) => match[1],
+        );
+
+        const uniqueIds = new Set(ids);
+        expect(uniqueIds.size).toBeGreaterThan(20);
+
+        for (const id of uniqueIds) {
+            expect(zhHans).toContain(`<trans-unit id="${id}">`);
+        }
+    });
+
+    it("renders an editable label field but keeps corpId read-only inside configured rows", () => {
+        expect(allowlistPanel).toContain(
+            "sources.oauth.dingtalk-allowlist.company.label.aria-label",
+        );
+        expect(allowlistPanel).not.toContain(
+            "sources.oauth.dingtalk-allowlist.company.corp-id.aria-label",
+        );
+    });
+
+    it("renders loaded department checkboxes in the picker that synchronize with the input", () => {
+        expect(departmentPicker).toContain("toggleDingTalkDepartmentTreeInput(");
+        expect(departmentPicker).toContain("buildDingTalkDepartmentTreeRows(");
+        expect(departmentPicker).toContain('.indeterminate=${row.selection === "indeterminate"}');
+    });
+
+    it("uses target-specific policy bindings for authentication and enrollment status rows", () => {
+        expect(allowlistPanel).toContain("bindingStateForTarget(this.source?.authenticationFlow)");
+        expect(allowlistPanel).toContain("bindingStateForTarget(this.source?.enrollmentFlow)");
+        expect(allowlistPanel).toContain("binding.target === target");
+    });
+
+    it("gates allowlist mutation controls with canManage from status", () => {
+        expect(allowlistPanel).toContain("private get canManage()");
+        expect(allowlistPanel).toContain("this.status?.canManage === true");
+        expect(allowlistPanel).toContain("sources.oauth.dingtalk-allowlist.read-only");
+        expect(allowlistPanel).toContain("?disabled=${!this.loaded || !this.canManage}");
+        expect(allowlistPanel).toContain("if (!this.canManage)");
+    });
+
+    it("gates directory mutation controls with canChange from status", () => {
+        expect(directoryPanel).toContain("private canChange = false");
+        expect(directoryPanel).toContain("canChange = response.canChange");
+        expect(directoryPanel).toContain("sources.oauth.dingtalk-directory.read-only");
+        expect(directoryPanel).toContain(
+            "?disabled=${!this.loaded || this.manualSyncPending || !this.canChange}",
+        );
+        expect(directoryPanel).toContain("if (!this.canChange)");
+    });
+
+    it("uses generated allowlist API methods instead of raw request shims", () => {
+        expect(allowlistApi).toContain("sourcesOauthDingtalkAllowlistApplyCreate({");
+        expect(allowlistApi).toContain("sourcesOauthDingtalkAllowlistRemoveCreate({");
+        expect(allowlistApi).not.toContain("RequestOpts");
+        expect(allowlistApi).not.toContain("JSONApiResponse");
+        expect(allowlistApi).not.toContain("this.request(");
+        expect(allowlistApi).not.toContain("fetch(");
+    });
+
+    it("renders bulk loaded-department selection controls in the picker", () => {
+        expect(departmentPicker).toContain("selectLoadedDingTalkDepartmentInput(");
+        expect(departmentPicker).toContain("invertLoadedDingTalkDepartmentInput(");
+        expect(departmentPicker).toContain(
+            "sources.oauth.dingtalk-allowlist.departments.select-all",
+        );
+        expect(departmentPicker).toContain("sources.oauth.dingtalk-allowlist.departments.invert");
+    });
+
+    it("opens the department picker as a modal dialog instead of an inline tree", () => {
+        expect(allowlistPanel).toContain("new DingTalkDepartmentPickerModal()");
+        expect(allowlistPanel).toContain("await renderDialog(picker)");
+        expect(allowlistPanel).not.toContain("renderDepartments(");
+        expect(departmentPicker).toContain("extends AKModal");
+        // Cancel discards the local edit; only Apply hands the value back.
+        expect(departmentPicker).toContain("this.onApply?.(this.value)");
+    });
+
+    it("warns that DingTalk logins fail closed while no allowlist is configured", () => {
+        expect(allowlistPanel).toContain("renderFailClosedNotice(");
+        expect(allowlistPanel).toContain(
+            "sources.oauth.dingtalk-allowlist.fail-closed.unconfigured",
+        );
+    });
+
+    it("normalizes discovered company labels from DingTalk corp name fields", () => {
+        expect(allowlistPanel).toContain("const payload = { ...profile, ...record };");
+        expect(allowlistPanel).toContain("payload.companyName");
+        expect(allowlistPanel).toContain("payload.corp_name");
+        expect(allowlistPanel).toContain("payload.corpName");
+    });
+
+    it("localizes DingTalk allowlist errors by stable machine code instead of raw prose", () => {
+        expect(allowlistPanel).toContain("extractDingTalkAllowlistErrorCode(");
+        expect(allowlistPanel).toContain('"department_access_denied"');
+        expect(allowlistPanel).toContain('"department_dependency_unavailable"');
+        expect(allowlistPanel).toContain('"department_response_invalid"');
+        expect(allowlistPanel).toContain('"authorization_code_missing"');
+        expect(allowlistPanel).toContain('"provider_unavailable"');
+        expect(allowlistPanel).toContain('"provider_response_invalid"');
+        expect(allowlistPanel).toContain('"state_invalid"');
+        expect(allowlistPanel).toContain('"state_expired"');
+        expect(allowlistPanel).toContain('"state_replayed"');
+        expect(allowlistPanel).toContain('"state_source_mismatch"');
+        expect(allowlistPanel).toContain("localizeDingTalkDepartmentError(");
+        expect(allowlistPanel).toContain("localizeDingTalkDiscoveryError(");
+        expect(allowlistPanel).not.toContain('"invalid_discovery_state"');
+        expect(allowlistPanel).not.toContain('"state_consumed"');
+        expect(allowlistPanel).not.toContain('"state_mismatch"');
+        expect(allowlistPanel).not.toContain("detail.includes(");
+        expect(allowlistPanel).not.toContain('"error",');
+        expect(allowlistPanel).not.toContain("normalizeOptionalString(record.error)");
+    });
+
+    it("defaults a discovered company to restricted so an inattentive save cannot grant org-wide access", () => {
+        expect(allowlistPanel).toContain(
+            "this.upsertCompany(result.corpId, result.label || result.corpId, false, []);",
+        );
+        // The old allow-all default is gone.
+        expect(allowlistPanel).not.toContain(
+            "this.upsertCompany(result.corpId, result.label || result.corpId, true, []);",
+        );
+    });
+
+    it("warns on every full-company row that it grants org-wide access", () => {
+        expect(allowlistPanel).toContain(
+            "sources.oauth.dingtalk-allowlist.company.allow-all.warning",
+        );
+    });
+
+    it("renders a first-load spinner until the initial status refresh settles", () => {
+        expect(allowlistPanel).toContain("private loaded = false;");
+        expect(allowlistPanel).toContain("this.loaded = true;");
+        expect(allowlistPanel).toContain("sources.oauth.dingtalk-allowlist.status.loading");
+        expect(allowlistPanel).toContain("<ak-empty-state loading");
+    });
+
+    it("surfaces companies detected on a shared flow read-only instead of prefilling the editable model", () => {
+        // The foreign shared-flow config is stored separately and never assigned to this.model.
+        expect(allowlistPanel).toContain("private detectedSharedConfig?");
+        expect(allowlistPanel).toContain("sources.oauth.dingtalk-allowlist.detected.title");
+        expect(allowlistPanel).toContain("adoptDetectedSharedConfig(");
+        expect(allowlistPanel).toContain(
+            "this.detectedSharedConfig = dingTalkAllowlistModelFromStoredConfig(config)",
+        );
+    });
+
+    it("guards every editable text input against mid-composition IME rewrites", () => {
+        expect(allowlistPanel).toContain("@compositionstart=${this.startComposition}");
+        expect(allowlistPanel).toContain("handleCompositionEnd(");
+        expect(allowlistPanel).toContain("handleComposedInput(");
+        expect(allowlistPanel).toContain("if (this.composing) {");
+    });
+
+    it("associates the manual company labels with their inputs via for/id", () => {
+        expect(allowlistPanel).toContain('for="dingtalk-manual-corp-id"');
+        expect(allowlistPanel).toContain('id="dingtalk-manual-corp-id"');
+        expect(allowlistPanel).toContain('for="dingtalk-manual-label"');
+        expect(allowlistPanel).toContain('id="dingtalk-manual-label"');
+    });
+
+    it("gives every department-tree checkbox an accessible name and PatternFly styling", () => {
+        expect(departmentPicker).toContain(
+            "sources.oauth.dingtalk-allowlist.department.checkbox.aria-label",
+        );
+        // aria-level is only meaningful on treeitem/row/heading roles, not a checkbox.
+        expect(departmentPicker).not.toContain("aria-level=");
+        expect(departmentPicker).toContain('class="pf-c-check__input"');
+    });
+
+    it("uses native responsive table semantics for allowlist and picker tables", () => {
+        expect(allowlistPanel).toContain("PFTableGrid");
+        expect(departmentPicker).toContain("PFTableGrid");
+        expect(allowlistPanel).toContain("sources.oauth.dingtalk-allowlist.table.caption");
+        expect(allowlistPanel).not.toContain('role="grid"');
+        expect(allowlistPanel).toContain('scope="col"');
+        expect(allowlistPanel).toContain('scope="row"');
+        expect(departmentPicker).toContain('scope="col"');
+    });
+
+    it("styles the allow-full-company toggle as a PatternFly switch", () => {
+        expect(allowlistPanel).toContain('class="pf-c-switch"');
+        expect(allowlistPanel).toContain('class="pf-c-switch__input"');
+    });
+
+    it("submits the manual company and department inputs on Enter", () => {
+        expect(allowlistPanel).toContain("handleSubmitKey(");
+        expect(allowlistPanel).toContain("event.isComposing");
+    });
+
+    it("drops per-corp state when a company is removed so a re-add starts clean", () => {
+        expect(allowlistPanel).toContain("omitRecordKey(this.departmentInputs, corpId)");
+    });
+
+    it("closes the discovery popup itself when finishing discovery", () => {
+        expect(allowlistPanel).toContain("this.discoveryPopup?.close();");
+    });
+
+    it("uses the backend allowlist transaction instead of browser-side policy and binding writes", () => {
+        expect(allowlistPanel).toContain("sourcesOauthDingtalkAllowlistApplyCreate");
+        expect(allowlistPanel).toContain("sourcesOauthDingtalkAllowlistRemoveCreate");
+        expect(allowlistPanel).toContain("expectedRevision");
+        expect(allowlistPanel).not.toContain("createOrUpdatePolicy(");
+        expect(allowlistPanel).not.toContain("listAllPolicyBindings(");
+        expect(allowlistPanel).not.toContain("#elements/forms/ConfirmationForm");
+    });
+
+    it("paginates and filters the loaded department tree in the picker", () => {
+        expect(departmentPicker).toContain("filterDingTalkDepartmentTreeRows(");
+        expect(departmentPicker).toContain("dingtalkDepartmentPageWindow(");
+        expect(departmentPicker).toContain("renderPager(");
+        expect(departmentPicker).toContain(
+            "sources.oauth.dingtalk-allowlist.departments.filter.placeholder",
+        );
+    });
+
+    it("clears the discovery popup reference when the popup is closed manually", () => {
+        expect(allowlistPanel).toContain("finishDiscovery(");
+        expect(allowlistPanel).toContain("this.discoveryPopup.closed");
+        expect(allowlistPanel).toContain("setInterval(");
+    });
+
+    it("shows an unsaved-changes banner when the local allowlist is dirty", () => {
+        expect(allowlistPanel).toContain("private dirty = false;");
+        expect(allowlistPanel).toContain("renderUnsavedChanges(");
+        expect(allowlistPanel).toContain("sources.oauth.dingtalk-allowlist.unsaved.title");
+    });
+
+    it("atomically resets source-scoped drafts before loading a different source", () => {
+        expect(allowlistPanel).toContain("private resetSourceState(): void");
+        expect(allowlistPanel).toContain("this.model = { companies: [] };");
+        expect(allowlistPanel).toContain("this.departmentInputs = {};");
+        expect(allowlistPanel).toContain("this.loaded = false;");
+        expect(allowlistPanel).toContain("this.dirty = false;");
+    });
+
+    it("binds async reads and saves to the source slug that started the action", () => {
+        expect(allowlistPanel).toContain("const sourceSlug = this.source.slug;");
+        expect(allowlistPanel).toContain("this.source?.slug !== sourceSlug");
+        expect(allowlistPanel).toContain(
+            "this.allowlistApi.sourcesOauthDingtalkAllowlistApplyCreate(sourceSlug",
+        );
+    });
+
+    it("reports refresh failures through the button result and an alert instead of a silent success", () => {
+        expect(allowlistPanel).toContain("refreshStatusAction(");
+        expect(allowlistPanel).toContain("this.refreshStatusAction()");
+        expect(allowlistPanel).toContain("sources.oauth.dingtalk-allowlist.status.refresh-failed");
+        // Partial failures are surfaced as an alert, not just a heading.
+        expect(allowlistPanel).toContain("</ak-alert>");
+    });
+
+    it("binds checkboxes through the checked property so programmatic state stays visible", () => {
+        expect(allowlistPanel).toContain(".checked=${company.allowAll}");
+        expect(allowlistPanel).not.toContain("?checked=");
+        expect(departmentPicker).toContain('.checked=${row.selection === "checked"}');
+        expect(departmentPicker).not.toContain("?checked=");
+    });
+
+    it("binds the manual company inputs through the value property so they clear after adding", () => {
+        expect(allowlistPanel).toContain(".value=${this.manualCorpId}");
+        expect(allowlistPanel).toContain(".value=${this.manualLabel}");
+    });
+
+    it("keeps loading departments read-only instead of merging them into the allowlist", () => {
+        expect(allowlistPanel).not.toContain("mergeLoadedDingTalkDepartmentInput");
+        expect(allowlistPanel).toContain("normalizeDingTalkDepartments(response.departments)");
+    });
+
+    it("only accepts discovery messages from its own popup with the backend marker fields", () => {
+        expect(allowlistPanel).toContain("event.source !== this.discoveryPopup");
+        expect(allowlistPanel).toContain("DINGTALK_DISCOVERY_MESSAGE_SOURCE");
+        expect(allowlistPanel).toContain("DINGTALK_DISCOVERY_MESSAGE_CONTEXT");
+        expect(allowlistPanel).toContain("record.ok === false");
+    });
+
+    it("opens the discovery popup synchronously before awaiting the start endpoint", () => {
+        const popupIndex = allowlistPanel.indexOf("window.open(");
+        const startIndex = allowlistPanel.indexOf(
+            "sourcesOauthDingtalkAllowlistDiscoverStartCreate",
+        );
+        expect(allowlistPanel).toContain('"about:blank"');
+        expect(popupIndex).toBeGreaterThan(-1);
+        expect(startIndex).toBeGreaterThan(popupIndex);
+    });
+});

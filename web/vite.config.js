@@ -11,6 +11,7 @@ import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vite";
 
 const patternflyPath = resolvePackage("@patternfly/patternfly", import.meta);
+const browserExecutablePath = process.env.AK_VITEST_BROWSER_EXECUTABLE_PATH;
 
 export default defineConfig({
     define: createBundleDefinitions(),
@@ -50,6 +51,7 @@ export default defineConfig({
                 },
             },
             {
+                plugins: [inlineCSSPlugin()],
                 test: {
                     setupFiles: ["./test/lit/setup.js"],
 
@@ -57,7 +59,11 @@ export default defineConfig({
                     name: "Browser Tests",
                     browser: {
                         enabled: true,
-                        provider: playwright(),
+                        provider: playwright({
+                            launchOptions: browserExecutablePath
+                                ? { executablePath: browserExecutablePath }
+                                : undefined,
+                        }),
 
                         instances: [
                             {

@@ -140,7 +140,7 @@ class UserInterface extends WithBrandConfig(WithSession(AuthenticatedInterface))
                 </div>
                 <header
                     role="banner"
-                    aria-label="Main"
+                    aria-label=${msg("Main")}
                     part="page__header"
                     class="pf-c-page__header"
                 >

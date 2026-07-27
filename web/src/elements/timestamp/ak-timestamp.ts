@@ -5,6 +5,7 @@ import { intersectionObserver } from "#elements/decorators/intersection-observer
 import { ifPresent } from "#elements/utils/attributes";
 import { dateProperty } from "#elements/utils/properties";
 
+import { msg } from "@lit/localize";
 import { html, nothing, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 
@@ -130,7 +131,7 @@ export class AKTimestamp extends AKElement {
 
     public render() {
         if (!this.timestamp || this.timestamp.getTime() === 0) {
-            return html`<span role="time" aria-label="None">-</span>`;
+            return html`<span role="time" aria-label=${msg("None")}>${msg("-")}</span>`;
         }
 
         const elapsed = formatElapsedTime(this.timestamp);
