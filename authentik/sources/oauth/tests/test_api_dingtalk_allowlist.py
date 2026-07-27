@@ -769,7 +769,12 @@ class TestDingTalkAllowlistAPI(APITestCase):
 
     def test_non_admin_cannot_use_server_side_discovery_endpoints(self):
         """Server-side DingTalk endpoints require source read permissions."""
-        self.client.force_login(create_test_user())
+        # force_authenticate() from setUp() is sticky on the DRF client, so force_login()
+        # alone would leave requests authenticated as the admin and never exercise the
+        # permission check. Re-force both, the way the directory tests do.
+        non_admin = create_test_user()
+        self.client.force_login(non_admin)
+        self.client.force_authenticate(user=non_admin)
 
         for method, path, body in [
             (

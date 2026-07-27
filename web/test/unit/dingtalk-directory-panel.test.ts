@@ -23,6 +23,8 @@ function makeSyncStatus(
         startedAt: null,
         finishedAt: null,
         error: "",
+        errorCode: "",
+        errorParams: {},
         counters: {},
         ...overrides,
     };
