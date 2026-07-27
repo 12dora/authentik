@@ -27,7 +27,47 @@ export interface DingTalkDirectoryTerminalEvent {
     key: string;
     corpId: string;
     status: "success" | "error" | "warning";
-    detail?: string;
+    /** Stable backend error code; the panel turns it into a localized message. */
+    errorCode?: DingTalkDirectorySyncErrorCode;
+}
+
+// Mirrors DINGTALK_SYNC_ERROR_CODES in authentik/sources/oauth/dingtalk/sync.py. The
+// backend only ever reports one of these, so the UI never has to render raw text.
+export const DINGTALK_DIRECTORY_SYNC_ERROR_CODES = [
+    "dingtalk_directory_broker_unavailable",
+    "dingtalk_directory_concurrency_limit",
+    "dingtalk_directory_http_request_failed",
+    "dingtalk_directory_invalid_response",
+    "dingtalk_directory_payload_limit",
+    "dingtalk_directory_run_stale",
+    "dingtalk_directory_source_disabled",
+    "dingtalk_directory_source_unavailable",
+    "dingtalk_directory_unsupported_source",
+    "dingtalk_directory_user_limit",
+    "dingtalk_directory_user_detail_failed",
+    "dingtalk_directory_sync_failed",
+] as const;
+
+export type DingTalkDirectorySyncErrorCode = (typeof DINGTALK_DIRECTORY_SYNC_ERROR_CODES)[number];
+
+const SYNC_ERROR_CODES = new Set<string>(DINGTALK_DIRECTORY_SYNC_ERROR_CODES);
+
+/**
+ * Normalize the error a sync row reports into a known code.
+ *
+ * Rows written before the stable error contract can still hold free-form text; those
+ * collapse to the generic failure code so the raw provider message never reaches the UI.
+ */
+export function dingtalkDirectorySyncErrorCode(
+    status: Pick<DingTalkDirectorySyncStatus, "error" | "errorCode">,
+): DingTalkDirectorySyncErrorCode | null {
+    const candidate = (status.errorCode || status.error || "").trim();
+    if (!candidate) {
+        return null;
+    }
+    return SYNC_ERROR_CODES.has(candidate)
+        ? (candidate as DingTalkDirectorySyncErrorCode)
+        : "dingtalk_directory_sync_failed";
 }
 
 export type DingTalkDirectoryStatusWithGeneration = DingTalkDirectorySyncStatus & {
@@ -110,15 +150,6 @@ export function nextDingTalkDirectoryPollDelay(state: DingTalkDirectoryPollState
     return Math.min(state.maxDelayMs, state.baseDelayMs * 2 ** exponentialAttempt);
 }
 
-export function summarizeDingTalkDirectoryError(error: string | null | undefined): string {
-    const trimmed = (error ?? "").trim();
-    if (!trimmed) {
-        return "";
-    }
-    const maxLength = 160;
-    return trimmed.length > maxLength ? `${trimmed.slice(0, maxLength - 3)}...` : trimmed;
-}
-
 export function hasDingTalkDirectoryWarning(status: DingTalkDirectorySyncStatus): boolean {
     const counters = status.counters;
     if (!counters || typeof counters !== "object" || Array.isArray(counters)) {
@@ -158,7 +189,8 @@ export function dingtalkDirectoryTerminalEvents(
                 key,
                 corpId: status.corpId,
                 status: "error",
-                detail: summarizeDingTalkDirectoryError(status.error),
+                errorCode:
+                    dingtalkDirectorySyncErrorCode(status) ?? "dingtalk_directory_sync_failed",
             });
             continue;
         }

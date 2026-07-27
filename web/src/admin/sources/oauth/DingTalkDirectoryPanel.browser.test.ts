@@ -330,6 +330,7 @@ describe("DingTalkDirectoryPanel", () => {
         const parts = ["label", "elapsed", "datetime"].map(
             (part) => timestamp.shadowRoot!.querySelector<HTMLElement>(`[part="${part}"]`)!,
         );
+
         const boxes = parts.map((part) => part.getBoundingClientRect());
 
         expect(parts.every(Boolean)).toBe(true);
@@ -339,6 +340,50 @@ describe("DingTalkDirectoryPanel", () => {
         expect(Math.max(...boxes.map((box) => box.top))).toBeLessThan(
             Math.min(...boxes.map((box) => box.bottom)),
         );
+    });
+
+    it("localizes sync error codes instead of showing the raw contract value", async () => {
+        const panel = makePanel({
+            status: async () => ({
+                sourceSlug: "source-a",
+                canChange: true,
+                sync: [
+                    makeSyncStatus("corp-a", "error", {
+                        error: "dingtalk_directory_invalid_response",
+                        errorCode: "dingtalk_directory_invalid_response",
+                    }),
+                ],
+            }),
+        });
+        await settled(panel);
+
+        const summary = panel.shadowRoot!.querySelector("details > summary")!;
+
+        expect(summary.textContent).toContain("DingTalk returned an invalid directory response.");
+        expect(summary.textContent).not.toContain("dingtalk_directory_invalid_response");
+    });
+
+    it("localizes unknown sync errors in the failure notification", async () => {
+        const panel = makePanel({
+            status: async () => ({
+                sourceSlug: "source-a",
+                canChange: true,
+                sync: [
+                    {
+                        ...makeSyncStatus("corp-a", "error", { error: "provider denied" }),
+                        generation: 1,
+                    },
+                ],
+            }),
+        });
+        await settled(panel);
+        vi.mocked(showMessage).mockClear();
+
+        await panel.shadowRoot?.querySelector("ak-spinner-button")?.callAction?.();
+
+        const message = vi.mocked(showMessage).mock.calls.at(-1)?.[0].message;
+        expect(message).toContain("DingTalk directory sync failed.");
+        expect(message).not.toContain("provider denied");
     });
 
     it("keeps directory status visible but disables sync and delete when canChange is false", async () => {

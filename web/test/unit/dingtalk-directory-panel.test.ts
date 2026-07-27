@@ -3,11 +3,11 @@ import {
     DINGTALK_DIRECTORY_SYNC_DESTROY_CONTRACT,
     dingtalkDirectoryStatusSummary,
     dingtalkDirectorySummaryMetrics,
+    dingtalkDirectorySyncErrorCode,
     DingTalkDirectorySyncStatus,
     dingtalkDirectoryTerminalEvents,
     hasRunningDingTalkDirectorySync,
     nextDingTalkDirectoryPollDelay,
-    summarizeDingTalkDirectoryError,
 } from "#admin/sources/oauth/DingTalkDirectoryPanelController";
 
 import { describe, expect, it } from "vitest";
@@ -151,7 +151,7 @@ describe("dingtalkDirectoryTerminalEvents", () => {
                 key: "source-a:corp-b:error:2",
                 corpId: "corp-b",
                 status: "error",
-                detail: "provider denied",
+                errorCode: "dingtalk_directory_sync_failed",
             },
         ]);
         expect(dingtalkDirectoryTerminalEvents("source-a", statuses, seen)).toEqual([]);
@@ -175,17 +175,37 @@ describe("dingtalkDirectoryTerminalEvents", () => {
     });
 });
 
-describe("summarizeDingTalkDirectoryError", () => {
-    it("returns an empty string for missing errors", () => {
-        expect(summarizeDingTalkDirectoryError(undefined)).toBe("");
-        expect(summarizeDingTalkDirectoryError("")).toBe("");
+describe("dingtalkDirectorySyncErrorCode", () => {
+    it("returns null when the row reports no error", () => {
+        expect(dingtalkDirectorySyncErrorCode(makeSyncStatus("corp-a", "success"))).toBeNull();
     });
 
-    it("truncates long provider errors for table display", () => {
-        const summary = summarizeDingTalkDirectoryError("x".repeat(220));
+    it("returns the stable code reported by the backend", () => {
+        expect(
+            dingtalkDirectorySyncErrorCode(
+                makeSyncStatus("corp-a", "error", {
+                    errorCode: "dingtalk_directory_invalid_response",
+                }),
+            ),
+        ).toBe("dingtalk_directory_invalid_response");
+    });
 
-        expect(summary).toHaveLength(160);
-        expect(summary.endsWith("...")).toBe(true);
+    it("falls back to the code carried in the legacy error field", () => {
+        expect(
+            dingtalkDirectorySyncErrorCode(
+                makeSyncStatus("corp-a", "error", {
+                    error: "dingtalk_directory_user_limit",
+                }),
+            ),
+        ).toBe("dingtalk_directory_user_limit");
+    });
+
+    it("collapses free-form provider text to the generic failure code", () => {
+        expect(
+            dingtalkDirectorySyncErrorCode(
+                makeSyncStatus("corp-a", "error", { error: "provider denied" }),
+            ),
+        ).toBe("dingtalk_directory_sync_failed");
     });
 });
 

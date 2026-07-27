@@ -11,11 +11,12 @@ import {
     dingtalkDirectoryStatusSummary,
     DingTalkDirectoryStatusSummary,
     dingtalkDirectorySummaryMetrics,
+    dingtalkDirectorySyncErrorCode,
+    DingTalkDirectorySyncErrorCode,
     DingTalkDirectorySyncStatus,
     dingtalkDirectoryTerminalEvents,
     hasRunningDingTalkDirectorySync,
     nextDingTalkDirectoryPollDelay,
-    summarizeDingTalkDirectoryError,
 } from "./DingTalkDirectoryPanelController";
 
 import { parseAPIResponseError, pluckErrorDetail } from "#common/errors/network";
@@ -517,11 +518,12 @@ export class DingTalkDirectoryPanel extends AKElement {
                     true,
                 );
             } else {
+                const detail = this.localizeSyncError(event.errorCode ?? null);
                 showMessage(
                     {
                         level: MessageLevel.error,
                         message: msg(
-                            str`DingTalk directory sync failed for ${event.corpId}: ${event.detail}`,
+                            str`DingTalk directory sync failed for ${event.corpId}: ${detail}`,
                             {
                                 id: "sources.oauth.dingtalk-directory.sync.failed",
                             },
@@ -530,6 +532,68 @@ export class DingTalkDirectoryPanel extends AKElement {
                     true,
                 );
             }
+        }
+    }
+
+    // The backend reports a stable code instead of provider text; map it to a message
+    // so the table and the notifications never surface `dingtalk_directory_*` verbatim.
+    private localizeSyncError(code: DingTalkDirectorySyncErrorCode | null): string {
+        switch (code) {
+            case "dingtalk_directory_broker_unavailable":
+                return msg(
+                    "The background task broker is unavailable, so this directory sync could not be queued. Try again later.",
+                    { id: "sources.oauth.dingtalk-directory.sync-error.broker-unavailable" },
+                );
+            case "dingtalk_directory_concurrency_limit":
+                return msg(
+                    "Too many DingTalk directory syncs are already running. Try again once one of them finishes.",
+                    { id: "sources.oauth.dingtalk-directory.sync-error.concurrency-limit" },
+                );
+            case "dingtalk_directory_http_request_failed":
+                return msg(
+                    "Could not reach DingTalk while syncing the directory. Try again later.",
+                    {
+                        id: "sources.oauth.dingtalk-directory.sync-error.http-request-failed",
+                    },
+                );
+            case "dingtalk_directory_invalid_response":
+                return msg("DingTalk returned an invalid directory response. Try again later.", {
+                    id: "sources.oauth.dingtalk-directory.sync-error.invalid-response",
+                });
+            case "dingtalk_directory_payload_limit":
+                return msg("The DingTalk directory response was too large to process.", {
+                    id: "sources.oauth.dingtalk-directory.sync-error.payload-limit",
+                });
+            case "dingtalk_directory_run_stale":
+                return msg("A newer directory sync replaced this run before it finished.", {
+                    id: "sources.oauth.dingtalk-directory.sync-error.run-stale",
+                });
+            case "dingtalk_directory_source_disabled":
+                return msg("This DingTalk source is disabled, so the directory sync did not run.", {
+                    id: "sources.oauth.dingtalk-directory.sync-error.source-disabled",
+                });
+            case "dingtalk_directory_source_unavailable":
+                return msg("The DingTalk source for this sync is no longer available.", {
+                    id: "sources.oauth.dingtalk-directory.sync-error.source-unavailable",
+                });
+            case "dingtalk_directory_unsupported_source":
+                return msg(
+                    "This source is not a DingTalk source, so the directory sync did not run.",
+                    { id: "sources.oauth.dingtalk-directory.sync-error.unsupported-source" },
+                );
+            case "dingtalk_directory_user_limit":
+                return msg("The DingTalk directory holds more users than a sync can process.", {
+                    id: "sources.oauth.dingtalk-directory.sync-error.user-limit",
+                });
+            case "dingtalk_directory_user_detail_failed":
+                return msg(
+                    "Could not load user details from DingTalk while syncing the directory. Try again later.",
+                    { id: "sources.oauth.dingtalk-directory.sync-error.user-detail-failed" },
+                );
+            default:
+                return msg("DingTalk directory sync failed.", {
+                    id: "sources.oauth.dingtalk-directory.sync-error.unknown",
+                });
         }
     }
 
@@ -653,6 +717,22 @@ export class DingTalkDirectoryPanel extends AKElement {
             return msg("-", { id: "sources.oauth.dingtalk-directory.counters.empty" });
         }
         return this.renderCounterList(entries);
+    }
+
+    private renderSyncError(status: DingTalkDirectorySyncStatus): TemplateResult {
+        const code = dingtalkDirectorySyncErrorCode(status);
+        if (!code) {
+            return html`<span class="ak-dingtalk-directory-muted"
+                >${msg("-", { id: "sources.oauth.dingtalk-directory.error.empty" })}</span
+            >`;
+        }
+        // The reference stays available for support tickets, but folded away so the
+        // cell reads as a message rather than an internal identifier.
+        const reference = [code, status.errorCorrelationId].filter(Boolean).join("\n");
+        return html`<details class="ak-dingtalk-directory-error">
+            <summary>${this.localizeSyncError(code)}</summary>
+            <pre>${reference}</pre>
+        </details>`;
     }
 
     private renderSummary(): TemplateResult {
@@ -934,18 +1014,7 @@ export class DingTalkDirectoryPanel extends AKElement {
                                     id: "sources.oauth.dingtalk-directory.table.error",
                                 })}
                             >
-                                ${status.error
-                                    ? html`<details class="ak-dingtalk-directory-error">
-                                          <summary>
-                                              ${summarizeDingTalkDirectoryError(status.error)}
-                                          </summary>
-                                          <pre>${status.error}</pre>
-                                      </details>`
-                                    : html`<span class="ak-dingtalk-directory-muted"
-                                          >${msg("-", {
-                                              id: "sources.oauth.dingtalk-directory.error.empty",
-                                          })}</span
-                                      >`}
+                                ${this.renderSyncError(status)}
                             </td>
                             <td
                                 data-label=${msg("Actions", {
