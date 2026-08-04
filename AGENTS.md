@@ -51,6 +51,29 @@ If a fix only takes effect after page reload, perform or instruct a hard refresh
 the loaded page uses the new chunk or shows the new behavior. Browser console logs may retain
 old errors; compare timestamps or loaded chunk names before treating them as current failures.
 
+### GitHub Actions
+
+Only `.github/workflows/build-docker.yml` is supposed to run in this fork. Every workflow
+inherited from upstream is disabled at the repository level (`disabled_manually`). That is
+GitHub-side state, not file state: the YAML still exists in `.github/workflows/`, so upstream
+merges stay clean, but no event — `push`, `pull_request`, `schedule` — can start a run.
+
+The disable survives pushes and upstream merges. A workflow file that upstream *adds* later
+does not: it appears already enabled. After merging upstream, re-check and disable anything new:
+
+```bash
+gh api "/repos/12dora/authentik/actions/workflows?per_page=100" \
+  -q '.workflows[] | select(.state == "active") | "\(.id)\t\(.path)"'
+
+# Expect only build-docker.yml. For anything else:
+gh api -X PUT "/repos/12dora/authentik/actions/workflows/<id>/disable"
+```
+
+The upstream workflows also have their `schedule:` and `push:` triggers trimmed as a second
+layer; prefer keeping the trimmed version when an upstream merge conflicts there. `.github/`
+also still carries upstream's `dependabot.yml`, which is inert because Dependabot is not
+enabled for this fork.
+
 ### Verification
 
 Run the smallest relevant tests before rebuilding the local image. For Web UI changes, prefer
