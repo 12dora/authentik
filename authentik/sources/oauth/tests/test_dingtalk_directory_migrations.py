@@ -1,5 +1,6 @@
 """DingTalk directory migration tests."""
 
+from django.contrib.contenttypes.models import ContentType
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
@@ -9,6 +10,7 @@ from authentik.sources.oauth.dingtalk.sync import (
     DINGTALK_SYNC_ERROR_UNKNOWN,
 )
 from authentik.sources.oauth.models import OAuthSource
+from authentik.tenants.apps import ensure_default_tenant
 
 
 class TestDingTalkDirectorySyncErrorMigration(TransactionTestCase):
@@ -26,10 +28,30 @@ class TestDingTalkDirectorySyncErrorMigration(TransactionTestCase):
         self.executor.migrate(self.migrate_to)
         self.apps = self.executor.loader.project_state(self.migrate_to).apps
 
-    def tearDown(self):
+    def _post_teardown(self):
+        # Django flushes in TransactionTestCase._post_teardown, which runs
+        # *after* tearDown(). Restore HEAD + seed data after that flush.
+        self._restore_migrated_schema()
+        super()._post_teardown()
+        self._restore_seed_state()
+
+    def _restore_migrated_schema(self):
+        self._ensure_connection()
+        self.executor = MigrationExecutor(connection)
         self.executor.loader.build_graph()
-        self.executor.migrate(self.migrate_to)
-        super().tearDown()
+        self.executor.migrate(self.executor.loader.graph.leaf_nodes())
+
+    def _restore_seed_state(self):
+        self._ensure_connection()
+        ensure_default_tenant()
+        ContentType.objects.clear_cache()
+
+    def _ensure_connection(self):
+        closed = connection.connection is None or getattr(connection.connection, "closed", False)
+        if closed:
+            connection.connect()
+        if getattr(connection, "needs_rollback", False):
+            connection.rollback()
 
     def _create_source(self):
         return OAuthSource.objects.create(
