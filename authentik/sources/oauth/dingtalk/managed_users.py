@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from django.core.paginator import EmptyPage, Paginator
+from django.core.paginator import EmptyPage, Page, Paginator
 from django.utils.timezone import now
 from structlog.stdlib import get_logger
 
@@ -180,6 +180,105 @@ def _binding_for(
     }
 
 
+def _require_manager(
+    source: OAuthSource, corp_id: str, manager_user_id: str
+) -> DingTalkDirectoryUser:
+    manager = DingTalkDirectoryUser.objects.filter(
+        source=source,
+        corp_id=corp_id,
+        user_id=manager_user_id,
+        is_deleted=False,
+    ).first()
+    if not manager:
+        raise DingTalkManagerNotFound(
+            f"DingTalk manager {manager_user_id!r} was not found for {source.slug}:{corp_id}"
+        )
+    return manager
+
+
+def _normalize_managed_user_pagination(
+    page: int, page_size: int, max_results: int
+) -> tuple[int, int, int]:
+    page = max(int(page), 1)
+    page_size = max(1, min(int(page_size), MAX_MANAGED_USERS_PAGE_SIZE))
+    max_results = max(1, min(int(max_results), MAX_MANAGED_USERS_RESULTS))
+    return page, page_size, max_results
+
+
+def _log_recursion_diagnostics(
+    source: OAuthSource,
+    corp_id: str,
+    manager_user_id: str,
+    diagnostics: dict[str, Any],
+) -> None:
+    if not (diagnostics["recursion_cycle_detected"] or diagnostics["max_depth_exceeded"]):
+        return
+    LOGGER.warning(
+        "dingtalk_managed_users_recursion_diagnostics",
+        source_slug=source.slug,
+        corp_id=corp_id,
+        manager_user_id=manager_user_id,
+        recursion_cycle_detected=diagnostics["recursion_cycle_detected"],
+        max_depth_exceeded=diagnostics["max_depth_exceeded"],
+        max_depth_omitted=diagnostics["max_depth_omitted"],
+    )
+
+
+def _managed_users_page(
+    descendants: list[DingTalkDirectoryUser], page: int, page_size: int
+) -> tuple[Paginator, Page]:
+    paginator = Paginator(descendants, page_size)
+    try:
+        page_obj = paginator.page(page)
+    except EmptyPage:
+        page_obj = paginator.page(paginator.num_pages or 1)
+    return paginator, page_obj
+
+
+def _managed_user_rows(
+    source: OAuthSource,
+    corp_id: str,
+    manager_user_id: str,
+    page_descendants: list[DingTalkDirectoryUser],
+) -> list[dict[str, Any]]:
+    bindings_by_identity = _bindings_by_identity(
+        source, [directory_user.union_id for directory_user in page_descendants]
+    )
+    users = []
+    for directory_user in page_descendants:
+        source_identifier = f"{corp_id}:{directory_user.user_id}"
+        users.append(
+            {
+                "source_user_id": directory_user.user_id,
+                "source_identifier": source_identifier,
+                "directory_active": directory_user.active,
+                "is_deleted": directory_user.is_deleted,
+                **_binding_for(
+                    source, corp_id, manager_user_id, directory_user, bindings_by_identity
+                ),
+            }
+        )
+    return users
+
+
+def _log_stale_managed_users(
+    source: OAuthSource,
+    corp_id: str,
+    manager_user_id: str,
+    status: DingTalkDirectorySyncStatus | None,
+) -> None:
+    LOGGER.info(
+        "dingtalk_managed_users_stale_cache",
+        source_slug=source.slug,
+        corp_id=corp_id,
+        manager_user_id=manager_user_id,
+        sync_status=status.status if status else None,
+        last_synced_at=status.last_success_at.isoformat()
+        if status and status.last_success_at
+        else None,
+    )
+
+
 def get_dingtalk_managed_users(
     source: OAuthSource,
     corp_id: str,
@@ -197,68 +296,18 @@ def get_dingtalk_managed_users(
             f"DingTalk source {source.slug!r} is disabled and cannot resolve managed users"
         )
     status = _sync_status(source, corp_id)
-    manager = DingTalkDirectoryUser.objects.filter(
-        source=source,
-        corp_id=corp_id,
-        user_id=manager_user_id,
-        is_deleted=False,
-    ).first()
-    if not manager:
-        raise DingTalkManagerNotFound(
-            f"DingTalk manager {manager_user_id!r} was not found for {source.slug}:{corp_id}"
-        )
-
-    page = max(int(page), 1)
-    page_size = max(1, min(int(page_size), MAX_MANAGED_USERS_PAGE_SIZE))
-    max_results = max(1, min(int(max_results), MAX_MANAGED_USERS_RESULTS))
-    users = []
+    manager = _require_manager(source, corp_id, manager_user_id)
+    page, page_size, max_results = _normalize_managed_user_pagination(page, page_size, max_results)
     descendants, diagnostics = _descendants(
         source, corp_id, manager.user_id, max_results=max_results
     )
-    if diagnostics["recursion_cycle_detected"] or diagnostics["max_depth_exceeded"]:
-        LOGGER.warning(
-            "dingtalk_managed_users_recursion_diagnostics",
-            source_slug=source.slug,
-            corp_id=corp_id,
-            manager_user_id=manager.user_id,
-            recursion_cycle_detected=diagnostics["recursion_cycle_detected"],
-            max_depth_exceeded=diagnostics["max_depth_exceeded"],
-            max_depth_omitted=diagnostics["max_depth_omitted"],
-        )
-    paginator = Paginator(descendants, page_size)
-    try:
-        page_obj = paginator.page(page)
-    except EmptyPage:
-        page_obj = paginator.page(paginator.num_pages or 1)
+    _log_recursion_diagnostics(source, corp_id, manager.user_id, diagnostics)
+    paginator, page_obj = _managed_users_page(descendants, page, page_size)
     page_descendants = list(page_obj.object_list)
-    bindings_by_identity = _bindings_by_identity(
-        source, [directory_user.union_id for directory_user in page_descendants]
-    )
-    for directory_user in page_descendants:
-        source_identifier = f"{corp_id}:{directory_user.user_id}"
-        users.append(
-            {
-                "source_user_id": directory_user.user_id,
-                "source_identifier": source_identifier,
-                "directory_active": directory_user.active,
-                "is_deleted": directory_user.is_deleted,
-                **_binding_for(
-                    source, corp_id, manager.user_id, directory_user, bindings_by_identity
-                ),
-            }
-        )
+    users = _managed_user_rows(source, corp_id, manager.user_id, page_descendants)
     stale = _is_stale(status)
     if stale:
-        LOGGER.info(
-            "dingtalk_managed_users_stale_cache",
-            source_slug=source.slug,
-            corp_id=corp_id,
-            manager_user_id=manager.user_id,
-            sync_status=status.status if status else None,
-            last_synced_at=status.last_success_at.isoformat()
-            if status and status.last_success_at
-            else None,
-        )
+        _log_stale_managed_users(source, corp_id, manager.user_id, status)
 
     return {
         "source_slug": source.slug,

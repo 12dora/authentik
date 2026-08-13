@@ -190,6 +190,58 @@ def safe_dingtalk_sync_error(exc: Exception) -> str:
     return error_code
 
 
+def _prepare_sync_error(
+    exc: Exception | None,
+    error_code: str | None,
+    error_params: dict[str, Any] | None,
+) -> tuple[str, dict[str, Any]]:
+    if exc and not error_code:
+        error_code, classified_params = classify_dingtalk_sync_error(exc)
+        error_params = {**classified_params, **(error_params or {})}
+    error_code = error_code or DINGTALK_SYNC_ERROR_UNKNOWN
+    if error_code not in DINGTALK_SYNC_ERROR_CODES:
+        error_code = DINGTALK_SYNC_ERROR_UNKNOWN
+        error_params = {"legacy_error": "redacted", **(error_params or {})}
+    return error_code, _bounded_error_params(error_params)
+
+
+def _sync_error_lookup(
+    source: OAuthSource | None,
+    source_pk: str | None,
+    corp_id: str,
+    run_id: UUID,
+) -> dict[str, Any] | None:
+    lookup: dict[str, Any] = {"corp_id": str(corp_id), "active_run_id": run_id}
+    if source is not None:
+        lookup["source"] = source
+    elif source_pk is not None:
+        lookup["source_id"] = source_pk
+    else:
+        return None
+    return lookup
+
+
+def _mark_sync_error(
+    lookup: dict[str, Any],
+    error_code: str,
+    error_params: dict[str, Any],
+    correlation_id: UUID,
+) -> bool:
+    with transaction.atomic():
+        status = DingTalkDirectorySyncStatus.objects.select_for_update().filter(**lookup).first()
+        if not status:
+            return False
+        status.status = DingTalkDirectorySyncStatusChoices.ERROR
+        status.error = error_code
+        status.error_code = error_code
+        status.error_params = error_params
+        status.error_correlation_id = correlation_id
+        status.finished_at = now()
+        status.active_run_id = None
+        status.save()
+    return True
+
+
 def finalize_dingtalk_directory_sync_error(
     *,
     source: OAuthSource | None = None,
@@ -204,34 +256,13 @@ def finalize_dingtalk_directory_sync_error(
     if not run_id:
         return False
     parsed_run_id = UUID(str(run_id))
-    if exc and not error_code:
-        error_code, classified_params = classify_dingtalk_sync_error(exc)
-        error_params = {**classified_params, **(error_params or {})}
-    error_code = error_code or DINGTALK_SYNC_ERROR_UNKNOWN
-    if error_code not in DINGTALK_SYNC_ERROR_CODES:
-        error_code = DINGTALK_SYNC_ERROR_UNKNOWN
-        error_params = {"legacy_error": "redacted", **(error_params or {})}
-    error_params = _bounded_error_params(error_params)
+    error_code, error_params = _prepare_sync_error(exc, error_code, error_params)
     correlation_id = uuid4()
-    lookup = {"corp_id": str(corp_id), "active_run_id": parsed_run_id}
-    if source is not None:
-        lookup["source"] = source
-    elif source_pk is not None:
-        lookup["source_id"] = source_pk
-    else:
+    lookup = _sync_error_lookup(source, source_pk, corp_id, parsed_run_id)
+    if lookup is None:
         return False
-    with transaction.atomic():
-        status = DingTalkDirectorySyncStatus.objects.select_for_update().filter(**lookup).first()
-        if not status:
-            return False
-        status.status = DingTalkDirectorySyncStatusChoices.ERROR
-        status.error = error_code
-        status.error_code = error_code
-        status.error_params = error_params
-        status.error_correlation_id = correlation_id
-        status.finished_at = now()
-        status.active_run_id = None
-        status.save()
+    if not _mark_sync_error(lookup, error_code, error_params, correlation_id):
+        return False
     LOGGER.warning(
         "dingtalk_directory_sync_failed",
         source_pk=str(source.pk) if source is not None else str(source_pk),
@@ -283,10 +314,14 @@ def queue_dingtalk_directory_sync(
         status = DingTalkDirectorySyncStatus.objects.select_for_update().get(
             source=source, corp_id=corp_id
         )
-        if status.status in {
-            DingTalkDirectorySyncStatusChoices.QUEUED,
-            DingTalkDirectorySyncStatusChoices.RUNNING,
-        } and status.active_run_id:
+        if (
+            status.status
+            in {
+                DingTalkDirectorySyncStatusChoices.QUEUED,
+                DingTalkDirectorySyncStatusChoices.RUNNING,
+            }
+            and status.active_run_id
+        ):
             return status.active_run_id, False
         status.run_sequence += 1
         status.active_run_id = uuid4()

@@ -1,6 +1,6 @@
 """Read-only DingTalk directory selectors for property mappings."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from django.db.models import Q
@@ -135,23 +135,7 @@ def source_scoped_dingtalk_identity(
     return corp_id, user_id
 
 
-def get_dingtalk_org_context(
-    user: User,
-    source_slug: str = "dingtalk",
-    include_manager_chain: bool = True,
-    include_department_path: bool = True,
-) -> dict[str, Any]:
-    """Return JSON-safe current-user DingTalk organization context from local cache only."""
-    context = empty_org_context(source_slug)
-    source = OAuthSource.objects.filter(
-        slug=source_slug, provider_type="dingtalk", enabled=True
-    ).first()
-    if not source:
-        return context
-    identity = source_scoped_dingtalk_identity(user, source)
-    if not identity:
-        return context
-    corp_id, user_id = identity
+def _sync_metadata(source: OAuthSource, corp_id: str) -> tuple[datetime | None, bool]:
     status = DingTalkDirectorySyncStatus.objects.filter(source=source, corp_id=str(corp_id)).first()
     last_synced_at = (
         status.last_success_at
@@ -159,22 +143,15 @@ def get_dingtalk_org_context(
         else None
     )
     stale = not last_synced_at or last_synced_at < now() - STALE_AFTER
-    directory_user = DingTalkDirectoryUser.objects.filter(
-        source=source,
-        corp_id=str(corp_id),
-        user_id=str(user_id),
-        is_deleted=False,
-    ).first()
-    context.update(
-        {
-            "corp_id": str(corp_id),
-            "user_id": str(user_id),
-            "last_synced_at": last_synced_at.isoformat() if last_synced_at else None,
-            "stale": stale,
-        }
-    )
-    if not directory_user:
-        return context
+    return last_synced_at, stale
+
+
+def _department_context(
+    source: OAuthSource,
+    corp_id: str,
+    directory_user: DingTalkDirectoryUser,
+    include_department_path: bool,
+) -> list[dict[str, Any]]:
     departments_by_id = {
         item.dept_id: item
         for item in DingTalkDirectoryDepartment.objects.filter(
@@ -196,18 +173,66 @@ def get_dingtalk_org_context(
         if include_department_path:
             value["path"] = _department_path(departments_by_id, department.dept_id)
         departments.append(value)
-    users_by_user_id = {}
-    if include_manager_chain:
-        users_by_user_id = {
-            item.user_id: item
-            for item in DingTalkDirectoryUser.objects.filter(
-                source=source,
-                corp_id=str(corp_id),
-                is_deleted=False,
-            )
+    return departments
+
+
+def _manager_context(
+    source: OAuthSource,
+    corp_id: str,
+    directory_user: DingTalkDirectoryUser,
+    include_manager_chain: bool,
+) -> list[dict[str, Any]]:
+    if not include_manager_chain:
+        return []
+    users_by_user_id = {
+        item.user_id: item
+        for item in DingTalkDirectoryUser.objects.filter(
+            source=source,
+            corp_id=str(corp_id),
+            is_deleted=False,
+        )
+    }
+    return _manager_chain(users_by_user_id, directory_user)
+
+
+def get_dingtalk_org_context(
+    user: User,
+    source_slug: str = "dingtalk",
+    include_manager_chain: bool = True,
+    include_department_path: bool = True,
+) -> dict[str, Any]:
+    """Return JSON-safe current-user DingTalk organization context from local cache only."""
+    context = empty_org_context(source_slug)
+    source = OAuthSource.objects.filter(
+        slug=source_slug, provider_type="dingtalk", enabled=True
+    ).first()
+    if not source:
+        return context
+    identity = source_scoped_dingtalk_identity(user, source)
+    if not identity:
+        return context
+    corp_id, user_id = identity
+    last_synced_at, stale = _sync_metadata(source, corp_id)
+    directory_user = DingTalkDirectoryUser.objects.filter(
+        source=source,
+        corp_id=str(corp_id),
+        user_id=str(user_id),
+        is_deleted=False,
+    ).first()
+    context.update(
+        {
+            "corp_id": str(corp_id),
+            "user_id": str(user_id),
+            "last_synced_at": last_synced_at.isoformat() if last_synced_at else None,
+            "stale": stale,
         }
-    chain = _manager_chain(users_by_user_id, directory_user) if include_manager_chain else []
-    context["departments"] = departments
+    )
+    if not directory_user:
+        return context
+    context["departments"] = _department_context(
+        source, corp_id, directory_user, include_department_path
+    )
+    chain = _manager_context(source, corp_id, directory_user, include_manager_chain)
     context["manager_chain"] = chain
     context["manager"] = chain[0] if chain else None
     return context

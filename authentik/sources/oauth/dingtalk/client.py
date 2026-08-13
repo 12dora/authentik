@@ -143,50 +143,57 @@ class DingTalkDirectoryClient:
             return data
         raise ValueError("DingTalk request retry budget was exhausted.")
 
+    @staticmethod
+    def _department_rows(data: dict[str, Any]) -> list[Any]:
+        if error := _legacy_error(data):
+            raise ValueError(error)
+        if "result" not in data:
+            raise ValueError("DingTalk department response did not include result.")
+        result = data["result"]
+        if isinstance(result, dict):
+            if "dept_id_list" in result:
+                result = result["dept_id_list"]
+            elif "departments" in result:
+                result = result["departments"]
+            else:
+                raise ValueError("DingTalk department response did not include departments.")
+        return _require_list(result, "department")
+
+    @staticmethod
+    def _normalize_department(department: Any, parent_id: str) -> tuple[str, dict[str, Any]]:
+        if not isinstance(department, dict):
+            raise ValueError("DingTalk department row was not an object.")
+        dept_id = department.get("dept_id") or department.get("deptId")
+        if dept_id is None:
+            raise ValueError("DingTalk department row did not include dept_id.")
+        dept_id = str(dept_id)
+        return dept_id, {
+            "dept_id": dept_id,
+            "name": department.get("name") or department.get("dept_name") or "",
+            "parent_dept_id": str(
+                department.get("parent_id") or department.get("parentId") or parent_id
+            ),
+            "raw": department,
+        }
+
+    def _iter_department_children(
+        self, seen: set[str], parent_id: str = "1", depth: int = 0
+    ) -> Iterator[dict[str, Any]]:
+        if depth > self.max_department_depth:
+            raise ValueError("DingTalk department traversal depth limit exceeded.")
+        data = self._post_json(DINGTALK_DEPARTMENT_LIST_URL, {"dept_id": parent_id})
+        for department in self._department_rows(data):
+            dept_id, normalized = self._normalize_department(department, parent_id)
+            if dept_id in seen:
+                continue
+            if len(seen) >= self.max_departments:
+                raise ValueError("DingTalk department traversal department limit exceeded.")
+            seen.add(dept_id)
+            yield normalized
+            yield from self._iter_department_children(seen, dept_id, depth + 1)
+
     def iter_departments(self) -> Iterator[dict[str, Any]]:
-        seen: set[str] = set()
-
-        def fetch_children(parent_id: str = "1", depth: int = 0) -> Iterator[dict[str, Any]]:
-            if depth > self.max_department_depth:
-                raise ValueError("DingTalk department traversal depth limit exceeded.")
-            data = self._post_json(DINGTALK_DEPARTMENT_LIST_URL, {"dept_id": parent_id})
-            if error := _legacy_error(data):
-                raise ValueError(error)
-            if "result" not in data:
-                raise ValueError("DingTalk department response did not include result.")
-            result = data["result"]
-            if isinstance(result, dict):
-                if "dept_id_list" in result:
-                    result = result["dept_id_list"]
-                elif "departments" in result:
-                    result = result["departments"]
-                else:
-                    raise ValueError("DingTalk department response did not include departments.")
-            result = _require_list(result, "department")
-            for department in result:
-                if not isinstance(department, dict):
-                    raise ValueError("DingTalk department row was not an object.")
-                dept_id = department.get("dept_id") or department.get("deptId")
-                if dept_id is None:
-                    raise ValueError("DingTalk department row did not include dept_id.")
-                dept_id = str(dept_id)
-                if dept_id in seen:
-                    continue
-                if len(seen) >= self.max_departments:
-                    raise ValueError("DingTalk department traversal department limit exceeded.")
-                seen.add(dept_id)
-                normalized = {
-                    "dept_id": dept_id,
-                    "name": department.get("name") or department.get("dept_name") or "",
-                    "parent_dept_id": str(
-                        department.get("parent_id") or department.get("parentId") or parent_id
-                    ),
-                    "raw": department,
-                }
-                yield normalized
-                yield from fetch_children(dept_id, depth + 1)
-
-        yield from fetch_children()
+        yield from self._iter_department_children(set())
 
     def iter_department_users(self, dept_id: str) -> Iterator[dict[str, Any]]:
         cursor = 0

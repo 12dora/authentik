@@ -237,6 +237,68 @@ def _dingtalk_app_token_cache_key(source: OAuthSource) -> str:
     return f"authentik/sources/oauth/dingtalk/app_token/{source.pk}/{fingerprint}"
 
 
+def _acquire_dingtalk_app_token_lease(lease_key: str) -> bool:
+    try:
+        return cache.add(lease_key, "1", DINGTALK_APP_TOKEN_LEASE_TTL)
+    except IntegrityError:
+        if transaction.get_connection().in_atomic_block:
+            transaction.set_rollback(False)
+        return False
+
+
+def _wait_for_dingtalk_app_token(
+    key: str,
+    lease_key: str,
+    initial_cached: Any,
+    force: bool,
+) -> str | None:
+    for _attempt in range(DINGTALK_APP_TOKEN_LEASE_WAIT_ATTEMPTS):
+        sleep(DINGTALK_APP_TOKEN_LEASE_WAIT_SECONDS)
+        cached = cache.get(key)
+        if cached and (not force or cached != initial_cached):
+            return str(cached)
+        if force and not cache.get(lease_key):
+            break
+    return None
+
+
+def _cached_dingtalk_app_token_after_lease(key: str, have_lease: bool, force: bool) -> str | None:
+    if not have_lease or force:
+        return None
+    cached = cache.get(key)
+    return str(cached) if cached else None
+
+
+def _dingtalk_app_token_after_lease(
+    source: OAuthSource,
+    session: Session | None,
+    force: bool,
+    key: str,
+    initial_cached: Any,
+) -> str:
+    lease_key = f"{key}/lease"
+    have_lease = False
+    if not cache.get(lease_key):
+        have_lease = _acquire_dingtalk_app_token_lease(lease_key)
+    if not have_lease:
+        cached = _wait_for_dingtalk_app_token(key, lease_key, initial_cached, force)
+        if cached is not None:
+            return cached
+        if not cache.get(lease_key):
+            have_lease = _acquire_dingtalk_app_token_lease(lease_key)
+    try:
+        cached = _cached_dingtalk_app_token_after_lease(key, have_lease, force)
+        if cached is not None:
+            return cached
+        token = _fetch_dingtalk_app_token(source, session or get_http_session())
+        # DingTalk tokens are valid for 7200s; refresh a little early to avoid edge expiry.
+        cache.set(key, token, DINGTALK_APP_TOKEN_CACHE_TTL)
+        return token
+    finally:
+        if have_lease:
+            cache.delete(lease_key)
+
+
 def fetch_dingtalk_app_token_cached(
     source: OAuthSource, session: Session | None = None, *, force: bool = False
 ) -> str:
@@ -252,41 +314,7 @@ def fetch_dingtalk_app_token_cached(
         cached = cache.get(key)
         if cached:
             return str(cached)
-    lease_key = f"{key}/lease"
-    have_lease = False
-    if not cache.get(lease_key):
-        try:
-            have_lease = cache.add(lease_key, "1", DINGTALK_APP_TOKEN_LEASE_TTL)
-        except IntegrityError:
-            if transaction.get_connection().in_atomic_block:
-                transaction.set_rollback(False)
-    if not have_lease:
-        for _ in range(DINGTALK_APP_TOKEN_LEASE_WAIT_ATTEMPTS):
-            sleep(DINGTALK_APP_TOKEN_LEASE_WAIT_SECONDS)
-            cached = cache.get(key)
-            if cached and (not force or cached != initial_cached):
-                return str(cached)
-            if force and not cache.get(lease_key):
-                break
-        if not cache.get(lease_key):
-            try:
-                have_lease = cache.add(lease_key, "1", DINGTALK_APP_TOKEN_LEASE_TTL)
-            except IntegrityError:
-                if transaction.get_connection().in_atomic_block:
-                    transaction.set_rollback(False)
-                have_lease = False
-    try:
-        if have_lease and not force:
-            cached = cache.get(key)
-            if cached:
-                return str(cached)
-        token = _fetch_dingtalk_app_token(source, session or get_http_session())
-        # DingTalk tokens are valid for 7200s; refresh a little early to avoid edge expiry.
-        cache.set(key, token, DINGTALK_APP_TOKEN_CACHE_TTL)
-        return token
-    finally:
-        if have_lease:
-            cache.delete(lease_key)
+    return _dingtalk_app_token_after_lease(source, session, force, key, initial_cached)
 
 
 def normalize_dingtalk_allowlist_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -1008,18 +1036,9 @@ class DingTalkOAuth2Client(OAuth2Client):
         self.logger.debug("Built DingTalk redirect URL")
         return urlunparse(parsed_url._replace(query=params))
 
-    def get_access_token(self, **request_kwargs) -> dict[str, Any] | None:
-        """Fetch and normalize DingTalk's non-standard token response."""
-        if not self.check_application_state():
-            self.logger.warning("Application state check failed.")
-            return {"error": _("State check failed.")}
-
-        code = self.get_request_arg("authCode", None) or self.get_request_arg("code", None)
-        if not code:
-            error = self.get_request_arg("error", None)
-            error_desc = self.get_request_arg("error_description", None)
-            return {"error": error_desc or error or _("No token received.")}
-
+    def _exchange_access_token(
+        self, code: str, request_kwargs: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
         data = {}
         try:
             response = self.do_request(
@@ -1039,19 +1058,17 @@ class DingTalkOAuth2Client(OAuth2Client):
                     response.json(),
                     "DingTalk token response was not an object.",
                 )
-            except JSONDecodeError as exc:
+            except (JSONDecodeError, ValueError) as exc:
                 response.raise_for_status()
                 self.logger.warning("Unable to parse dingtalk token", exc=exc)
-                return {"error": _("DingTalk token exchange failed.")}
-            except ValueError as exc:
-                response.raise_for_status()
-                self.logger.warning("Unable to parse dingtalk token", exc=exc)
-                return {"error": _("DingTalk token exchange failed.")}
+                return data, {"error": _("DingTalk token exchange failed.")}
             response.raise_for_status()
         except RequestException as exc:
             self.logger.warning("Unable to fetch dingtalk token", exc=exc)
-            return {"error": self._get_error(data) or _("DingTalk token exchange failed.")}
+            return data, {"error": self._get_error(data) or _("DingTalk token exchange failed.")}
+        return data, None
 
+    def _normalize_access_token(self, data: dict[str, Any]) -> dict[str, Any]:
         access_token = data.get("accessToken") or data.get("access_token")
         if not access_token:
             # A 2xx response without a token: surface any DingTalk error detail, otherwise
@@ -1071,6 +1088,23 @@ class DingTalkOAuth2Client(OAuth2Client):
             "corp_id": data.get("corpId") or data.get("corp_id"),
         }
         return {key: value for key, value in token.items() if value is not None}
+
+    def get_access_token(self, **request_kwargs) -> dict[str, Any] | None:
+        """Fetch and normalize DingTalk's non-standard token response."""
+        if not self.check_application_state():
+            self.logger.warning("Application state check failed.")
+            return {"error": _("State check failed.")}
+
+        code = self.get_request_arg("authCode", None) or self.get_request_arg("code", None)
+        if not code:
+            error = self.get_request_arg("error", None)
+            error_desc = self.get_request_arg("error_description", None)
+            return {"error": error_desc or error or _("No token received.")}
+
+        data, error = self._exchange_access_token(code, request_kwargs)
+        if error:
+            return error
+        return self._normalize_access_token(data)
 
     def get_profile_info(self, token: dict[str, Any]) -> dict[str, Any] | None:
         """Fetch DingTalk profile and enrich with directory data when available."""
