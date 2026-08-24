@@ -15,6 +15,54 @@
 import { type BindingTypeEnum } from "../models/BindingTypeEnum";
 import { type DigestAlgorithmEnum } from "../models/DigestAlgorithmEnum";
 import {
+    type DingTalkAllowlistApplyRequestRequest,
+    DingTalkAllowlistApplyRequestRequestToJSON,
+} from "../models/DingTalkAllowlistApplyRequestRequest";
+import {
+    type DingTalkAllowlistDepartmentsRequestRequest,
+    DingTalkAllowlistDepartmentsRequestRequestToJSON,
+} from "../models/DingTalkAllowlistDepartmentsRequestRequest";
+import {
+    type DingTalkAllowlistDepartmentsResponse,
+    DingTalkAllowlistDepartmentsResponseFromJSON,
+} from "../models/DingTalkAllowlistDepartmentsResponse";
+import {
+    type DingTalkAllowlistDiscoverStartResponse,
+    DingTalkAllowlistDiscoverStartResponseFromJSON,
+} from "../models/DingTalkAllowlistDiscoverStartResponse";
+import {
+    type DingTalkAllowlistRemoveRequestRequest,
+    DingTalkAllowlistRemoveRequestRequestToJSON,
+} from "../models/DingTalkAllowlistRemoveRequestRequest";
+import {
+    type DingTalkAllowlistStatusResponse,
+    DingTalkAllowlistStatusResponseFromJSON,
+} from "../models/DingTalkAllowlistStatusResponse";
+import {
+    type DingTalkDirectoryOrgContext,
+    DingTalkDirectoryOrgContextFromJSON,
+} from "../models/DingTalkDirectoryOrgContext";
+import {
+    type DingTalkDirectoryStatus,
+    DingTalkDirectoryStatusFromJSON,
+} from "../models/DingTalkDirectoryStatus";
+import {
+    type DingTalkDirectorySyncDeleted,
+    DingTalkDirectorySyncDeletedFromJSON,
+} from "../models/DingTalkDirectorySyncDeleted";
+import {
+    type DingTalkDirectorySyncQueued,
+    DingTalkDirectorySyncQueuedFromJSON,
+} from "../models/DingTalkDirectorySyncQueued";
+import {
+    type DingTalkDirectorySyncRequestRequest,
+    DingTalkDirectorySyncRequestRequestToJSON,
+} from "../models/DingTalkDirectorySyncRequestRequest";
+import {
+    type DingTalkManagedUsersResponse,
+    DingTalkManagedUsersResponseFromJSON,
+} from "../models/DingTalkManagedUsersResponse";
+import {
     type GroupKerberosSourceConnection,
     GroupKerberosSourceConnectionFromJSON,
 } from "../models/GroupKerberosSourceConnection";
@@ -82,6 +130,14 @@ import { type LDAPSource, LDAPSourceFromJSON } from "../models/LDAPSource";
 import { type LDAPSourceRequest, LDAPSourceRequestToJSON } from "../models/LDAPSourceRequest";
 import { type OAuthSource, OAuthSourceFromJSON } from "../models/OAuthSource";
 import { type OAuthSourceRequest, OAuthSourceRequestToJSON } from "../models/OAuthSourceRequest";
+import {
+    type PaginatedDingTalkDirectoryDepartmentList,
+    PaginatedDingTalkDirectoryDepartmentListFromJSON,
+} from "../models/PaginatedDingTalkDirectoryDepartmentList";
+import {
+    type PaginatedDingTalkDirectoryUserList,
+    PaginatedDingTalkDirectoryUserListFromJSON,
+} from "../models/PaginatedDingTalkDirectoryUserList";
 import {
     type PaginatedGroupKerberosSourceConnectionList,
     PaginatedGroupKerberosSourceConnectionListFromJSON,
@@ -753,6 +809,74 @@ export interface SourcesOauthCreateRequest {
 
 export interface SourcesOauthDestroyRequest {
     slug: string;
+}
+
+export interface SourcesOauthDingtalkAllowlistApplyCreateRequest {
+    sourceSlug: string;
+    dingTalkAllowlistApplyRequestRequest: DingTalkAllowlistApplyRequestRequest;
+}
+
+export interface SourcesOauthDingtalkAllowlistDepartmentsCreateRequest {
+    sourceSlug: string;
+    dingTalkAllowlistDepartmentsRequestRequest?: DingTalkAllowlistDepartmentsRequestRequest;
+}
+
+export interface SourcesOauthDingtalkAllowlistDiscoverStartCreateRequest {
+    sourceSlug: string;
+}
+
+export interface SourcesOauthDingtalkAllowlistRemoveCreateRequest {
+    sourceSlug: string;
+    dingTalkAllowlistRemoveRequestRequest?: DingTalkAllowlistRemoveRequestRequest;
+}
+
+export interface SourcesOauthDingtalkAllowlistStatusRetrieveRequest {
+    sourceSlug: string;
+}
+
+export interface SourcesOauthDingtalkDirectoryDepartmentsListRequest {
+    sourceSlug: string;
+    ordering?: string;
+    page?: number;
+    pageSize?: number;
+    search?: string;
+}
+
+export interface SourcesOauthDingtalkDirectoryManagedUsersByManagerRetrieveRequest {
+    corpId: string;
+    managerUserId: string;
+    sourceSlug: string;
+    maxResults?: number;
+    page?: number;
+    pageSize?: number;
+}
+
+export interface SourcesOauthDingtalkDirectoryStatusRetrieveRequest {
+    sourceSlug: string;
+}
+
+export interface SourcesOauthDingtalkDirectorySyncCreateRequest {
+    sourceSlug: string;
+    dingTalkDirectorySyncRequestRequest: DingTalkDirectorySyncRequestRequest;
+}
+
+export interface SourcesOauthDingtalkDirectorySyncDestroyRequest {
+    corpId: string;
+    sourceSlug: string;
+}
+
+export interface SourcesOauthDingtalkDirectoryUsersListRequest {
+    sourceSlug: string;
+    ordering?: string;
+    page?: number;
+    pageSize?: number;
+    search?: string;
+}
+
+export interface SourcesOauthDingtalkDirectoryUsersOrgRetrieveRequest {
+    corpId: string;
+    sourceSlug: string;
+    userId: string;
 }
 
 export interface SourcesOauthListRequest {
@@ -6492,6 +6616,971 @@ export class SourcesApi extends runtime.BaseAPI {
         initOverrides?: RequestInit | runtime.InitOverrideFunction,
     ): Promise<void> {
         await this.sourcesOauthDestroyRaw(requestParameters, initOverrides);
+    }
+
+    /**
+     * Creates request options for sourcesOauthDingtalkAllowlistApplyCreate without sending the request
+     */
+    async sourcesOauthDingtalkAllowlistApplyCreateRequestOpts(
+        requestParameters: SourcesOauthDingtalkAllowlistApplyCreateRequest,
+    ): Promise<runtime.RequestOpts> {
+        if (requestParameters["sourceSlug"] == null) {
+            throw new runtime.RequiredError(
+                "sourceSlug",
+                'Required parameter "sourceSlug" was null or undefined when calling sourcesOauthDingtalkAllowlistApplyCreate().',
+            );
+        }
+
+        if (requestParameters["dingTalkAllowlistApplyRequestRequest"] == null) {
+            throw new runtime.RequiredError(
+                "dingTalkAllowlistApplyRequestRequest",
+                'Required parameter "dingTalkAllowlistApplyRequestRequest" was null or undefined when calling sourcesOauthDingtalkAllowlistApplyCreate().',
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters["Content-Type"] = "application/json";
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("authentik", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+
+        let urlPath = `/sources/oauth/dingtalk-allowlist/{source_slug}/apply/`;
+        urlPath = urlPath.replace(
+            "{source_slug}",
+            encodeURIComponent(String(requestParameters["sourceSlug"])),
+        );
+
+        return {
+            path: urlPath,
+            method: "POST",
+            headers: headerParameters,
+            query: queryParameters,
+            body: DingTalkAllowlistApplyRequestRequestToJSON(
+                requestParameters["dingTalkAllowlistApplyRequestRequest"],
+            ),
+        };
+    }
+
+    /**
+     * Transactionally apply the source-scoped managed DingTalk allowlist policy.
+     */
+    async sourcesOauthDingtalkAllowlistApplyCreateRaw(
+        requestParameters: SourcesOauthDingtalkAllowlistApplyCreateRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<runtime.ApiResponse<DingTalkAllowlistStatusResponse>> {
+        const requestOptions =
+            await this.sourcesOauthDingtalkAllowlistApplyCreateRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) =>
+            DingTalkAllowlistStatusResponseFromJSON(jsonValue),
+        );
+    }
+
+    /**
+     * Transactionally apply the source-scoped managed DingTalk allowlist policy.
+     */
+    async sourcesOauthDingtalkAllowlistApplyCreate(
+        requestParameters: SourcesOauthDingtalkAllowlistApplyCreateRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<DingTalkAllowlistStatusResponse> {
+        const response = await this.sourcesOauthDingtalkAllowlistApplyCreateRaw(
+            requestParameters,
+            initOverrides,
+        );
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for sourcesOauthDingtalkAllowlistDepartmentsCreate without sending the request
+     */
+    async sourcesOauthDingtalkAllowlistDepartmentsCreateRequestOpts(
+        requestParameters: SourcesOauthDingtalkAllowlistDepartmentsCreateRequest,
+    ): Promise<runtime.RequestOpts> {
+        if (requestParameters["sourceSlug"] == null) {
+            throw new runtime.RequiredError(
+                "sourceSlug",
+                'Required parameter "sourceSlug" was null or undefined when calling sourcesOauthDingtalkAllowlistDepartmentsCreate().',
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters["Content-Type"] = "application/json";
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("authentik", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+
+        let urlPath = `/sources/oauth/dingtalk-allowlist/{source_slug}/departments/`;
+        urlPath = urlPath.replace(
+            "{source_slug}",
+            encodeURIComponent(String(requestParameters["sourceSlug"])),
+        );
+
+        return {
+            path: urlPath,
+            method: "POST",
+            headers: headerParameters,
+            query: queryParameters,
+            body: DingTalkAllowlistDepartmentsRequestRequestToJSON(
+                requestParameters["dingTalkAllowlistDepartmentsRequestRequest"],
+            ),
+        };
+    }
+
+    /**
+     * Fetch DingTalk departments with server-side source credentials.
+     */
+    async sourcesOauthDingtalkAllowlistDepartmentsCreateRaw(
+        requestParameters: SourcesOauthDingtalkAllowlistDepartmentsCreateRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<runtime.ApiResponse<DingTalkAllowlistDepartmentsResponse>> {
+        const requestOptions =
+            await this.sourcesOauthDingtalkAllowlistDepartmentsCreateRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) =>
+            DingTalkAllowlistDepartmentsResponseFromJSON(jsonValue),
+        );
+    }
+
+    /**
+     * Fetch DingTalk departments with server-side source credentials.
+     */
+    async sourcesOauthDingtalkAllowlistDepartmentsCreate(
+        requestParameters: SourcesOauthDingtalkAllowlistDepartmentsCreateRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<DingTalkAllowlistDepartmentsResponse> {
+        const response = await this.sourcesOauthDingtalkAllowlistDepartmentsCreateRaw(
+            requestParameters,
+            initOverrides,
+        );
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for sourcesOauthDingtalkAllowlistDiscoverStartCreate without sending the request
+     */
+    async sourcesOauthDingtalkAllowlistDiscoverStartCreateRequestOpts(
+        requestParameters: SourcesOauthDingtalkAllowlistDiscoverStartCreateRequest,
+    ): Promise<runtime.RequestOpts> {
+        if (requestParameters["sourceSlug"] == null) {
+            throw new runtime.RequiredError(
+                "sourceSlug",
+                'Required parameter "sourceSlug" was null or undefined when calling sourcesOauthDingtalkAllowlistDiscoverStartCreate().',
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("authentik", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+
+        let urlPath = `/sources/oauth/dingtalk-allowlist/{source_slug}/discover/start/`;
+        urlPath = urlPath.replace(
+            "{source_slug}",
+            encodeURIComponent(String(requestParameters["sourceSlug"])),
+        );
+
+        return {
+            path: urlPath,
+            method: "POST",
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     * Start DingTalk allowlist discovery.
+     */
+    async sourcesOauthDingtalkAllowlistDiscoverStartCreateRaw(
+        requestParameters: SourcesOauthDingtalkAllowlistDiscoverStartCreateRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<runtime.ApiResponse<DingTalkAllowlistDiscoverStartResponse>> {
+        const requestOptions =
+            await this.sourcesOauthDingtalkAllowlistDiscoverStartCreateRequestOpts(
+                requestParameters,
+            );
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) =>
+            DingTalkAllowlistDiscoverStartResponseFromJSON(jsonValue),
+        );
+    }
+
+    /**
+     * Start DingTalk allowlist discovery.
+     */
+    async sourcesOauthDingtalkAllowlistDiscoverStartCreate(
+        requestParameters: SourcesOauthDingtalkAllowlistDiscoverStartCreateRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<DingTalkAllowlistDiscoverStartResponse> {
+        const response = await this.sourcesOauthDingtalkAllowlistDiscoverStartCreateRaw(
+            requestParameters,
+            initOverrides,
+        );
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for sourcesOauthDingtalkAllowlistRemoveCreate without sending the request
+     */
+    async sourcesOauthDingtalkAllowlistRemoveCreateRequestOpts(
+        requestParameters: SourcesOauthDingtalkAllowlistRemoveCreateRequest,
+    ): Promise<runtime.RequestOpts> {
+        if (requestParameters["sourceSlug"] == null) {
+            throw new runtime.RequiredError(
+                "sourceSlug",
+                'Required parameter "sourceSlug" was null or undefined when calling sourcesOauthDingtalkAllowlistRemoveCreate().',
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters["Content-Type"] = "application/json";
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("authentik", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+
+        let urlPath = `/sources/oauth/dingtalk-allowlist/{source_slug}/remove/`;
+        urlPath = urlPath.replace(
+            "{source_slug}",
+            encodeURIComponent(String(requestParameters["sourceSlug"])),
+        );
+
+        return {
+            path: urlPath,
+            method: "POST",
+            headers: headerParameters,
+            query: queryParameters,
+            body: DingTalkAllowlistRemoveRequestRequestToJSON(
+                requestParameters["dingTalkAllowlistRemoveRequestRequest"],
+            ),
+        };
+    }
+
+    /**
+     * Transactionally remove the source-scoped managed DingTalk allowlist policy.
+     */
+    async sourcesOauthDingtalkAllowlistRemoveCreateRaw(
+        requestParameters: SourcesOauthDingtalkAllowlistRemoveCreateRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<runtime.ApiResponse<DingTalkAllowlistStatusResponse>> {
+        const requestOptions =
+            await this.sourcesOauthDingtalkAllowlistRemoveCreateRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) =>
+            DingTalkAllowlistStatusResponseFromJSON(jsonValue),
+        );
+    }
+
+    /**
+     * Transactionally remove the source-scoped managed DingTalk allowlist policy.
+     */
+    async sourcesOauthDingtalkAllowlistRemoveCreate(
+        requestParameters: SourcesOauthDingtalkAllowlistRemoveCreateRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<DingTalkAllowlistStatusResponse> {
+        const response = await this.sourcesOauthDingtalkAllowlistRemoveCreateRaw(
+            requestParameters,
+            initOverrides,
+        );
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for sourcesOauthDingtalkAllowlistStatusRetrieve without sending the request
+     */
+    async sourcesOauthDingtalkAllowlistStatusRetrieveRequestOpts(
+        requestParameters: SourcesOauthDingtalkAllowlistStatusRetrieveRequest,
+    ): Promise<runtime.RequestOpts> {
+        if (requestParameters["sourceSlug"] == null) {
+            throw new runtime.RequiredError(
+                "sourceSlug",
+                'Required parameter "sourceSlug" was null or undefined when calling sourcesOauthDingtalkAllowlistStatusRetrieve().',
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("authentik", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+
+        let urlPath = `/sources/oauth/dingtalk-allowlist/{source_slug}/status/`;
+        urlPath = urlPath.replace(
+            "{source_slug}",
+            encodeURIComponent(String(requestParameters["sourceSlug"])),
+        );
+
+        return {
+            path: urlPath,
+            method: "GET",
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     * Return DingTalk allowlist status for a source.
+     */
+    async sourcesOauthDingtalkAllowlistStatusRetrieveRaw(
+        requestParameters: SourcesOauthDingtalkAllowlistStatusRetrieveRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<runtime.ApiResponse<DingTalkAllowlistStatusResponse>> {
+        const requestOptions =
+            await this.sourcesOauthDingtalkAllowlistStatusRetrieveRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) =>
+            DingTalkAllowlistStatusResponseFromJSON(jsonValue),
+        );
+    }
+
+    /**
+     * Return DingTalk allowlist status for a source.
+     */
+    async sourcesOauthDingtalkAllowlistStatusRetrieve(
+        requestParameters: SourcesOauthDingtalkAllowlistStatusRetrieveRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<DingTalkAllowlistStatusResponse> {
+        const response = await this.sourcesOauthDingtalkAllowlistStatusRetrieveRaw(
+            requestParameters,
+            initOverrides,
+        );
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for sourcesOauthDingtalkDirectoryDepartmentsList without sending the request
+     */
+    async sourcesOauthDingtalkDirectoryDepartmentsListRequestOpts(
+        requestParameters: SourcesOauthDingtalkDirectoryDepartmentsListRequest,
+    ): Promise<runtime.RequestOpts> {
+        if (requestParameters["sourceSlug"] == null) {
+            throw new runtime.RequiredError(
+                "sourceSlug",
+                'Required parameter "sourceSlug" was null or undefined when calling sourcesOauthDingtalkDirectoryDepartmentsList().',
+            );
+        }
+
+        const queryParameters: any = {};
+
+        if (requestParameters["ordering"] != null) {
+            queryParameters["ordering"] = requestParameters["ordering"];
+        }
+
+        if (requestParameters["page"] != null) {
+            queryParameters["page"] = requestParameters["page"];
+        }
+
+        if (requestParameters["pageSize"] != null) {
+            queryParameters["page_size"] = requestParameters["pageSize"];
+        }
+
+        if (requestParameters["search"] != null) {
+            queryParameters["search"] = requestParameters["search"];
+        }
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("authentik", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+
+        let urlPath = `/sources/oauth/dingtalk-directory/{source_slug}/departments/`;
+        urlPath = urlPath.replace(
+            "{source_slug}",
+            encodeURIComponent(String(requestParameters["sourceSlug"])),
+        );
+
+        return {
+            path: urlPath,
+            method: "GET",
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     */
+    async sourcesOauthDingtalkDirectoryDepartmentsListRaw(
+        requestParameters: SourcesOauthDingtalkDirectoryDepartmentsListRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<runtime.ApiResponse<PaginatedDingTalkDirectoryDepartmentList>> {
+        const requestOptions =
+            await this.sourcesOauthDingtalkDirectoryDepartmentsListRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) =>
+            PaginatedDingTalkDirectoryDepartmentListFromJSON(jsonValue),
+        );
+    }
+
+    /**
+     */
+    async sourcesOauthDingtalkDirectoryDepartmentsList(
+        requestParameters: SourcesOauthDingtalkDirectoryDepartmentsListRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<PaginatedDingTalkDirectoryDepartmentList> {
+        const response = await this.sourcesOauthDingtalkDirectoryDepartmentsListRaw(
+            requestParameters,
+            initOverrides,
+        );
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for sourcesOauthDingtalkDirectoryManagedUsersByManagerRetrieve without sending the request
+     */
+    async sourcesOauthDingtalkDirectoryManagedUsersByManagerRetrieveRequestOpts(
+        requestParameters: SourcesOauthDingtalkDirectoryManagedUsersByManagerRetrieveRequest,
+    ): Promise<runtime.RequestOpts> {
+        if (requestParameters["corpId"] == null) {
+            throw new runtime.RequiredError(
+                "corpId",
+                'Required parameter "corpId" was null or undefined when calling sourcesOauthDingtalkDirectoryManagedUsersByManagerRetrieve().',
+            );
+        }
+
+        if (requestParameters["managerUserId"] == null) {
+            throw new runtime.RequiredError(
+                "managerUserId",
+                'Required parameter "managerUserId" was null or undefined when calling sourcesOauthDingtalkDirectoryManagedUsersByManagerRetrieve().',
+            );
+        }
+
+        if (requestParameters["sourceSlug"] == null) {
+            throw new runtime.RequiredError(
+                "sourceSlug",
+                'Required parameter "sourceSlug" was null or undefined when calling sourcesOauthDingtalkDirectoryManagedUsersByManagerRetrieve().',
+            );
+        }
+
+        const queryParameters: any = {};
+
+        if (requestParameters["maxResults"] != null) {
+            queryParameters["max_results"] = requestParameters["maxResults"];
+        }
+
+        if (requestParameters["page"] != null) {
+            queryParameters["page"] = requestParameters["page"];
+        }
+
+        if (requestParameters["pageSize"] != null) {
+            queryParameters["page_size"] = requestParameters["pageSize"];
+        }
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("authentik", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+
+        let urlPath = `/sources/oauth/dingtalk-directory/{source_slug}/managed-users/by-manager/{corp_id}/{manager_user_id}/`;
+        urlPath = urlPath.replace(
+            "{corp_id}",
+            encodeURIComponent(String(requestParameters["corpId"])),
+        );
+        urlPath = urlPath.replace(
+            "{manager_user_id}",
+            encodeURIComponent(String(requestParameters["managerUserId"])),
+        );
+        urlPath = urlPath.replace(
+            "{source_slug}",
+            encodeURIComponent(String(requestParameters["sourceSlug"])),
+        );
+
+        return {
+            path: urlPath,
+            method: "GET",
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     * Expose DingTalk managed users for downstream EasyAuth resolution.
+     */
+    async sourcesOauthDingtalkDirectoryManagedUsersByManagerRetrieveRaw(
+        requestParameters: SourcesOauthDingtalkDirectoryManagedUsersByManagerRetrieveRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<runtime.ApiResponse<DingTalkManagedUsersResponse>> {
+        const requestOptions =
+            await this.sourcesOauthDingtalkDirectoryManagedUsersByManagerRetrieveRequestOpts(
+                requestParameters,
+            );
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) =>
+            DingTalkManagedUsersResponseFromJSON(jsonValue),
+        );
+    }
+
+    /**
+     * Expose DingTalk managed users for downstream EasyAuth resolution.
+     */
+    async sourcesOauthDingtalkDirectoryManagedUsersByManagerRetrieve(
+        requestParameters: SourcesOauthDingtalkDirectoryManagedUsersByManagerRetrieveRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<DingTalkManagedUsersResponse> {
+        const response = await this.sourcesOauthDingtalkDirectoryManagedUsersByManagerRetrieveRaw(
+            requestParameters,
+            initOverrides,
+        );
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for sourcesOauthDingtalkDirectoryStatusRetrieve without sending the request
+     */
+    async sourcesOauthDingtalkDirectoryStatusRetrieveRequestOpts(
+        requestParameters: SourcesOauthDingtalkDirectoryStatusRetrieveRequest,
+    ): Promise<runtime.RequestOpts> {
+        if (requestParameters["sourceSlug"] == null) {
+            throw new runtime.RequiredError(
+                "sourceSlug",
+                'Required parameter "sourceSlug" was null or undefined when calling sourcesOauthDingtalkDirectoryStatusRetrieve().',
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("authentik", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+
+        let urlPath = `/sources/oauth/dingtalk-directory/{source_slug}/status/`;
+        urlPath = urlPath.replace(
+            "{source_slug}",
+            encodeURIComponent(String(requestParameters["sourceSlug"])),
+        );
+
+        return {
+            path: urlPath,
+            method: "GET",
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     */
+    async sourcesOauthDingtalkDirectoryStatusRetrieveRaw(
+        requestParameters: SourcesOauthDingtalkDirectoryStatusRetrieveRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<runtime.ApiResponse<DingTalkDirectoryStatus>> {
+        const requestOptions =
+            await this.sourcesOauthDingtalkDirectoryStatusRetrieveRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) =>
+            DingTalkDirectoryStatusFromJSON(jsonValue),
+        );
+    }
+
+    /**
+     */
+    async sourcesOauthDingtalkDirectoryStatusRetrieve(
+        requestParameters: SourcesOauthDingtalkDirectoryStatusRetrieveRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<DingTalkDirectoryStatus> {
+        const response = await this.sourcesOauthDingtalkDirectoryStatusRetrieveRaw(
+            requestParameters,
+            initOverrides,
+        );
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for sourcesOauthDingtalkDirectorySyncCreate without sending the request
+     */
+    async sourcesOauthDingtalkDirectorySyncCreateRequestOpts(
+        requestParameters: SourcesOauthDingtalkDirectorySyncCreateRequest,
+    ): Promise<runtime.RequestOpts> {
+        if (requestParameters["sourceSlug"] == null) {
+            throw new runtime.RequiredError(
+                "sourceSlug",
+                'Required parameter "sourceSlug" was null or undefined when calling sourcesOauthDingtalkDirectorySyncCreate().',
+            );
+        }
+
+        if (requestParameters["dingTalkDirectorySyncRequestRequest"] == null) {
+            throw new runtime.RequiredError(
+                "dingTalkDirectorySyncRequestRequest",
+                'Required parameter "dingTalkDirectorySyncRequestRequest" was null or undefined when calling sourcesOauthDingtalkDirectorySyncCreate().',
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters["Content-Type"] = "application/json";
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("authentik", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+
+        let urlPath = `/sources/oauth/dingtalk-directory/{source_slug}/sync/`;
+        urlPath = urlPath.replace(
+            "{source_slug}",
+            encodeURIComponent(String(requestParameters["sourceSlug"])),
+        );
+
+        return {
+            path: urlPath,
+            method: "POST",
+            headers: headerParameters,
+            query: queryParameters,
+            body: DingTalkDirectorySyncRequestRequestToJSON(
+                requestParameters["dingTalkDirectorySyncRequestRequest"],
+            ),
+        };
+    }
+
+    /**
+     */
+    async sourcesOauthDingtalkDirectorySyncCreateRaw(
+        requestParameters: SourcesOauthDingtalkDirectorySyncCreateRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<runtime.ApiResponse<DingTalkDirectorySyncQueued>> {
+        const requestOptions =
+            await this.sourcesOauthDingtalkDirectorySyncCreateRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) =>
+            DingTalkDirectorySyncQueuedFromJSON(jsonValue),
+        );
+    }
+
+    /**
+     */
+    async sourcesOauthDingtalkDirectorySyncCreate(
+        requestParameters: SourcesOauthDingtalkDirectorySyncCreateRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<DingTalkDirectorySyncQueued> {
+        const response = await this.sourcesOauthDingtalkDirectorySyncCreateRaw(
+            requestParameters,
+            initOverrides,
+        );
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for sourcesOauthDingtalkDirectorySyncDestroy without sending the request
+     */
+    async sourcesOauthDingtalkDirectorySyncDestroyRequestOpts(
+        requestParameters: SourcesOauthDingtalkDirectorySyncDestroyRequest,
+    ): Promise<runtime.RequestOpts> {
+        if (requestParameters["corpId"] == null) {
+            throw new runtime.RequiredError(
+                "corpId",
+                'Required parameter "corpId" was null or undefined when calling sourcesOauthDingtalkDirectorySyncDestroy().',
+            );
+        }
+
+        if (requestParameters["sourceSlug"] == null) {
+            throw new runtime.RequiredError(
+                "sourceSlug",
+                'Required parameter "sourceSlug" was null or undefined when calling sourcesOauthDingtalkDirectorySyncDestroy().',
+            );
+        }
+
+        const queryParameters: any = {};
+
+        if (requestParameters["corpId"] != null) {
+            queryParameters["corp_id"] = requestParameters["corpId"];
+        }
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("authentik", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+
+        let urlPath = `/sources/oauth/dingtalk-directory/{source_slug}/sync/`;
+        urlPath = urlPath.replace(
+            "{source_slug}",
+            encodeURIComponent(String(requestParameters["sourceSlug"])),
+        );
+
+        return {
+            path: urlPath,
+            method: "DELETE",
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     */
+    async sourcesOauthDingtalkDirectorySyncDestroyRaw(
+        requestParameters: SourcesOauthDingtalkDirectorySyncDestroyRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<runtime.ApiResponse<DingTalkDirectorySyncDeleted>> {
+        const requestOptions =
+            await this.sourcesOauthDingtalkDirectorySyncDestroyRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) =>
+            DingTalkDirectorySyncDeletedFromJSON(jsonValue),
+        );
+    }
+
+    /**
+     */
+    async sourcesOauthDingtalkDirectorySyncDestroy(
+        requestParameters: SourcesOauthDingtalkDirectorySyncDestroyRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<DingTalkDirectorySyncDeleted> {
+        const response = await this.sourcesOauthDingtalkDirectorySyncDestroyRaw(
+            requestParameters,
+            initOverrides,
+        );
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for sourcesOauthDingtalkDirectoryUsersList without sending the request
+     */
+    async sourcesOauthDingtalkDirectoryUsersListRequestOpts(
+        requestParameters: SourcesOauthDingtalkDirectoryUsersListRequest,
+    ): Promise<runtime.RequestOpts> {
+        if (requestParameters["sourceSlug"] == null) {
+            throw new runtime.RequiredError(
+                "sourceSlug",
+                'Required parameter "sourceSlug" was null or undefined when calling sourcesOauthDingtalkDirectoryUsersList().',
+            );
+        }
+
+        const queryParameters: any = {};
+
+        if (requestParameters["ordering"] != null) {
+            queryParameters["ordering"] = requestParameters["ordering"];
+        }
+
+        if (requestParameters["page"] != null) {
+            queryParameters["page"] = requestParameters["page"];
+        }
+
+        if (requestParameters["pageSize"] != null) {
+            queryParameters["page_size"] = requestParameters["pageSize"];
+        }
+
+        if (requestParameters["search"] != null) {
+            queryParameters["search"] = requestParameters["search"];
+        }
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("authentik", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+
+        let urlPath = `/sources/oauth/dingtalk-directory/{source_slug}/users/`;
+        urlPath = urlPath.replace(
+            "{source_slug}",
+            encodeURIComponent(String(requestParameters["sourceSlug"])),
+        );
+
+        return {
+            path: urlPath,
+            method: "GET",
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     */
+    async sourcesOauthDingtalkDirectoryUsersListRaw(
+        requestParameters: SourcesOauthDingtalkDirectoryUsersListRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<runtime.ApiResponse<PaginatedDingTalkDirectoryUserList>> {
+        const requestOptions =
+            await this.sourcesOauthDingtalkDirectoryUsersListRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) =>
+            PaginatedDingTalkDirectoryUserListFromJSON(jsonValue),
+        );
+    }
+
+    /**
+     */
+    async sourcesOauthDingtalkDirectoryUsersList(
+        requestParameters: SourcesOauthDingtalkDirectoryUsersListRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<PaginatedDingTalkDirectoryUserList> {
+        const response = await this.sourcesOauthDingtalkDirectoryUsersListRaw(
+            requestParameters,
+            initOverrides,
+        );
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for sourcesOauthDingtalkDirectoryUsersOrgRetrieve without sending the request
+     */
+    async sourcesOauthDingtalkDirectoryUsersOrgRetrieveRequestOpts(
+        requestParameters: SourcesOauthDingtalkDirectoryUsersOrgRetrieveRequest,
+    ): Promise<runtime.RequestOpts> {
+        if (requestParameters["corpId"] == null) {
+            throw new runtime.RequiredError(
+                "corpId",
+                'Required parameter "corpId" was null or undefined when calling sourcesOauthDingtalkDirectoryUsersOrgRetrieve().',
+            );
+        }
+
+        if (requestParameters["sourceSlug"] == null) {
+            throw new runtime.RequiredError(
+                "sourceSlug",
+                'Required parameter "sourceSlug" was null or undefined when calling sourcesOauthDingtalkDirectoryUsersOrgRetrieve().',
+            );
+        }
+
+        if (requestParameters["userId"] == null) {
+            throw new runtime.RequiredError(
+                "userId",
+                'Required parameter "userId" was null or undefined when calling sourcesOauthDingtalkDirectoryUsersOrgRetrieve().',
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("authentik", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+
+        let urlPath = `/sources/oauth/dingtalk-directory/{source_slug}/users/{corp_id}/{user_id}/org/`;
+        urlPath = urlPath.replace(
+            "{corp_id}",
+            encodeURIComponent(String(requestParameters["corpId"])),
+        );
+        urlPath = urlPath.replace(
+            "{source_slug}",
+            encodeURIComponent(String(requestParameters["sourceSlug"])),
+        );
+        urlPath = urlPath.replace(
+            "{user_id}",
+            encodeURIComponent(String(requestParameters["userId"])),
+        );
+
+        return {
+            path: urlPath,
+            method: "GET",
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     */
+    async sourcesOauthDingtalkDirectoryUsersOrgRetrieveRaw(
+        requestParameters: SourcesOauthDingtalkDirectoryUsersOrgRetrieveRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<runtime.ApiResponse<DingTalkDirectoryOrgContext>> {
+        const requestOptions =
+            await this.sourcesOauthDingtalkDirectoryUsersOrgRetrieveRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) =>
+            DingTalkDirectoryOrgContextFromJSON(jsonValue),
+        );
+    }
+
+    /**
+     */
+    async sourcesOauthDingtalkDirectoryUsersOrgRetrieve(
+        requestParameters: SourcesOauthDingtalkDirectoryUsersOrgRetrieveRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<DingTalkDirectoryOrgContext> {
+        const response = await this.sourcesOauthDingtalkDirectoryUsersOrgRetrieveRaw(
+            requestParameters,
+            initOverrides,
+        );
+        return await response.value();
     }
 
     /**
