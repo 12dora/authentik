@@ -68,10 +68,10 @@ export interface DingTalkDirectoryUser {
     jobNumber?: string;
     /**
      *
-     * @type {{ [key: string]: any; }}
+     * @type {Array<string>}
      * @memberof DingTalkDirectoryUser
      */
-    deptIdList?: { [key: string]: any };
+    readonly deptIdList: Array<string>;
     /**
      *
      * @type {string}
@@ -117,6 +117,13 @@ export function instanceOfDingTalkDirectoryUser(value: object): value is DingTal
     )
         return false;
     if (
+        (!("deptIdList" in (value as Record<string, any>)) &&
+            !("dept_id_list" in (value as Record<string, any>))) ||
+        ((value as Record<string, any>)["deptIdList"] === undefined &&
+            (value as Record<string, any>)["dept_id_list"] === undefined)
+    )
+        return false;
+    if (
         (!("lastSeenAt" in (value as Record<string, any>)) &&
             !("last_seen_at" in (value as Record<string, any>))) ||
         ((value as Record<string, any>)["lastSeenAt"] === undefined &&
@@ -146,7 +153,7 @@ export function DingTalkDirectoryUserFromJSONTyped(
         email: json["email"] == null ? undefined : json["email"],
         mobile: json["mobile"] == null ? undefined : json["mobile"],
         jobNumber: json["job_number"] == null ? undefined : json["job_number"],
-        deptIdList: json["dept_id_list"] == null ? undefined : json["dept_id_list"],
+        deptIdList: json["dept_id_list"],
         managerUserId: json["manager_user_id"] == null ? undefined : json["manager_user_id"],
         active: json["active"] == null ? undefined : json["active"],
         isDeleted: json["is_deleted"] == null ? undefined : json["is_deleted"],
@@ -159,7 +166,7 @@ export function DingTalkDirectoryUserToJSON(json: any): DingTalkDirectoryUser {
 }
 
 export function DingTalkDirectoryUserToJSONTyped(
-    value?: DingTalkDirectoryUser | null,
+    value?: Omit<DingTalkDirectoryUser, "deptIdList"> | null,
     ignoreDiscriminator: boolean = false,
 ): any {
     if (value == null) {
@@ -175,7 +182,6 @@ export function DingTalkDirectoryUserToJSONTyped(
         email: value["email"],
         mobile: value["mobile"],
         job_number: value["jobNumber"],
-        dept_id_list: value["deptIdList"],
         manager_user_id: value["managerUserId"],
         active: value["active"],
         is_deleted: value["isDeleted"],

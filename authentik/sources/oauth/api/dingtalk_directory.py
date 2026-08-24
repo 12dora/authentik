@@ -195,6 +195,9 @@ class DingTalkDirectoryDepartmentSerializer(ModelSerializer):
 
 
 class DingTalkDirectoryUserSerializer(ModelSerializer):
+    # authentik's ModelSerializer maps JSONField to JSONDictField; this field is a list.
+    dept_id_list = serializers.ListField(child=serializers.CharField(), read_only=True)
+
     class Meta:
         model = DingTalkDirectoryUser
         fields = [

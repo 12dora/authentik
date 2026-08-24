@@ -40413,8 +40413,10 @@ components:
         job_number:
           type: string
         dept_id_list:
-          type: object
-          additionalProperties: {}
+          type: array
+          items:
+            type: string
+          readOnly: true
         manager_user_id:
           type: string
         active:
@@ -40426,6 +40428,7 @@ components:
           format: date-time
       required:
       - corp_id
+      - dept_id_list
       - last_seen_at
       - user_id
     DingTalkManagedUser:
