@@ -3,7 +3,7 @@ authentik
 
 Making authentication simple.
 
-API version: 2026.5.6
+API version: 2026.8.0
 Contact: hello@goauthentik.io
 */
 
@@ -41,7 +41,7 @@ var (
 	queryDescape    = strings.NewReplacer("%5B", "[", "%5D", "]")
 )
 
-// APIClient manages communication with the authentik API v2026.5.6
+// APIClient manages communication with the authentik API v2026.8.0
 // In most cases there should be only one, shared, APIClient.
 type APIClient struct {
 	cfg    *Configuration
@@ -452,6 +452,15 @@ func (c *APIClient) decode(v interface{}, b []byte, contentType string) (err err
 	}
 	if s, ok := v.(*string); ok {
 		*s = string(b)
+		return nil
+	}
+	if r, ok := v.(*io.Reader); ok {
+		*r = bytes.NewReader(b)
+		return nil
+	}
+	// Must stay before the JSON branch: json.Unmarshal would base64-decode into *[]byte.
+	if p, ok := v.(*[]byte); ok {
+		*p = b
 		return nil
 	}
 	if f, ok := v.(*os.File); ok {

@@ -1,7 +1,7 @@
 import "#components/ak-status-label";
 import "#elements/EmptyState";
 import "#elements/buttons/SpinnerButton/index";
-import "#elements/tasks/ScheduleList";
+import "#components/tasks/ScheduleList";
 import "#elements/timestamp/ak-timestamp";
 
 import { confirmDingTalkDestructiveAction } from "./DingTalkDestructiveActionModal";

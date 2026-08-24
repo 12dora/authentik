@@ -15,6 +15,12 @@ import CaptchaDisplayController from "#flow/stages/identification/controllers/Ca
 import RememberMeController from "#flow/stages/identification/controllers/RememberMeController";
 import WebauthnController from "#flow/stages/identification/controllers/WebauthnController";
 import Styles from "#flow/stages/identification/styles.css";
+import {
+    compareLoginSource,
+    formatUIFieldLabel,
+    OR_LIST_FORMATTERS,
+    UIFieldLabels,
+} from "#flow/stages/identification/utils";
 
 import {
     FlowDesignationEnum,
@@ -26,7 +32,6 @@ import {
 } from "@goauthentik/api";
 
 import { capitalCase, kebabCase } from "change-case";
-import { match } from "ts-pattern";
 
 import { msg, str } from "@lit/localize";
 import { html, nothing, PropertyValues, ReactiveControllerHost } from "lit";
@@ -51,21 +56,17 @@ export const PasswordManagerPrefill: {
     totp?: string;
 } = {};
 
-export const OR_LIST_FORMATTERS: Intl.ListFormat = new Intl.ListFormat("default", {
-    style: "short",
-    type: "disjunction",
-});
-
 /**
  * INTENTIONAL UPSTREAM DEVIATION — keep on merges from `upstream/main`.
  *
- * Upstream authentik builds identification-field labels from a `UI_FIELDS`
- * constant and always renders them through `OR_LIST_FORMATTERS`. This fork
- * instead collapses the common `[Email, Username]` pair into a single, naturally
- * phrased translation unit ("Email or username") so it reads well in every
- * locale (notably zh) instead of being machine-joined. This behavior is
- * deliberate and is covered by `IdentificationStage.browser.test.ts` — do not
- * "restore" upstream list-formatting for that pair.
+ * Upstream authentik builds identification-field labels from the `UIFieldLabels`
+ * table in `#flow/stages/identification/utils` and always renders them through
+ * `OR_LIST_FORMATTERS`. This fork instead collapses the common
+ * `[Email, Username]` pair into a single, naturally phrased translation unit
+ * ("Email or username") so it reads well in every locale (notably zh) instead of
+ * being machine-joined. This behavior is deliberate and is covered by
+ * `IdentificationStage.browser.test.ts` — do not "restore" upstream
+ * list-formatting for that pair.
  *
  * The `flow.identification.email-or-username` message id is likewise kept stable
  * on purpose: it is the shared lookup key for this string across every catalog in
@@ -85,22 +86,15 @@ export const identificationFieldLabel = (fields: UserFieldsEnum[]): string => {
         });
     }
 
-    const labels: Partial<Record<UserFieldsEnum, string>> = {
-        [UserFieldsEnum.Username]: msg("Username"),
-        [UserFieldsEnum.Email]: msg("Email"),
-        [UserFieldsEnum.Upn]: msg("UPN"),
-    };
-
-    // For fields we have no explicit label for, humanize the raw enum value
-    // (e.g. "phone-number" -> "Phone Number") instead of leaking the enum token.
-    return OR_LIST_FORMATTERS.format(fields.map((field) => labels[field] ?? capitalCase(field)));
+    // For fields upstream has no explicit label for, humanize the raw enum value
+    // (e.g. "phone-number" -> "Phone Number") instead of leaking the enum token or
+    // rendering upstream's "Unknown Field" placeholder.
+    return OR_LIST_FORMATTERS.format(
+        fields.map((field) =>
+            Object.hasOwn(UIFieldLabels, field) ? formatUIFieldLabel(field) : capitalCase(field),
+        ),
+    );
 };
-
-const sortLoginSources = (a: LoginSource, b: LoginSource) =>
-    match([!!a.promoted, !!b.promoted])
-        .with([true, false], () => -1)
-        .with([false, true], () => 1)
-        .otherwise(() => 0);
 
 @customElement("ak-stage-identification")
 export class IdentificationStage extends BaseStage<
@@ -327,7 +321,7 @@ export class IdentificationStage extends BaseStage<
 
     protected renderUidField(
         id: string,
-        type: string,
+        type: "email" | "text",
         label: string,
         initialUserIdentification: string | null,
         passwordFields?: boolean,
@@ -367,6 +361,7 @@ export class IdentificationStage extends BaseStage<
             .errors=${challenge.responseErrors?.password}
             ?allow-show-password=${allowShowPassword}
             prefill=${PasswordManagerPrefill.password ?? ""}
+            required
         ></ak-flow-input-password> `;
     }
 
@@ -375,6 +370,7 @@ export class IdentificationStage extends BaseStage<
             challenge;
 
         const fields = [...(userFields || [])].sort() as UserFieldsEnum[];
+
         if (fields.length === 0) {
             return html`<p>${msg("Select one of the options below to continue.")}</p>`;
         }
@@ -387,6 +383,7 @@ export class IdentificationStage extends BaseStage<
 
         const offerRecovery = flowDesignation === FlowDesignationEnum.Recovery;
         const type = fields.length === 1 && fields[0] === UserFieldsEnum.Email ? "email" : "text";
+
         const label = identificationFieldLabel(fields);
 
         // prettier-ignore
@@ -474,7 +471,7 @@ export class IdentificationStage extends BaseStage<
         >
             <legend class="sr-only">${msg("Login sources")}</legend>
             ${repeat(
-                [...sources].sort(sortLoginSources),
+                [...sources].sort(compareLoginSource),
                 (source, idx) => source.name + idx,
                 (source) => this.renderLoginSource(source, showLabels),
             )}

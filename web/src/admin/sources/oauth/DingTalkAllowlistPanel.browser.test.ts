@@ -21,8 +21,8 @@ vi.mock("#admin/policies/expression/ExpressionPolicyForm", () => ({
     ExpressionPolicyForm: class ExpressionPolicyForm extends HTMLElement {},
 }));
 
-vi.mock("#common/api/config", () => ({
-    DEFAULT_CONFIG: {},
+vi.mock("#common/api/client", () => ({
+    aki: (APIClass: new () => unknown) => new APIClass(),
 }));
 
 vi.mock("#common/errors/network", () => ({

@@ -80,10 +80,17 @@ class PolicyBindingSerializer(ModelSerializer):
             "order",
             "timeout",
             "failure_result",
+            "expires",
+            "expiring",
         ]
+        extra_kwargs = {
+            "expires": {"read_only": True},
+            "expiring": {"read_only": True},
+        }
 
     def validate(self, attrs: OrderedDict) -> OrderedDict:
         """Check that either policy, group or user is set."""
+
         def binding_value(field_name: str):
             if field_name in attrs:
                 return attrs.get(field_name)

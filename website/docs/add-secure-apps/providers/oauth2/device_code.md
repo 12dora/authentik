@@ -1,5 +1,6 @@
 ---
 title: Device code flow
+sidebar_position: 5
 ---
 
 The device code flow is also known as _device flow_ or _device authorization grant flow_. This type of authentication flow is useful for devices with limited input capabilities and/or devices without browsers. The Request for Comments (RFC) 8628) abstract for this flow states:
@@ -8,7 +9,7 @@ The device code flow is also known as _device flow_ or _device authorization gra
 
 ### Requirements
 
-This device flow is only possible if the active [brand](../../../sys-mgmt/brands/index.md) has a device code flow configured. This flow is run _after_ the user logs in, and before the user authenticates.
+This device flow is only possible if the active [brand](../../../customize/branding/index.md) has a device code flow configured. This flow is run _after_ the user logs in, and before the user authenticates.
 
 authentik does not include a default flow for this use case, so it is necessary to create a new one with a **Designation** of `Stage Configuration`.
 

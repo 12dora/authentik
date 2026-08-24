@@ -1,6 +1,6 @@
 import "#elements/forms/DeleteBulkForm";
 
-import { DEFAULT_CONFIG } from "#common/api/config";
+import { aki } from "#common/api/client";
 
 import { PaginatedResponse, Table, TableColumn, Timestamp } from "#elements/table/Table";
 import { SlottedTemplateResult } from "#elements/types";
@@ -29,7 +29,7 @@ export class UserReputationList extends Table<Reputation> {
         if (this.targetEmail !== undefined) {
             identifiers.push(this.targetEmail);
         }
-        return new PoliciesApi(DEFAULT_CONFIG).policiesReputationScoresList({
+        return aki(PoliciesApi).policiesReputationScoresList({
             ...(await this.defaultEndpointConfig()),
             identifierIn: identifiers,
         });
@@ -56,12 +56,12 @@ export class UserReputationList extends Table<Reputation> {
             object-label=${msg("Reputation score(s)")}
             .objects=${this.selectedElements}
             .usedBy=${(item: Reputation) => {
-                return new PoliciesApi(DEFAULT_CONFIG).policiesReputationScoresUsedByList({
+                return aki(PoliciesApi).policiesReputationScoresUsedByList({
                     reputationUuid: item.pk || "",
                 });
             }}
             .delete=${(item: Reputation) => {
-                return new PoliciesApi(DEFAULT_CONFIG).policiesReputationScoresDestroy({
+                return aki(PoliciesApi).policiesReputationScoresDestroy({
                     reputationUuid: item.pk || "",
                 });
             }}

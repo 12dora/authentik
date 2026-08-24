@@ -64,7 +64,7 @@ def _retry_after_seconds(value: str | None) -> float:
             if retry_at.tzinfo is None:
                 retry_at = retry_at.replace(tzinfo=UTC)
             seconds = (retry_at - datetime.now(UTC)).total_seconds()
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return 0
     return max(0, min(seconds, DINGTALK_MAX_RETRY_AFTER_SECONDS))
 
@@ -123,7 +123,7 @@ class DingTalkDirectoryClient:
                     params={"access_token": self.app_token},
                     json=payload,
                 )
-            except (RequestsConnectionError, Timeout):
+            except RequestsConnectionError, Timeout:
                 if attempt == DINGTALK_MAX_REQUEST_ATTEMPTS - 1:
                     raise
                 continue
@@ -223,7 +223,7 @@ class DingTalkDirectoryClient:
                 raw_next = result.get("nextCursor")
             try:
                 next_cursor = int(raw_next) if raw_next is not None else None
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 next_cursor = None
             # DingTalk must return a strictly-advancing cursor while has_more is set;
             # a missing/non-advancing cursor (or too many pages) would otherwise re-fetch page 1

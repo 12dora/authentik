@@ -7,6 +7,8 @@ import "@goauthentik/core/environment/load/node";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
+import { copyAssets } from "./build-assets.mjs";
+
 /**
  * @file ESBuild script for building the authentik web UI.
  *
@@ -35,22 +37,6 @@ const publicBundledDefinitions = Object.fromEntries(
 );
 logger.info(publicBundledDefinitions, "Bundle definitions");
 
-/**
- * @typedef {[from: string, to: string]} SourceDestinationPair
- */
-
-/**
- * @type {SourceDestinationPair[]}
- */
-const assets = [
-    [
-        path.join(path.dirname(EntryPoint.StandaloneLoading.in), "startup"),
-        path.dirname(EntryPoint.StandaloneLoading.out),
-    ],
-    [path.resolve(PackageRoot, "src", "assets", "images"), "./assets/images"],
-    [path.resolve(PackageRoot, "icons"), "./assets/icons"],
-];
-
 const entryPointNames = Object.keys(EntryPoint);
 const entryPoints = Object.values(EntryPoint);
 const entryPointsDescription = entryPointNames.join("\n\t");
@@ -68,31 +54,26 @@ const BASE_ESBUILD_PLUGINS = [
                  */
                 const errors = [];
 
-                /**
-                 * @param {SourceDestinationPair} pair
-                 */
-                const copy = ([from, to]) => {
-                    const resolvedDestination = path.resolve(DistDirectory, to);
-
-                    logger.debug(`📋 Copying assets from ${from} to ${to}`);
-
-                    return fs
-                        .cp(from, resolvedDestination, {
-                            recursive: true,
-                        })
-                        .catch((error) => {
-                            errors.push({
-                                text: `Failed to copy assets from ${from} to ${to}: ${error}`,
-                                location: {
-                                    file: from,
-                                },
-                            });
-                        });
-                };
-
-                await Promise.all(assets.map(copy));
+                await copyAssets();
 
                 return { errors };
+            });
+        },
+    },
+    {
+        name: "log",
+        setup(build) {
+            let start = new Date(0);
+            build.onStart(() => {
+                start = new Date();
+                logger.info("Build started");
+            });
+            build.onEnd((r) => {
+                const end = new Date();
+                const dur = end.getTime() - start.getTime();
+                logger.info(
+                    `Build finished (took ${dur} ms, ${r.errors.length} error(s), ${r.warnings.length} warning(s))`,
+                );
             });
         },
     },
@@ -133,7 +114,10 @@ const BASE_ESBUILD_OPTIONS = {
      * @see https://esbuild.github.io/api/#conditions
      * @see https://nodejs.org/api/packages.html#packages_conditional_exports
      */
-    conditions: NodeEnvironment === "production" ? ["production"] : ["development", "production"],
+    conditions: [
+        "bundler",
+        ...(NodeEnvironment === "production" ? ["production"] : ["development", "production"]),
+    ],
     plugins: BASE_ESBUILD_PLUGINS,
     define: bundleDefinitions,
     format: "esm",

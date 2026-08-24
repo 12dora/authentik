@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from authentik.api.pagination import Pagination
+from authentik.core.api.utils import ModelSerializer
 from authentik.sources.oauth.dingtalk.selectors import (
     get_dingtalk_org_context,
     source_scoped_dingtalk_identity,
@@ -104,7 +105,7 @@ class CanViewDingTalkDirectoryUser(CanViewDingTalkDirectory):
         )
 
 
-class DingTalkDirectorySyncStatusSerializer(serializers.ModelSerializer):
+class DingTalkDirectorySyncStatusSerializer(ModelSerializer):
     status = serializers.ChoiceField(choices=DingTalkDirectorySyncStatusChoices.choices)
     error = serializers.SerializerMethodField()
     error_code = serializers.SerializerMethodField()
@@ -180,7 +181,7 @@ class DingTalkDirectoryOrgContextSerializer(serializers.Serializer):
     last_synced_at = serializers.CharField(allow_null=True)
 
 
-class DingTalkDirectoryDepartmentSerializer(serializers.ModelSerializer):
+class DingTalkDirectoryDepartmentSerializer(ModelSerializer):
     class Meta:
         model = DingTalkDirectoryDepartment
         fields = [
@@ -193,7 +194,7 @@ class DingTalkDirectoryDepartmentSerializer(serializers.ModelSerializer):
         ]
 
 
-class DingTalkDirectoryUserSerializer(serializers.ModelSerializer):
+class DingTalkDirectoryUserSerializer(ModelSerializer):
     class Meta:
         model = DingTalkDirectoryUser
         fields = [
@@ -285,10 +286,11 @@ class DingTalkDirectorySyncView(APIView):
             raise ValidationError({"corp_id": gettext_lazy("This field is required.")})
         corp_id = str(corp_id)
         with transaction.atomic():
-            status, _created = (
-                DingTalkDirectorySyncStatus.objects.select_for_update().get_or_create(
-                    source=source, corp_id=corp_id
-                )
+            (
+                status,
+                _created,
+            ) = DingTalkDirectorySyncStatus.objects.select_for_update().get_or_create(
+                source=source, corp_id=corp_id
             )
             status.run_sequence += 1
             status.active_run_id = None

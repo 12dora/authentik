@@ -279,6 +279,28 @@ class TestApplicationsAPI(APITestCase):
         body = loads(response.content.decode())
         self.assertNotIn(self.allowed.slug, [app["slug"] for app in body["results"]])
 
+    def test_list_includes_protected_app_with_dingtalk_allowlist_session_marker(self):
+        """The user library lists marker-protected apps for sessions with a matching marker."""
+        config, source = self.bind_dingtalk_marker_policy()
+        plain_user = create_test_user()
+        self.client.force_login(plain_user)
+        session = self.client.session
+        session[DINGTALK_ALLOWLIST_SESSION_KEY] = {
+            "source_slug": source.slug,
+            "source_pk": str(source.pk),
+            "corp_id": "CORP_ALLOWED",
+            "dept_ids": ["10"],
+            "user_pk": plain_user.pk,
+            "config_hash": dingtalk_allowlist_config_hash(config),
+        }
+        session.save()
+
+        response = self.client.get(reverse("authentik_api:application-list"))
+
+        self.assertEqual(response.status_code, 200)
+        body = loads(response.content.decode())
+        self.assertIn(self.allowed.slug, [app["slug"] for app in body["results"]])
+
     def test_list(self):
         """Test list operation without superuser_full_list"""
         self.client.force_login(self.user)
@@ -301,6 +323,7 @@ class TestApplicationsAPI(APITestCase):
                         "pk": str(self.allowed.pk),
                         "name": "allowed",
                         "slug": "allowed",
+                        "pbm_uuid": str(self.allowed.pbm_uuid),
                         "group": "",
                         "provider": self.provider.pk,
                         "provider_obj": {
@@ -361,6 +384,7 @@ class TestApplicationsAPI(APITestCase):
                         "name": "allowed",
                         "slug": "allowed",
                         "group": "",
+                        "pbm_uuid": str(self.allowed.pbm_uuid),
                         "provider": self.provider.pk,
                         "provider_obj": {
                             "assigned_application_name": "allowed",
@@ -403,6 +427,7 @@ class TestApplicationsAPI(APITestCase):
                         "meta_publisher": "",
                         "group": "",
                         "name": "denied",
+                        "pbm_uuid": str(self.denied.pbm_uuid),
                         "pk": str(self.denied.pk),
                         "policy_engine_mode": "any",
                         "provider": None,

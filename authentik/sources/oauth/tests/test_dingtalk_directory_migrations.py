@@ -84,9 +84,7 @@ class TestDingTalkDirectorySyncErrorMigration(TransactionTestCase):
         )
 
     def test_legacy_error_text_is_replaced_with_public_code(self):
-        status_model = self.apps.get_model(
-            "authentik_sources_oauth", "DingTalkDirectorySyncStatus"
-        )
+        status_model = self.apps.get_model("authentik_sources_oauth", "DingTalkDirectorySyncStatus")
 
         raw = status_model.objects.get(source_id=self.source_pk, corp_id="CORP")
         prefixed = status_model.objects.get(source_id=self.source_pk, corp_id="PREF")
@@ -106,9 +104,7 @@ class TestDingTalkDirectorySyncErrorMigration(TransactionTestCase):
         self.executor.loader.build_graph()
         self.executor.migrate(self.migrate_from)
         old_apps = self.executor.loader.project_state(self.migrate_from).apps
-        status_model = old_apps.get_model(
-            "authentik_sources_oauth", "DingTalkDirectorySyncStatus"
-        )
+        status_model = old_apps.get_model("authentik_sources_oauth", "DingTalkDirectorySyncStatus")
 
         for corp_id in ("CORP", "PREF"):
             status = status_model.objects.get(source_id=self.source_pk, corp_id=corp_id)

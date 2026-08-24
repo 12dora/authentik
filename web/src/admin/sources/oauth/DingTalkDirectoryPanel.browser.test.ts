@@ -12,15 +12,15 @@ vi.mock("#elements/messages/MessageContainer", () => ({
     showMessage,
 }));
 
-vi.mock("#elements/tasks/ScheduleList", () => {
+vi.mock("#components/tasks/ScheduleList", () => {
     if (!customElements.get("ak-schedule-list")) {
         customElements.define("ak-schedule-list", class ScheduleList extends HTMLElement {});
     }
     return {};
 });
 
-vi.mock("#common/api/config", () => ({
-    DEFAULT_CONFIG: {},
+vi.mock("#common/api/client", () => ({
+    aki: (APIClass: new () => unknown) => new APIClass(),
 }));
 
 vi.mock("#common/errors/network", () => ({

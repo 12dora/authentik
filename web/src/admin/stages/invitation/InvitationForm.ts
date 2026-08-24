@@ -6,7 +6,7 @@ import "#elements/CodeMirror";
 import "#elements/forms/HorizontalFormElement";
 import "#elements/forms/SearchSelect/index";
 
-import { DEFAULT_CONFIG } from "#common/api/config";
+import { aki } from "#common/api/client";
 import { PFSize } from "#common/enums";
 import { dateTimeLocal } from "#common/temporal";
 
@@ -31,52 +31,21 @@ export class InvitationForm extends ModelForm<Invitation, string> {
     public static override verboseName = msg("Invitation");
     public static override verboseNamePlural = msg("Invitations");
 
-    protected override loadInstance(pk: string): Promise<Invitation> {
-        return new StagesApi(DEFAULT_CONFIG).stagesInvitationInvitationsRetrieve({
-            inviteUuid: pk,
-        });
-    }
     protected flowSearchRef = createRef<AkFlowSearch<Flow>>();
+
+    protected endpoints = {
+        load: (inviteUuid: string) =>
+            aki(StagesApi).stagesInvitationInvitationsRetrieve({ inviteUuid }),
+        create: (invitationRequest: Invitation) =>
+            aki(StagesApi).stagesInvitationInvitationsCreate({ invitationRequest }),
+        update: (inviteUuid: string, invitationRequest: Invitation) =>
+            aki(StagesApi).stagesInvitationInvitationsUpdate({ inviteUuid, invitationRequest }),
+    };
 
     getSuccessMessage(): string {
         return this.instance
             ? msg("Successfully updated invitation.")
             : msg("Successfully created invitation.");
-    }
-
-    protected override async send(data: Invitation): Promise<Invitation> {
-        if (this.instance) {
-            return new StagesApi(DEFAULT_CONFIG).stagesInvitationInvitationsUpdate({
-                inviteUuid: this.instance.pk || "",
-                invitationRequest: data,
-            });
-        }
-
-        return new StagesApi(DEFAULT_CONFIG)
-            .stagesInvitationInvitationsCreate({
-                invitationRequest: data,
-            })
-            .then((response) => {
-                // Show the freshly created invitation's link so the user can copy
-                // it or send it via email right away.
-                renderDialog(
-                    html`<ak-modal headline=${msg("Invitation Details")} size=${PFSize.Medium}>
-                        <ak-stage-invitation-list-link
-                            .invitation=${response as Invitation}
-                        ></ak-stage-invitation-list-link>
-                        <button
-                            slot="actions"
-                            type="button"
-                            class="pf-c-button pf-m-primary"
-                            @click=${this.#confirmationCloseListener}
-                        >
-                            ${msg("Close")}
-                        </button>
-                    </ak-modal>`,
-                );
-
-                return response;
-            });
     }
 
     /**
@@ -163,6 +132,34 @@ export class InvitationForm extends ModelForm<Invitation, string> {
 
         target.closest("ak-modal")?.close("close");
     };
+
+    protected override send(data: Invitation): Promise<unknown> {
+        const creating = this.instancePk === null;
+
+        return super.send(data).then((response) => {
+            if (creating) {
+                // Show the freshly created invitation's link so the user can copy
+                // it or send it via email right away.
+                renderDialog(
+                    html`<ak-modal headline=${msg("Invitation Details")} size=${PFSize.Medium}>
+                        <ak-stage-invitation-list-link
+                            .invitation=${response as Invitation}
+                        ></ak-stage-invitation-list-link>
+                        <button
+                            slot="actions"
+                            type="button"
+                            class="pf-c-button pf-m-primary"
+                            @click=${this.#confirmationCloseListener}
+                        >
+                            ${msg("Close")}
+                        </button>
+                    </ak-modal>`,
+                );
+            }
+
+            return response;
+        });
+    }
 
     protected override renderForm(): TemplateResult {
         return html`<ak-slug-input

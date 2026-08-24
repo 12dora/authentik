@@ -25,9 +25,7 @@ def migrate_dingtalk_identifiers_to_union_id(apps, schema_editor):
     if not source_ids:
         return
 
-    connections = UserOAuthSourceConnection.objects.using(db_alias).filter(
-        source_id__in=source_ids
-    )
+    connections = UserOAuthSourceConnection.objects.using(db_alias).filter(source_id__in=source_ids)
     # Traverse the FK in SQL (``user__attributes``) to avoid multi-table-inheritance quirks when
     # touching the linked user through the historical model.
     for row in connections.values("pk", "identifier", "source_id", "user__attributes"):
@@ -55,7 +53,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunPython(
-            migrate_dingtalk_identifiers_to_union_id, migrations.RunPython.noop
-        ),
+        migrations.RunPython(migrate_dingtalk_identifiers_to_union_id, migrations.RunPython.noop),
     ]

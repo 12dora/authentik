@@ -1,6 +1,6 @@
 import { DingTalkAllowlistApi } from "../../src/admin/sources/oauth/DingTalkAllowlistApi";
 
-import { Configuration } from "@goauthentik/api";
+import { Configuration, SourcesApi } from "@goauthentik/api";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -26,7 +26,7 @@ describe("DingTalkAllowlistApi", () => {
             }),
         );
         const api = new DingTalkAllowlistApi(
-            new Configuration({ basePath: "", fetchApi: fetchApi as typeof fetch }),
+            new SourcesApi(new Configuration({ basePath: "", fetchApi: fetchApi as typeof fetch })),
         );
 
         const status = await api.sourcesOauthDingtalkAllowlistApplyCreate("ding/talk", {
@@ -79,7 +79,7 @@ describe("DingTalkAllowlistApi", () => {
             }),
         );
         const api = new DingTalkAllowlistApi(
-            new Configuration({ basePath: "", fetchApi: fetchApi as typeof fetch }),
+            new SourcesApi(new Configuration({ basePath: "", fetchApi: fetchApi as typeof fetch })),
         );
 
         await api.sourcesOauthDingtalkAllowlistRemoveCreate("dingtalk", {

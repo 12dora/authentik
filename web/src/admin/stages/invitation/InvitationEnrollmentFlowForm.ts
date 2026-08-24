@@ -3,7 +3,7 @@ import "#components/ak-slug-input";
 import "#components/ak-switch-input";
 import "#components/ak-text-input";
 
-import { DEFAULT_CONFIG } from "#common/api/config";
+import { aki } from "#common/api/client";
 
 import { Form } from "#elements/forms/Form";
 import { RadioOption } from "#elements/forms/Radio";
@@ -44,7 +44,7 @@ export class InvitationEnrollmentFlowForm extends Form<InvitationEnrollmentFlowF
     }
 
     protected override async send(data: InvitationEnrollmentFlowFormData): Promise<Flow> {
-        const result = await new ManagedApi(DEFAULT_CONFIG).managedBlueprintsImportCreate({
+        const result = await aki(ManagedApi).managedBlueprintsImportCreate({
             path: MINIMAL_BLUEPRINT_PATH,
             context: JSON.stringify({
                 flow_name: data.flowName,
@@ -64,9 +64,7 @@ export class InvitationEnrollmentFlowForm extends Form<InvitationEnrollmentFlowF
             throw new Error(logs || msg("Blueprint validation failed"));
         }
 
-        const { results } = await new FlowsApi(DEFAULT_CONFIG).flowsInstancesList({
-            slug: data.slug,
-        });
+        const { results } = await aki(FlowsApi).flowsInstancesList({ slug: data.slug });
         const createdFlow = results[0];
 
         if (!createdFlow) {

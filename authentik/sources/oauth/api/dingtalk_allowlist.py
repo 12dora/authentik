@@ -60,6 +60,7 @@ __all__ = [
     "render_dingtalk_allowlist_policy",
 ]
 
+
 def dingtalk_department_public_error(
     code: str,
     params: dict | None = None,

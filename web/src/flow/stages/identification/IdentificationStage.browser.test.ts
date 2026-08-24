@@ -8,6 +8,9 @@ const UserFieldsEnum = {
     Email: "email",
     Upn: "upn",
     Username: "username",
+    // Mirrors the generated client: upstream's `UIFieldLabels` table keys on this
+    // member, so omitting it would silently produce an "undefined" key there.
+    UnknownDefaultOpenApi: "11184809",
 } as const;
 
 type UserFieldsEnum = (typeof UserFieldsEnum)[keyof typeof UserFieldsEnum];

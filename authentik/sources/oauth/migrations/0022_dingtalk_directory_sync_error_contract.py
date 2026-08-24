@@ -25,10 +25,7 @@ def migrate_legacy_dingtalk_directory_errors(apps, schema_editor):
     status_model = apps.get_model("authentik_sources_oauth", "DingTalkDirectorySyncStatus")
     db_alias = schema_editor.connection.alias
     for status in (
-        status_model.objects.using(db_alias)
-        .filter(status="error")
-        .exclude(error="")
-        .order_by("pk")
+        status_model.objects.using(db_alias).filter(status="error").exclude(error="").order_by("pk")
     ):
         correlation_id = status.error_correlation_id or uuid5(
             NAMESPACE_URL,

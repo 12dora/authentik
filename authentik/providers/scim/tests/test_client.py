@@ -75,9 +75,10 @@ class SCIMClientTests(TestCase):
                     "etag": {"supported": False},
                 },
             )
-            SCIMClient(self.provider)
+            client = SCIMClient(self.provider)
             self.assertEqual(mock.call_count, 1)
             self.assertEqual(mock.request_history[0].method, "GET")
+            self.assertFalse(client._config.is_fallback)
 
     def test_config_invalid(self):
         """Test invalid config"""
@@ -87,9 +88,23 @@ class SCIMClientTests(TestCase):
                 "https://localhost/ServiceProviderConfig",
                 json={},
             )
-            SCIMClient(self.provider)
+            client = SCIMClient(self.provider)
             self.assertEqual(mock.call_count, 1)
             self.assertEqual(mock.request_history[0].method, "GET")
+            self.assertTrue(client._config.is_fallback)
+
+    def test_config_non_json_response(self):
+        """Test non-JSON config response falls back to defaults"""
+        with Mocker() as mock:
+            mock.get(
+                "https://localhost/ServiceProviderConfig",
+                text="<html></html>",
+                headers={"Content-Type": "text/html"},
+            )
+            client = SCIMClient(self.provider)
+            self.assertEqual(mock.call_count, 1)
+            self.assertEqual(mock.request_history[0].method, "GET")
+            self.assertTrue(client._config.is_fallback)
 
     def test_scim_sync(self):
         """test scim_sync task"""

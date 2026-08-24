@@ -1,13 +1,15 @@
 """policy engine tests"""
 
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.core.cache import cache
 from django.db import connections
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
+from django.utils.timezone import now
 
-from authentik.core.models import Group, User
+from authentik.core.models import Actor, ActorPolicyInheritance, Group, User, UserTypes
 from authentik.core.tests.utils import create_test_user
 from authentik.lib.generators import generate_id
 from authentik.policies.dummy.models import DummyPolicy
@@ -294,6 +296,45 @@ class TestFilterPolicyEngine(TestCase):
         mock_get_many.assert_called_once()
         mock_get.assert_not_called()
 
+    def test_multi_engine_expired_static_binding_ignored(self):
+        """An expired static binding is excluded from evaluation entirely -- it must
+        not affect users who would otherwise pass via a still-active binding."""
+        pbm = PolicyBindingModel.objects.create(policy_engine_mode=PolicyEngineMode.MODE_ALL)
+        PolicyBinding.objects.create(target=pbm, group=self.group_a, order=0)
+        PolicyBinding.objects.create(
+            target=pbm,
+            group=self.group_b,
+            order=1,
+            expiring=True,
+            expires=now() - timedelta(minutes=10),
+        )
+        engine = FilterPolicyEngine(pbm, self.users)
+        self.assertEqual(
+            set(engine.build().result.values_list("pk", flat=True)),
+            {self.user_a.pk, self.user_b.pk},
+        )
+
+    def test_multi_engine_expired_policy_binding_ignored(self):
+        """An expired real-Policy binding is excluded from evaluation entirely, even
+        though (were it not expired) it would force MODE_ALL to fail for everyone."""
+        policy_false = DummyPolicy.objects.create(
+            name=generate_id(), result=False, wait_min=0, wait_max=1
+        )
+        pbm = PolicyBindingModel.objects.create(policy_engine_mode=PolicyEngineMode.MODE_ALL)
+        PolicyBinding.objects.create(target=pbm, group=self.group_a, order=0)
+        PolicyBinding.objects.create(
+            target=pbm,
+            policy=policy_false,
+            order=1,
+            expiring=True,
+            expires=now() - timedelta(minutes=10),
+        )
+        engine = FilterPolicyEngine(pbm, self.users)
+        self.assertEqual(
+            set(engine.build().result.values_list("pk", flat=True)),
+            {self.user_a.pk, self.user_b.pk},
+        )
+
     def test_cache_reused_across_builds(self):
         """A second FilterPolicyEngine.build() must reuse the PolicyResults cached by
         the first build (bulk-prefetched via one cache.get_many()) instead of
@@ -319,3 +360,42 @@ class TestFilterPolicyEngine(TestCase):
 
         self.assertEqual(second, {self.user_a.pk, self.user_b.pk, self.user_c.pk})
         mock_get_many.assert_called_once()
+
+    def _mirror_actor(self, parent: User) -> Actor:
+        uid = generate_id()
+        return Actor.objects.create(
+            username=uid,
+            name=uid,
+            email=f"{uid}@goauthentik.io",
+            parent=parent,
+            policy_behavior=ActorPolicyInheritance.MIRROR,
+            type=UserTypes.SERVICE_ACCOUNT,
+        )
+
+    def test_mirror_actor_evaluated_as_parent(self):
+        """A MIRROR actor passes iff the identity it mirrors passes, folded into the same
+        evaluation -- no per-actor PolicyEngine is spawned on the static path."""
+        actor_a = self._mirror_actor(self.user_a)  # user_a is in group_a
+        actor_c = self._mirror_actor(self.user_c)  # user_c is in no group
+        users = User.objects.filter(pk__in=[actor_a.pk, actor_c.pk, self.user_a.pk, self.user_c.pk])
+        pbm = PolicyBindingModel.objects.create()
+        PolicyBinding.objects.create(target=pbm, group=self.group_a, order=0)
+
+        with patch("authentik.policies.engine.PolicyEngine") as mock_engine:
+            result = set(FilterPolicyEngine(pbm, users).build().result.values_list("pk", flat=True))
+
+        # actor_a mirrors user_a (in group_a) -> passes; actor_c mirrors user_c -> denied.
+        self.assertEqual(result, {self.user_a.pk, actor_a.pk})
+        self.assertEqual(mock_engine.call_count, 0)
+
+    def test_mirror_actor_without_parent_in_set(self):
+        """The mirrored parent need not itself be in the queryset."""
+        actor_a = self._mirror_actor(self.user_a)
+        users = User.objects.filter(pk__in=[actor_a.pk, self.user_c.pk])
+        pbm = PolicyBindingModel.objects.create()
+        PolicyBinding.objects.create(target=pbm, group=self.group_a, order=0)
+
+        engine = FilterPolicyEngine(pbm, users)
+        result = set(engine.build().result.values_list("pk", flat=True))
+        # Only the actor passes (via user_a's membership); user_a itself is not in the result set.
+        self.assertEqual(result, {actor_a.pk})

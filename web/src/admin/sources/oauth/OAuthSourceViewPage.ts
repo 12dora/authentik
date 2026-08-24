@@ -8,7 +8,7 @@ import "#elements/LoadingOverlay";
 import "#elements/Tabs";
 import "#elements/buttons/SpinnerButton/index";
 
-import { DEFAULT_CONFIG } from "#common/api/config";
+import { aki } from "#common/api/client";
 import { EVENT_REFRESH } from "#common/constants";
 
 import { AKElement } from "#elements/Base";
@@ -39,8 +39,6 @@ export function ProviderToLabel(provider?: ProviderTypeEnum): string {
             return "";
         case ProviderTypeEnum.Apple:
             return "Apple";
-        case ProviderTypeEnum.Azuread:
-            return "Azure Active Directory (Deprecated)";
         case ProviderTypeEnum.Dingtalk:
             return "DingTalk";
         case ProviderTypeEnum.Discord:
@@ -122,7 +120,7 @@ export class OAuthSourceViewPage extends AKElement {
         this.loadError = false;
         this.sourceLoading = true;
         try {
-            const source = await new SourcesApi(DEFAULT_CONFIG).sourcesOauthRetrieve({ slug });
+            const source = await aki(SourcesApi).sourcesOauthRetrieve({ slug });
             if (generation === this.requestGeneration && this.requestedSlug === slug) {
                 this.source = source;
                 if (source.providerType === ProviderTypeEnum.Dingtalk) {
@@ -178,7 +176,7 @@ export class OAuthSourceViewPage extends AKElement {
                     })}</span
                 >
                 <button
-                    slot="primary-action"
+                    slot="primary"
                     type="button"
                     class="pf-c-button pf-m-primary"
                     @click=${() => this.loadSource(this.requestedSlug)}

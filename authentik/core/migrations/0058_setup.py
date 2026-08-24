@@ -5,8 +5,9 @@ from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 
 
 def check_is_already_setup(apps: Apps, schema_editor: BaseDatabaseSchemaEditor):
-    from authentik.flows.models import FlowAuthenticationRequirement
     from django.conf import settings
+
+    from authentik.flows.models import FlowAuthenticationRequirement
 
     VersionHistory = apps.get_model("authentik_admin", "VersionHistory")
     Flow = apps.get_model("authentik_flows", "Flow")

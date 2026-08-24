@@ -11,7 +11,6 @@ import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vite";
 
 const patternflyPath = resolvePackage("@patternfly/patternfly", import.meta);
-const browserExecutablePath = process.env.AK_VITEST_BROWSER_EXECUTABLE_PATH;
 
 export default defineConfig({
     define: createBundleDefinitions(),
@@ -51,6 +50,10 @@ export default defineConfig({
                 },
             },
             {
+                // Projects do not inherit the root plugin list, and elements
+                // import their stylesheets as text for `unsafeCSS`. Without
+                // this the CSS resolves to a Vite style side-effect with no
+                // default export, and importing any AKElement throws.
                 plugins: [inlineCSSPlugin()],
                 test: {
                     setupFiles: ["./test/lit/setup.js"],
@@ -59,11 +62,7 @@ export default defineConfig({
                     name: "Browser Tests",
                     browser: {
                         enabled: true,
-                        provider: playwright({
-                            launchOptions: browserExecutablePath
-                                ? { executablePath: browserExecutablePath }
-                                : undefined,
-                        }),
+                        provider: playwright(),
 
                         instances: [
                             {

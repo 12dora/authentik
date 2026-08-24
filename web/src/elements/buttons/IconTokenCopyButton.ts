@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG } from "#common/api/config";
+import { aki } from "#common/api/client";
 import { formatIntentLabel } from "#common/labels";
 
 import { IconCopyButton } from "#elements/buttons/IconCopyButton";
@@ -33,7 +33,7 @@ export function IconTokenCopyButton(tokenLike?: Token | string | null): SlottedT
                 return Promise.resolve(new Blob([""], { type: "text/plain" }));
             }
 
-            return new CoreApi(DEFAULT_CONFIG)
+            return aki(CoreApi)
                 .coreTokensViewKeyRetrieve({ identifier })
                 .then((tokenView) => new Blob([tokenView.key], { type: "text/plain" }));
         };

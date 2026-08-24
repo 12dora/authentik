@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG } from "#common/api/config";
+import { aki } from "#common/api/client";
 
 import {
     type DingTalkDirectoryStatus,
@@ -17,7 +17,7 @@ export interface DingTalkDirectoryClient {
 }
 
 export class GeneratedDingTalkDirectoryClient implements DingTalkDirectoryClient {
-    constructor(private readonly api = new SourcesApi(DEFAULT_CONFIG)) {}
+    constructor(private readonly api: SourcesApi = aki(SourcesApi)) {}
 
     status(sourceSlug: string): Promise<DingTalkDirectoryStatus> {
         return this.api.sourcesOauthDingtalkDirectoryStatusRetrieve({ sourceSlug });

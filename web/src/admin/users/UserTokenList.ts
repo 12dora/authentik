@@ -7,7 +7,7 @@ import "#elements/forms/DeleteBulkForm";
 import "#elements/forms/ModalForm";
 import "@patternfly/elements/pf-tooltip/pf-tooltip.js";
 
-import { DEFAULT_CONFIG } from "#common/api/config";
+import { aki } from "#common/api/client";
 import { formatIntentLabel } from "#common/labels";
 
 import { IconTokenCopyButton } from "#elements/buttons/IconTokenCopyButton";
@@ -57,7 +57,7 @@ export class AdminUserTokenList extends Table<Token> {
             throw new TypeError("User is not set, cannot fetch tokens.");
         }
 
-        return new CoreApi(DEFAULT_CONFIG).coreTokensList({
+        return aki(CoreApi).coreTokensList({
             ...(await this.defaultEndpointConfig()),
             userUsername: this.user.username,
         });
@@ -68,7 +68,7 @@ export class AdminUserTokenList extends Table<Token> {
             return;
         }
 
-        return new CoreApi(DEFAULT_CONFIG)
+        return aki(CoreApi)
             .coreUsersRetrieve({
                 id: this.userID!,
             })
@@ -117,12 +117,12 @@ export class AdminUserTokenList extends Table<Token> {
                 return [{ key: msg("Identifier"), value: item.identifier }];
             }}
             .usedBy=${(item: Token) => {
-                return new CoreApi(DEFAULT_CONFIG).coreTokensUsedByList({
+                return aki(CoreApi).coreTokensUsedByList({
                     identifier: item.identifier,
                 });
             }}
             .delete=${(item: Token) => {
-                return new CoreApi(DEFAULT_CONFIG).coreTokensDestroy({
+                return aki(CoreApi).coreTokensDestroy({
                     identifier: item.identifier,
                 });
             }}

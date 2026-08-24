@@ -273,9 +273,9 @@ def _log_stale_managed_users(
         corp_id=corp_id,
         manager_user_id=manager_user_id,
         sync_status=status.status if status else None,
-        last_synced_at=status.last_success_at.isoformat()
-        if status and status.last_success_at
-        else None,
+        last_synced_at=(
+            status.last_success_at.isoformat() if status and status.last_success_at else None
+        ),
     )
 
 
@@ -316,9 +316,9 @@ def get_dingtalk_managed_users(
         "resolver": RESOLVER,
         "resolved_at": now().isoformat(),
         "stale": stale,
-        "last_synced_at": status.last_success_at.isoformat()
-        if status and status.last_success_at
-        else None,
+        "last_synced_at": (
+            status.last_success_at.isoformat() if status and status.last_success_at else None
+        ),
         "diagnostics": diagnostics,
         "pagination": {
             "next": page_obj.next_page_number() if page_obj.has_next() else 0,

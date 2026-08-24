@@ -4,6 +4,8 @@ sidebar_label: GitHub Enterprise Cloud
 support_level: community
 ---
 
+import SAMLProvider20265Warning from "../../\_saml-provider-2026-5-warning.mdx";
+
 ## What is GitHub Enterprise Cloud?
 
 > GitHub Enterprise Cloud is a plan for large businesses or teams who collaborate on GitHub.com.
@@ -33,8 +35,10 @@ To support the integration of GitHub Enterprise Cloud with authentik, you need t
 
 ### Create an application and provider in authentik
 
+<SAMLProvider20265Warning />
+
 1. Log in to authentik as an administrator and open the authentik Admin interface.
-2. Navigate to **Applications** > **Applications** and click **Create with Provider** to create an application and provider pair. (Alternatively you can first create a provider separately, then create the application and connect it with the provider.)
+2. Navigate to **Applications** > **Applications** and click **New Application** to create an application and provider pair. (Alternatively you can first create a provider separately, then create the application and connect it with the provider.)
     - **Application**: provide a descriptive name, an optional group for the type of application, the policy engine mode, and optional UI settings.
     - **Choose a Provider type**: select **SAML Provider** as the provider type.
     - **Configure the Provider**: provide a name (or accept the auto-provided name), the authorization flow to use for this provider, and the following required configurations.

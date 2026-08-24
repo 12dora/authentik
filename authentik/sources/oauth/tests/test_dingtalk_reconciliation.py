@@ -25,6 +25,7 @@ policy_migration = import_module(
     "authentik.sources.oauth.migrations.0023_reconcile_dingtalk_allowlist_denial_messages"
 )
 
+
 def legacy_policy_body(source_slug: str | None = None, source_pk: str | None = None) -> str:
     """Return a marked but stale policy expression that keeps an old executable body."""
     source_line = f'# source: "{source_slug}"\n' if source_slug else ""

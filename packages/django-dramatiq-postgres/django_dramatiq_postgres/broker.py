@@ -4,6 +4,7 @@ import time
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any, ParamSpec, TypeVar, cast
+from uuid import UUID
 
 import tenacity
 from django.core.exceptions import ImproperlyConfigured
@@ -31,6 +32,7 @@ from psycopg import sql
 from psycopg.errors import AdminShutdown
 from structlog.stdlib import get_logger
 
+from authentik.lib.utils.db import chunked_queryset
 from django_dramatiq_postgres.conf import Conf
 from django_dramatiq_postgres.models import CHANNEL_PREFIX, ChannelIdentifier, TaskBase, TaskState
 
@@ -50,6 +52,7 @@ DATABASE_ERRORS = (
 CONSUMABLE_TASK_STATES: set[TaskState] = set(TaskState) - {
     TaskState.DONE,
     TaskState.REJECTED,
+    TaskState.WAITING_FOR_DEPENDENCIES,
 }
 
 
@@ -81,14 +84,22 @@ class PostgresBroker(Broker):
         *args: Any,
         middleware: list[Middleware] | None = None,
         db_alias: str = DEFAULT_DB_ALIAS,
+        direct_db_alias: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, middleware=[], **kwargs)  # type: ignore[misc]
         self.logger = get_logger(__name__, type(self))
 
+        self.actor_options.add("dependencies")
         self.queues = set()
 
         self.db_alias = db_alias
+        # Django alias used for connections that must hold a stable PG backend
+        # across statements (consumer LISTEN, session-scoped advisory locks).
+        # When unset, both fall back to db_alias. When set, ORM queries continue
+        # via db_alias (which may go through a transaction pooler) while LISTEN
+        # and lock connections go through direct_db_alias.
+        self.direct_db_alias = direct_db_alias or db_alias
         self.middleware = []
         if middleware:
             raise ImproperlyConfigured(
@@ -117,6 +128,7 @@ class PostgresBroker(Broker):
         return self.consumer_class(
             broker=self,
             db_alias=self.db_alias,
+            direct_db_alias=self.direct_db_alias,
             queue_name=queue_name,
             prefetch=prefetch,
             timeout=timeout,
@@ -137,7 +149,6 @@ class PostgresBroker(Broker):
         return {
             "queue_name": message.queue_name,
             "actor_name": message.actor_name,
-            "state": TaskState.QUEUED,
             "retries": message.options.get("retries", 0),
             "eta": eta,
         }
@@ -163,6 +174,7 @@ class PostgresBroker(Broker):
             "Enqueueing message on queue", message_id=message.message_id, queue=queue_name
         )
 
+        dependencies = message.options.pop("dependencies", [])
         message.options["model_defaults"] = self.model_defaults(message)
         message.options["model_create_defaults"] = {}
         self.emit_before("enqueue", message, delay)
@@ -173,6 +185,9 @@ class PostgresBroker(Broker):
             }
             defaults = message.options.pop("model_defaults")
             defaults["message"] = message.encode()
+            defaults["state"] = (
+                TaskState.QUEUED if not dependencies else TaskState.WAITING_FOR_DEPENDENCIES
+            )
             create_defaults = {
                 **query,
                 **defaults,
@@ -186,6 +201,8 @@ class PostgresBroker(Broker):
             )
             message.options["task"] = task
             message.options["task_created"] = created
+            if created and dependencies:
+                task.dependencies.set(dependencies)
 
             self.emit_after("enqueue", message, delay)
         return message
@@ -233,6 +250,7 @@ class _PostgresConsumer(Consumer):
         queue_name: str,
         prefetch: int,
         timeout: int,
+        direct_db_alias: str | None = None,
         **kwargs: Any,
     ) -> None:
         self.logger = get_logger(__name__, type(self))
@@ -240,6 +258,8 @@ class _PostgresConsumer(Consumer):
         self.pending: set[str] = set()
         self.broker = broker
         self.db_alias = db_alias
+        # See PostgresBroker.__init__ for the rationale. None falls back to db_alias.
+        self.direct_db_alias = direct_db_alias or db_alias
         self.queue_name = queue_name
         self.timeout = timeout // 1000
         self.to_unlock: set[str] = set()
@@ -266,6 +286,7 @@ class _PostgresConsumer(Consumer):
             self.scheduler = import_string(Conf().scheduler_class)()
             self.scheduler.broker = self.broker
             self.scheduler.db_alias = self.db_alias
+            self.scheduler.direct_db_alias = self.direct_db_alias
             self.scheduler_interval = timedelta(seconds=Conf().scheduler_interval)
             self.scheduler_last_run = timezone.now() - self.scheduler_interval
 
@@ -284,7 +305,11 @@ class _PostgresConsumer(Consumer):
             except DATABASE_ERRORS as exc:
                 self.logger.warning("Failed to close old unusable locks connection", exc=exc)
 
-        self._locks_connection = cast(DatabaseWrapper, connections.create_connection(self.db_alias))
+        # Use the direct alias to bypass any transaction pooler: pg_advisory_lock
+        # and pg_advisory_unlock are session-scoped and must run on the same backend.
+        self._locks_connection = cast(
+            DatabaseWrapper, connections.create_connection(self.direct_db_alias)
+        )
         return self._locks_connection
 
     @property
@@ -298,8 +323,10 @@ class _PostgresConsumer(Consumer):
             except DATABASE_ERRORS as exc:
                 self.logger.warning("Failed to close old unusable listen connection", exc=exc)
 
+        # Use the direct alias to bypass any transaction pooler: LISTEN
+        # registration is session-scoped and is lost if the pooler swaps backends.
         self._listen_connection = cast(
-            DatabaseWrapper, connections.create_connection(self.db_alias)
+            DatabaseWrapper, connections.create_connection(self.direct_db_alias)
         )
         # Required for notifications
         # See https://www.psycopg.org/psycopg3/docs/advanced/async.html#asynchronous-notifications
@@ -314,6 +341,41 @@ class _PostgresConsumer(Consumer):
             f"{channel_name(self.queue_name, ChannelIdentifier.LOCK)}.{message_id}"
         )  # type: ignore[no-untyped-call]
         return cast(int, lock_id)
+
+    def _backlog_waiting_for_dependencies(self) -> None:
+        self.logger.debug("Backlogging tasks waiting for dependencies", queue=self.queue_name)
+        with transaction.atomic(using=self.db_alias):
+            for task in self.query_set.filter(
+                queue_name=self.queue_name,
+                state=TaskState.WAITING_FOR_DEPENDENCIES,
+            ).select_for_update():
+                dependencies_states = task.dependencies.values_list("state", flat=True)
+                if any(state == TaskState.REJECTED for state in dependencies_states):
+                    self.logger.debug(
+                        "Task found with rejected dependencies, rejecting it too.",
+                        queue=self.queue_name,
+                        task_id=task.message_id,
+                    )
+                    task.state = TaskState.REJECTED
+                    task.message = b""
+                    task.mtime = timezone.now()
+                    task.eta = None
+                    task.save()
+                elif all(state == TaskState.DONE for state in dependencies_states):
+                    self.logger.debug(
+                        "Task found with all dependencies done, enqueuing.",
+                        queue=self.queue_name,
+                        task_id=task.message_id,
+                    )
+                    task.state = TaskState.QUEUED
+                    task.mtime = timezone.now()
+                    task.save()
+                else:
+                    self.logger.debug(
+                        "Task is still waiting for dependencies, skipping.",
+                        queue=self.queue_name,
+                        task_id=task.message_id,
+                    )
 
     def _fetch_pending_messages(self) -> set[str]:
         self.logger.debug("Fetching for pending messages", queue=self.queue_name)
@@ -440,6 +502,9 @@ class _PostgresConsumer(Consumer):
         if not self.pending:
             self.pending = self._fetch_pending_messages()
 
+        if not self.pending:
+            self._backlog_waiting_for_dependencies()
+
         # If we have some messages pending, loop to find one to process
         while True:
             try:
@@ -497,10 +562,26 @@ class _PostgresConsumer(Consumer):
     @raise_broker_connection_error
     def ack(self, message: MessageProxy) -> None:
         self._post_process_message(message, TaskState.DONE)
+        with transaction.atomic(using=self.db_alias):
+            dependents = self.query_set.select_for_update().filter(
+                state=TaskState.WAITING_FOR_DEPENDENCIES,
+                dependencies=cast(UUID, message.message_id),
+            )
+            for dependent in dependents:
+                dependencies_state = dependent.dependencies.using(self.db_alias).values_list(
+                    "state", flat=True
+                )
+                if all(state == TaskState.DONE for state in dependencies_state):
+                    dependent.state = TaskState.QUEUED
+                    dependent.save()
 
     @raise_broker_connection_error
     def nack(self, message: MessageProxy) -> None:
         self._post_process_message(message, TaskState.REJECTED)
+        self.query_set.filter(
+            state=TaskState.WAITING_FOR_DEPENDENCIES,
+            dependencies=cast(UUID, message.message_id),
+        ).update(state=TaskState.REJECTED, message=b"", mtime=timezone.now(), eta=None)
 
     @raise_broker_connection_error
     def requeue(self, messages: Iterable[MessageProxy]) -> None:
@@ -522,7 +603,7 @@ class _PostgresConsumer(Consumer):
         if timezone.now() - self.scheduler_last_run < self.scheduler_interval:
             return
         self.scheduler.run()
-        self.schedule_last_run = timezone.now()
+        self.scheduler_last_run = timezone.now()
 
     def _purge_locks(self) -> None:
         while True:
@@ -537,11 +618,17 @@ class _PostgresConsumer(Consumer):
         if timezone.now() - self.task_purge_last_run < self.task_purge_interval:
             return
         self.logger.debug("Running garbage collector")
-        count = self.query_set.filter(
-            state__in=(TaskState.DONE, TaskState.REJECTED),
-            mtime__lte=timezone.now() - timedelta(seconds=Conf().task_expiration),
-            result_expiry__lte=timezone.now(),
-        ).delete()
+        count = 0
+        for task in chunked_queryset(
+            self.query_set.filter(
+                state__in=(TaskState.DONE, TaskState.REJECTED),
+                mtime__lte=timezone.now() - timedelta(seconds=Conf().task_expiration),
+                result_expiry__lte=timezone.now(),
+            ),
+            chunk_size=100,
+        ):
+            task.delete()
+            count += 1
         self.logger.info("Purged messages in all queues", count=count)
         self.task_purge_last_run = timezone.now()
 

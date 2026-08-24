@@ -10,7 +10,6 @@ const ProviderTypeEnum = {
     Apple: "apple",
     Openidconnect: "openidconnect",
     Entraid: "entraid",
-    Azuread: "azuread",
     Dingtalk: "dingtalk",
     Discord: "discord",
     Facebook: "facebook",
@@ -92,8 +91,8 @@ vi.mock("@goauthentik/api", () => ({
     },
 }));
 
-vi.mock("#common/api/config", () => ({
-    DEFAULT_CONFIG: {},
+vi.mock("#common/api/client", () => ({
+    aki: (APIClass: new () => unknown) => new APIClass(),
 }));
 
 vi.mock("#common/global", () => ({

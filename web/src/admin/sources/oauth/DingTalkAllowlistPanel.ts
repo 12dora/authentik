@@ -5,7 +5,7 @@ import "#elements/Alert";
 
 import { DingTalkAllowlistApi, type DingTalkAllowlistStatus } from "./DingTalkAllowlistApi";
 
-import { DEFAULT_CONFIG } from "#common/api/config";
+import { aki } from "#common/api/client";
 import { parseAPIResponseError, pluckErrorDetail } from "#common/errors/network";
 import { MessageLevel } from "#common/messages";
 
@@ -263,8 +263,8 @@ export class DingTalkAllowlistPanel extends AKElement {
     // rewrite (and thus the `.value` write-back) that would break Chinese input.
     private composing = false;
 
-    private sourcesApi = new SourcesApi(DEFAULT_CONFIG);
-    private allowlistApi = new DingTalkAllowlistApi(DEFAULT_CONFIG);
+    private sourcesApi = aki(SourcesApi);
+    private allowlistApi = new DingTalkAllowlistApi(this.sourcesApi);
 
     static styles: CSSResult[] = [
         PFButton,

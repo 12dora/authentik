@@ -503,9 +503,11 @@ def _record_dingtalk_allowlist_denial(
     **metadata,
 ) -> None:
     Event.new(
-        EventAction.CONFIGURATION_ERROR
-        if category == "temporarily_unable_to_verify"
-        else EventAction.LOGIN_FAILED,
+        (
+            EventAction.CONFIGURATION_ERROR
+            if category == "temporarily_unable_to_verify"
+            else EventAction.LOGIN_FAILED
+        ),
         message="DingTalk allowlist denied access.",
         reason=reason,
         public_category=category,
@@ -832,7 +834,7 @@ def _fetch_dingtalk_user_profile(
         profile.setdefault("corp_id", corp_id)
         try:
             org_info = fetch_dingtalk_org_auth_info(source, str(corp_id), session=session)
-        except (RequestException, ValueError):
+        except RequestException, ValueError:
             org_info = {}
         if label := org_info.get("label"):
             profile.setdefault("label", label)

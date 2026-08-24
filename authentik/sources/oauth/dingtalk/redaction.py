@@ -37,8 +37,7 @@ def redact_dingtalk_detail(value: Any) -> str:
         message,
     )
     message = sub(
-        r"(?i)(['\"]?authorization['\"]?\s*[:=]\s*['\"]?)(?:Bearer\s+)?"
-        r"[^'\"&\s,;}]+",
+        r"(?i)(['\"]?authorization['\"]?\s*[:=]\s*['\"]?)(?:Bearer\s+)?" r"[^'\"&\s,;}]+",
         r"\1[redacted]",
         message,
     )

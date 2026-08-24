@@ -1,7 +1,6 @@
 import type { DingTalkAllowlistModel } from "#admin/sources/oauth/DingTalkAllowlistPolicy";
 
 import {
-    type Configuration,
     type DingTalkAllowlistApplyRequestRequest,
     type DingTalkAllowlistRemoveRequestRequest,
     type DingTalkAllowlistStatusResponse,
@@ -30,8 +29,12 @@ function dingTalkAllowlistConfigToJSON(model: DingTalkAllowlistModel): unknown {
 export class DingTalkAllowlistApi {
     private readonly api: SourcesApi;
 
-    public constructor(configuration?: Configuration) {
-        this.api = new SourcesApi(configuration);
+    // The caller injects the endpoint (`aki(SourcesApi)` in the panel) rather than
+    // this module importing `#common/api/client` itself: that module pulls in the
+    // API middleware, which reaches `AKElement` and therefore `CSSStyleSheet`, and
+    // would break the Node-environment unit tests that import this file directly.
+    public constructor(api: SourcesApi) {
+        this.api = api;
     }
 
     public async sourcesOauthDingtalkAllowlistApplyCreate(
