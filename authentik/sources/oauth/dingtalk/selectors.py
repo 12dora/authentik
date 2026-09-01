@@ -109,7 +109,10 @@ def source_scoped_dingtalk_identity(
             if identity:
                 return identity
 
-    connection = UserOAuthSourceConnection.objects.filter(user=user, source=source).first()
+    if isinstance(user, User) and user.pk is not None:
+        connection = UserOAuthSourceConnection.objects.filter(user=user, source=source).first()
+    else:
+        connection = None
     if connection and connection.identifier:
         directory_user = (
             DingTalkDirectoryUser.objects.filter(source=source, is_deleted=False)

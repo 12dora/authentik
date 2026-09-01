@@ -1,5 +1,6 @@
 """DingTalk directory model, sync, and selector tests."""
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.db import connection
@@ -824,6 +825,33 @@ class TestDingTalkOrgContext(TestCase):
             consumer_key="CLIENT_ID",
             consumer_secret="CLIENT_SECRET",
         )
+
+    def test_org_context_accepts_directory_identity_without_a_user_pk(self):
+        seen = now()
+        DingTalkDirectorySyncStatus.objects.create(
+            source=self.source,
+            corp_id="CORP",
+            status="success",
+            finished_at=seen,
+            last_success_at=seen,
+        )
+        DingTalkDirectoryUser.objects.create(
+            source=self.source,
+            corp_id="CORP",
+            user_id="USER",
+            name="Ada",
+            dept_id_list=[],
+            last_seen_at=seen,
+        )
+
+        context = get_dingtalk_org_context(
+            SimpleNamespace(attributes={"dingtalk": {"corp_id": "CORP", "user_id": "USER"}}),
+            source_slug="dingtalk",
+        )
+
+        self.assertEqual(context["corp_id"], "CORP")
+        self.assertEqual(context["user_id"], "USER")
+        self.assertFalse(context["stale"])
 
     def test_org_context_returns_department_path_and_manager_chain(self):
         seen = now()

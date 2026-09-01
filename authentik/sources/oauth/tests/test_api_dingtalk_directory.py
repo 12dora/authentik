@@ -372,3 +372,29 @@ class TestDingTalkDirectoryAPI(APITestCase):
         self.assertEqual(own_response.status_code, 200)
         self.assertEqual(own_response.json()["corp_id"], "CORP_A")
         self.assertEqual(other_response.status_code, 403)
+
+    def test_org_context_directory_reader_can_load_other_users(self):
+        seen = now()
+        DingTalkDirectorySyncStatus.objects.create(
+            source=self.source,
+            corp_id="CORP",
+            status="success",
+            finished_at=seen,
+            last_success_at=seen,
+        )
+        self.authenticate(create_test_admin_user())
+
+        response = self.client.get(
+            reverse(
+                "authentik_api:dingtalk-directory-user-org",
+                kwargs={
+                    "source_slug": "dingtalk",
+                    "corp_id": "CORP",
+                    "user_id": "USER",
+                },
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["corp_id"], "CORP")
+        self.assertEqual(response.json()["user_id"], "USER")
