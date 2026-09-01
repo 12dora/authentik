@@ -416,6 +416,20 @@ def _verify_sync_corp(source: OAuthSource, corp_id: str, client: DingTalkDirecto
         # once the response has stated no corp identity of its own to check against.
         verified_corp_ids = extract_dingtalk_corp_ids(raw, keys=DINGTALK_CORP_ID_ECHO_KEYS)
     if not verified_corp_ids:
+        # Internal enterprise apps' /v1.0/contact/organizations/authInfos returns
+        # license/orgName for the requested targetCorpId and omits corpid. A successful
+        # lookup that names the organization is enough to bind this app token to the
+        # requested corp, but only when the body stated no corp identity of its own.
+        label = str(
+            org_info.get("label")
+            or raw.get("orgName")
+            or raw.get("licenseOrgName")
+            or raw.get("corpName")
+            or ""
+        ).strip()
+        if label:
+            verified_corp_ids = {corp_id}
+    if not verified_corp_ids:
         raise ValueError("DingTalk organization verification did not report a corp identity.")
     if corp_id not in verified_corp_ids:
         raise ValueError("DingTalk organization verification reported a different corp identity.")
@@ -437,12 +451,18 @@ def _check_stage_budgets(user_count: int, raw_payload_bytes: int) -> None:
         raise ValueError("DingTalk directory sync payload limit exceeded.")
 
 
+def _unique_by_id(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+    """Last write wins. Postgres rejects ON CONFLICT DO UPDATE if one INSERT lists a key twice."""
+    return list({str(row[key]): row for row in rows}.values())
+
+
 def _flush_department_stage(
     source: OAuthSource,
     corp_id: str,
     run_id: UUID,
     departments: list[dict[str, Any]],
 ) -> None:
+    departments[:] = _unique_by_id(departments, "dept_id")
     if not departments:
         return
     DingTalkDirectoryDepartmentStage.objects.bulk_create(
@@ -472,6 +492,7 @@ def _flush_user_stage(
     run_id: UUID,
     users: list[dict[str, Any]],
 ) -> None:
+    users[:] = _unique_by_id(users, "user_id")
     if not users:
         return
     DingTalkDirectoryUserStage.objects.bulk_create(
@@ -571,6 +592,7 @@ def _stage_directory_snapshot(
     department_count = 0
     user_count = 0
     raw_payload_bytes = 0
+    seen_user_ids: set[str] = set()
     for department in _iter_departments(client):
         department_batch.append(department)
         department_count += 1
@@ -582,7 +604,13 @@ def _stage_directory_snapshot(
                 source, corp_id, run_id, department_count, user_count, department["dept_id"]
             )
         for raw_user in client.iter_department_users(department["dept_id"]):
+            listed_id = raw_user.get("userid") or raw_user.get("userId") or raw_user.get("user_id")
+            if listed_id is not None and str(listed_id) in seen_user_ids:
+                continue
             user = _stage_user(client, corp_id, raw_user)
+            if user["user_id"] in seen_user_ids:
+                continue
+            seen_user_ids.add(user["user_id"])
             user_batch.append(user)
             user_count += 1
             raw_payload_bytes += _raw_size(raw_user)

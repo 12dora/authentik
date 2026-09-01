@@ -173,6 +173,27 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertFalse(DingTalkDirectoryUserStage.objects.filter(corp_id="CORP").exists())
 
     @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
+    def test_sync_dedupes_users_listed_in_multiple_departments(self, client_cls):
+        listed = {
+            "userid": "USER",
+            "name": "Ada",
+            "dept_id_list": [1, 2],
+            "active": True,
+        }
+        client = client_cls.return_value
+        client.get_user_detail.return_value = {"manager_userid": "MANAGER"}
+        client.iter_departments.return_value = [
+            {"dept_id": "2", "name": "Engineering", "parent_dept_id": "1", "raw": {"dept_id": 2}},
+        ]
+        client.iter_department_users.side_effect = [[listed], [listed]]
+
+        result = sync_dingtalk_directory(self.source, corp_id="CORP")
+
+        self.assertEqual(result["users"], 1)
+        self.assertEqual(DingTalkDirectoryUser.objects.filter(user_id="USER").count(), 1)
+        self.assertEqual(client.get_user_detail.call_count, 1)
+
+    @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
     def test_sync_enriches_manager_from_user_detail(self, client_cls):
         """v2/user/list never returns manager_userid; it must be enriched via v2/user/get."""
         client = client_cls.return_value
@@ -231,6 +252,13 @@ class TestDingTalkDirectorySync(TestCase):
             {"authInfos": [{"targetCorpId": "CORP", "contactName": "Example"}]},
             {"result": {"corpId": "CORP"}},
             {"corp_id": "CORP"},
+            # Internal-app authInfos: business-license payload, no corp id field.
+            {
+                "orgName": "Example",
+                "licenseOrgName": "Example",
+                "authLevel": 2,
+                "unifiedSocialCredit": "X",
+            },
         ]:
             with self.subTest(raw=raw):
                 org_auth_mock.return_value = {"raw": raw, "label": "Example"}
@@ -587,6 +615,28 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.ERROR)
         self.assertEqual(status.error_code, DINGTALK_SYNC_ERROR_CORP_MISMATCH)
         self.assertEqual(status.error_params["reason"], "unverified")
+
+    @patch("authentik.sources.oauth.dingtalk.sync.fetch_dingtalk_org_auth_info")
+    @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
+    def test_corp_verification_accepts_internal_app_license_payload_without_corp_id(
+        self, client_cls, org_auth_mock
+    ):
+        org_auth_mock.return_value = {
+            "corp_id": "CORP",
+            "label": "Example Co",
+            "raw": {
+                "orgName": "Example Co",
+                "licenseOrgName": "Example Co",
+                "authLevel": 2,
+            },
+        }
+        client_cls.return_value.iter_departments.return_value = []
+        client_cls.return_value.iter_department_users.return_value = []
+
+        sync_dingtalk_directory(self.source, corp_id="CORP")
+
+        status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
+        self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.SUCCESS)
 
     @patch("authentik.sources.oauth.dingtalk.sync.DINGTALK_MAX_SYNC_USERS", 0)
     @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
