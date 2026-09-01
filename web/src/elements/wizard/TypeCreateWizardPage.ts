@@ -67,6 +67,9 @@ export class TypeCreateWizardPage extends WithLicenseSummary(WizardPage) {
             :host([theme="dark"]) .pf-c-card__header-main img {
                 filter: invert(1);
             }
+            :host([theme="dark"]) .pf-c-card__header-main img[src*="dingtalk"] {
+                filter: none;
+            }
 
             :host([theme="dark"]) .pf-c-card {
                 --pf-c-card--BackgroundColor: var(--pf-global--BackgroundColor--150);

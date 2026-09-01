@@ -66,5 +66,10 @@ ak-stage-identification[theme="dark"].style-scope {
         .pf-c-button__icon .fas {
             filter: invert(1);
         }
+
+        /* Colored brand marks must not be inverted (blue DingTalk becomes yellow). */
+        img[src*="dingtalk"] {
+            filter: none;
+        }
     }
 }

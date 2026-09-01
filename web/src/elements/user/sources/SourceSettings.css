@@ -28,6 +28,10 @@
         filter: invert(1);
     }
 
+    .pf-c-data-list__cell img[src*="dingtalk"] {
+        filter: none;
+    }
+
     .pf-c-data-list__item {
         --pf-c-data-list__item--BackgroundColor: transparent;
         --pf-c-data-list__item--BorderBottomColor: var(--ak-dark-background-lighter);
