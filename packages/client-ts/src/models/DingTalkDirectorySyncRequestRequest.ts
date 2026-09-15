@@ -24,6 +24,12 @@ export interface DingTalkDirectorySyncRequestRequest {
      * @memberof DingTalkDirectorySyncRequestRequest
      */
     corpId: string;
+    /**
+     *
+     * @type {boolean}
+     * @memberof DingTalkDirectorySyncRequestRequest
+     */
+    full?: boolean;
 }
 
 /**
@@ -57,6 +63,7 @@ export function DingTalkDirectorySyncRequestRequestFromJSONTyped(
     }
     return {
         corpId: json["corp_id"],
+        full: json["full"] == null ? undefined : json["full"],
     };
 }
 
@@ -76,5 +83,6 @@ export function DingTalkDirectorySyncRequestRequestToJSONTyped(
 
     return {
         corp_id: value["corpId"],
+        full: value["full"],
     };
 }

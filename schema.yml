@@ -40329,6 +40329,9 @@ components:
         corp_id:
           type: string
           minLength: 1
+        full:
+          type: boolean
+          default: true
       required:
       - corp_id
     DingTalkDirectorySyncStatus:
@@ -40356,6 +40359,10 @@ components:
           format: date-time
           nullable: true
         last_success_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_full_success_at:
           type: string
           format: date-time
           nullable: true

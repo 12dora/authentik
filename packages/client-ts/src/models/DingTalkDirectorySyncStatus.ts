@@ -68,6 +68,12 @@ export interface DingTalkDirectorySyncStatus {
     lastSuccessAt?: Date | null;
     /**
      *
+     * @type {Date}
+     * @memberof DingTalkDirectorySyncStatus
+     */
+    lastFullSuccessAt?: Date | null;
+    /**
+     *
      * @type {string}
      * @memberof DingTalkDirectorySyncStatus
      */
@@ -170,6 +176,12 @@ export function DingTalkDirectorySyncStatusFromJSONTyped(
                 : json["last_success_at"] === null
                   ? null
                   : new Date(json["last_success_at"]),
+        lastFullSuccessAt:
+            json["last_full_success_at"] === undefined
+                ? undefined
+                : json["last_full_success_at"] === null
+                  ? null
+                  : new Date(json["last_full_success_at"]),
         error: json["error"],
         errorCode: json["error_code"],
         errorParams: json["error_params"],
@@ -211,6 +223,10 @@ export function DingTalkDirectorySyncStatusToJSONTyped(
             value["lastSuccessAt"] == null
                 ? value["lastSuccessAt"]
                 : value["lastSuccessAt"].toISOString(),
+        last_full_success_at:
+            value["lastFullSuccessAt"] == null
+                ? value["lastFullSuccessAt"]
+                : value["lastFullSuccessAt"].toISOString(),
         error_correlation_id: value["errorCorrelationId"],
         counters: value["counters"],
     };
