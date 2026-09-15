@@ -1,5 +1,6 @@
 """DingTalk directory model, sync, and selector tests."""
 
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -12,6 +13,7 @@ from requests.exceptions import RequestException
 from structlog.testing import capture_logs
 
 from authentik.core.tests.utils import create_test_user
+from authentik.sources.oauth.dingtalk.config import DINGTALK_FULL_REFRESH_INTERVAL
 from authentik.sources.oauth.dingtalk.selectors import get_dingtalk_org_context
 from authentik.sources.oauth.dingtalk.sync import (
     DINGTALK_SYNC_ERROR_APP_TOKEN_FAILED,
@@ -23,6 +25,7 @@ from authentik.sources.oauth.dingtalk.sync import (
     DINGTALK_SYNC_ERROR_SOURCE_DISABLED,
     _publish_snapshot,
     _start_sync_run,
+    _typed_counters,
     classify_dingtalk_sync_error,
     finalize_dingtalk_directory_sync_error,
     queue_dingtalk_directory_sync,
@@ -54,6 +57,14 @@ from authentik.sources.oauth.types.dingtalk import (
 ORG_AUTH_CORP = {
     "raw": {"auth_org_info": {"corpid": "CORP", "corp_name": "Example"}},
     "label": "Example",
+}
+DIRECTORY_COUNTER_KEYS = {
+    "departments",
+    "users",
+    "warnings",
+    "mode",
+    "requests",
+    "user_detail_requests",
 }
 
 
@@ -195,6 +206,32 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertEqual(client.get_user_detail.call_count, 1)
 
     @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
+    def test_incremental_dedupes_unchanged_user_listed_in_multiple_departments(self, client_cls):
+        listed = {
+            "userid": "USER",
+            "name": "Ada",
+            "dept_id_list": [1, 2],
+            "active": True,
+        }
+        self._cache_directory_user(listed, manager_user_id="CACHED-BOSS")
+        client = client_cls.return_value
+        client.get_user_detail.return_value = {"manager_userid": "DETAIL-BOSS"}
+        client.iter_departments.return_value = [
+            {"dept_id": "2", "name": "Engineering", "parent_dept_id": "1", "raw": {"dept_id": 2}},
+        ]
+        client.iter_department_users.side_effect = [[listed], [listed]]
+
+        result = sync_dingtalk_directory(self.source, corp_id="CORP", full=False)
+
+        self.assertEqual(result["users"], 1)
+        self.assertEqual(DingTalkDirectoryUser.objects.filter(user_id="USER").count(), 1)
+        self.assertEqual(client.get_user_detail.call_count, 0)
+        self.assertEqual(
+            DingTalkDirectoryUser.objects.get(user_id="USER").manager_user_id,
+            "CACHED-BOSS",
+        )
+
+    @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
     def test_sync_enriches_manager_from_user_detail(self, client_cls):
         """v2/user/list never returns manager_userid; it must be enriched via v2/user/get."""
         client = client_cls.return_value
@@ -217,6 +254,165 @@ class TestDingTalkDirectorySync(TestCase):
         user = DingTalkDirectoryUser.objects.get(user_id="USER")
         self.assertEqual(user.manager_user_id, "BOSS")
 
+    def _cache_directory_user(self, raw, *, manager_user_id="", is_deleted=False):
+        user_id = str(raw.get("userid") or raw.get("userId") or raw.get("user_id"))
+        return DingTalkDirectoryUser.objects.create(
+            source=self.source,
+            corp_id="CORP",
+            user_id=user_id,
+            name=str(raw.get("name") or ""),
+            manager_user_id=manager_user_id,
+            dept_id_list=["1"],
+            raw=raw,
+            is_deleted=is_deleted,
+            last_seen_at=now(),
+        )
+
+    @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
+    def test_incremental_reuses_cached_manager_unless_row_is_new_changed_or_deleted(
+        self, client_cls
+    ):
+        unchanged = {
+            "userid": "UNCHANGED",
+            "name": "Ada",
+            "dept_id_list": [1],
+            "active": True,
+        }
+        changed_cached = {
+            "userid": "CHANGED",
+            "name": "Old",
+            "dept_id_list": [1],
+            "active": True,
+        }
+        changed_listed = {
+            "userid": "CHANGED",
+            "name": "New",
+            "dept_id_list": [1],
+            "active": True,
+        }
+        new_user = {
+            "userid": "NEW",
+            "name": "Grace",
+            "dept_id_list": [1],
+            "active": True,
+        }
+        deleted = {
+            "userid": "DELETED",
+            "name": "Gone",
+            "dept_id_list": [1],
+            "active": True,
+        }
+        self._cache_directory_user(unchanged, manager_user_id="CACHED-BOSS")
+        self._cache_directory_user(changed_cached, manager_user_id="OLD-BOSS")
+        self._cache_directory_user(deleted, manager_user_id="DELETED-BOSS", is_deleted=True)
+
+        client = client_cls.return_value
+        client.request_budget.used = 11
+        client.iter_departments.return_value = []
+        client.iter_department_users.return_value = [
+            unchanged,
+            changed_listed,
+            new_user,
+            deleted,
+        ]
+        client.get_user_detail.side_effect = lambda user_id: {"manager_userid": f"DETAIL-{user_id}"}
+
+        result = sync_dingtalk_directory(self.source, corp_id="CORP", full=False)
+
+        called_ids = [call.args[0] for call in client.get_user_detail.call_args_list]
+        self.assertEqual(called_ids, ["CHANGED", "NEW", "DELETED"])
+        self.assertEqual(
+            DingTalkDirectoryUser.objects.get(user_id="UNCHANGED").manager_user_id,
+            "CACHED-BOSS",
+        )
+        self.assertEqual(
+            DingTalkDirectoryUser.objects.get(user_id="CHANGED").manager_user_id,
+            "DETAIL-CHANGED",
+        )
+        self.assertEqual(
+            DingTalkDirectoryUser.objects.get(user_id="NEW").manager_user_id,
+            "DETAIL-NEW",
+        )
+        self.assertEqual(
+            DingTalkDirectoryUser.objects.get(user_id="DELETED").manager_user_id,
+            "DETAIL-DELETED",
+        )
+        self.assertFalse(DingTalkDirectoryUser.objects.get(user_id="DELETED").is_deleted)
+        self.assertEqual(set(result), DIRECTORY_COUNTER_KEYS)
+        self.assertEqual(result["mode"], "incremental")
+        self.assertEqual(result["users"], 4)
+        self.assertEqual(result["requests"], 11)
+        self.assertEqual(result["user_detail_requests"], 3)
+        status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
+        self.assertIsNone(status.last_full_success_at)
+        self.assertEqual(status.counters["mode"], "incremental")
+        self.assertEqual(status.counters["user_detail_requests"], 3)
+
+    @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
+    def test_full_run_fetches_every_user_detail_and_sets_last_full_success_at(self, client_cls):
+        listed = {
+            "userid": "USER",
+            "name": "Ada",
+            "dept_id_list": [1],
+            "active": True,
+        }
+        other = {
+            "userid": "OTHER",
+            "name": "Grace",
+            "dept_id_list": [1],
+            "active": True,
+        }
+        self._cache_directory_user(listed, manager_user_id="CACHED-BOSS")
+
+        client = client_cls.return_value
+        client.request_budget.used = 8
+        client.iter_departments.return_value = []
+        client.iter_department_users.return_value = [listed, other]
+        client.get_user_detail.side_effect = lambda user_id: {"manager_userid": f"DETAIL-{user_id}"}
+
+        result = sync_dingtalk_directory(self.source, corp_id="CORP", full=True)
+
+        self.assertEqual(
+            [call.args[0] for call in client.get_user_detail.call_args_list],
+            ["USER", "OTHER"],
+        )
+        self.assertEqual(
+            DingTalkDirectoryUser.objects.get(user_id="USER").manager_user_id,
+            "DETAIL-USER",
+        )
+        self.assertEqual(set(result), DIRECTORY_COUNTER_KEYS)
+        self.assertEqual(result["mode"], "full")
+        self.assertEqual(result["users"], 2)
+        self.assertEqual(result["requests"], 8)
+        self.assertEqual(result["user_detail_requests"], 2)
+        status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
+        self.assertIsNotNone(status.last_full_success_at)
+        self.assertEqual(status.last_full_success_at, status.finished_at)
+        self.assertEqual(status.counters["mode"], "full")
+
+        first_full_at = status.last_full_success_at
+        client.get_user_detail.reset_mock()
+        client.request_budget.used = 5
+        incremental = sync_dingtalk_directory(self.source, corp_id="CORP", full=False)
+
+        self.assertEqual(client.get_user_detail.call_count, 0)
+        self.assertEqual(incremental["mode"], "incremental")
+        self.assertEqual(incremental["user_detail_requests"], 0)
+        status.refresh_from_db()
+        self.assertEqual(status.last_full_success_at, first_full_at)
+        self.assertEqual(
+            DingTalkDirectoryUser.objects.get(user_id="USER").manager_user_id,
+            "DETAIL-USER",
+        )
+
+    def test_typed_counters_defaults_include_mode_and_request_keys(self):
+        counters = _typed_counters()
+        self.assertEqual(set(counters), DIRECTORY_COUNTER_KEYS)
+        self.assertEqual(counters["mode"], "")
+        self.assertEqual(counters["requests"], 0)
+        self.assertEqual(counters["user_detail_requests"], 0)
+        self.assertEqual(counters["warnings"], [])
+
     @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
     def test_sync_error_status_survives_raised_client_error(self, client_cls):
         DingTalkDirectorySyncStatus.objects.create(
@@ -238,6 +434,7 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertIsNotNone(status.error_correlation_id)
         self.assertEqual(status.generation, 7)
         self.assertIsNone(status.last_success_at)
+        self.assertIsNone(status.last_full_success_at)
 
     @patch("authentik.sources.oauth.dingtalk.sync.fetch_dingtalk_org_auth_info")
     @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
@@ -340,6 +537,10 @@ class TestDingTalkDirectorySync(TestCase):
         status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
         self.assertEqual(second["departments"], 1)
         self.assertTrue(stale["stale"])
+        self.assertEqual(set(stale), DIRECTORY_COUNTER_KEYS | {"stale"})
+        self.assertEqual(stale["mode"], "full")
+        self.assertEqual(stale["requests"], 0)
+        self.assertEqual(stale["user_detail_requests"], 0)
         self.assertEqual(status.generation, second_sequence)
         self.assertTrue(
             DingTalkDirectoryDepartment.objects.filter(
@@ -384,6 +585,10 @@ class TestDingTalkDirectorySync(TestCase):
 
         self.assertEqual(counters["departments"], 5)
         self.assertEqual(counters["users"], 5)
+        self.assertEqual(set(counters), DIRECTORY_COUNTER_KEYS)
+        self.assertEqual(counters["mode"], "full")
+        self.assertEqual(counters["requests"], 0)
+        self.assertEqual(counters["user_detail_requests"], 0)
         self.assertFalse(dept_update.called)
         self.assertFalse(user_update.called)
         self.assertLessEqual(len(captured), 12)
@@ -516,6 +721,7 @@ class TestDingTalkDirectorySync(TestCase):
             generation=4,
             finished_at=seen,
             last_success_at=seen,
+            last_full_success_at=seen,
         )
         DingTalkDirectoryUser.objects.create(
             source=self.source,
@@ -545,6 +751,7 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.ERROR)
         self.assertEqual(status.generation, 4)
         self.assertEqual(status.last_success_at, seen)
+        self.assertEqual(status.last_full_success_at, seen)
 
     @patch("authentik.sources.oauth.dingtalk.sync.DINGTALK_STAGE_BATCH_SIZE", 1)
     @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
@@ -750,6 +957,7 @@ class TestDingTalkDirectorySync(TestCase):
         queued = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP_A")
         self.assertEqual(queued.status, DingTalkDirectorySyncStatusChoices.QUEUED)
         self.assertEqual(send_mock.call_args.args[1], "CORP_A")
+        self.assertTrue(send_mock.call_args.kwargs["full"])
         self.assertFalse(
             DingTalkDirectorySyncStatus.objects.filter(
                 source=self.source, corp_id="CORP_B"
@@ -774,6 +982,59 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertEqual(status.error, DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE)
         self.assertEqual(status.error_code, DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE)
         self.assertIsNotNone(status.error_correlation_id)
+
+    @patch("authentik.sources.oauth.types.dingtalk.get_dingtalk_allowlist_binding")
+    @patch("authentik.sources.oauth.tasks.dingtalk_directory_sync.send")
+    def test_scheduled_sync_selects_full_from_last_full_success_at(self, send_mock, allowlist_mock):
+        allowlist_mock.return_value = (
+            None,
+            None,
+            {
+                "companies": [
+                    {"corp_id": "NEVER"},
+                    {"corp_id": "MISSING"},
+                    {"corp_id": "STALE"},
+                    {"corp_id": "BOUNDARY"},
+                    {"corp_id": "RECENT"},
+                ]
+            },
+        )
+        frozen = now()
+        DingTalkDirectorySyncStatus.objects.create(
+            source=self.source,
+            corp_id="MISSING",
+            status=DingTalkDirectorySyncStatusChoices.SUCCESS,
+            last_full_success_at=None,
+        )
+        DingTalkDirectorySyncStatus.objects.create(
+            source=self.source,
+            corp_id="STALE",
+            status=DingTalkDirectorySyncStatusChoices.SUCCESS,
+            last_full_success_at=frozen - DINGTALK_FULL_REFRESH_INTERVAL - timedelta(hours=1),
+        )
+        DingTalkDirectorySyncStatus.objects.create(
+            source=self.source,
+            corp_id="BOUNDARY",
+            status=DingTalkDirectorySyncStatusChoices.SUCCESS,
+            last_full_success_at=frozen - DINGTALK_FULL_REFRESH_INTERVAL,
+        )
+        DingTalkDirectorySyncStatus.objects.create(
+            source=self.source,
+            corp_id="RECENT",
+            status=DingTalkDirectorySyncStatusChoices.SUCCESS,
+            last_full_success_at=frozen - timedelta(hours=1),
+        )
+
+        self.assertEqual(DINGTALK_FULL_REFRESH_INTERVAL, timedelta(hours=20))
+        with patch("django.utils.timezone.now", return_value=frozen):
+            dingtalk_directory_sync_all()
+
+        by_corp = {call.args[1]: call.kwargs["full"] for call in send_mock.call_args_list}
+        self.assertTrue(by_corp["NEVER"])
+        self.assertTrue(by_corp["MISSING"])
+        self.assertTrue(by_corp["STALE"])
+        self.assertTrue(by_corp["BOUNDARY"])
+        self.assertFalse(by_corp["RECENT"])
 
 
 class TestDingTalkCorpIdExtraction(TestCase):

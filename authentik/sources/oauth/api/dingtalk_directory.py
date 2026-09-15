@@ -122,6 +122,7 @@ class DingTalkDirectorySyncStatusSerializer(ModelSerializer):
             "finished_at",
             "last_attempt_at",
             "last_success_at",
+            "last_full_success_at",
             "error",
             "error_code",
             "error_params",
@@ -157,6 +158,7 @@ class DingTalkDirectoryStatusSerializer(serializers.Serializer):
 
 class DingTalkDirectorySyncRequestSerializer(serializers.Serializer):
     corp_id = serializers.CharField()
+    full = serializers.BooleanField(required=False, default=True)
 
 
 class DingTalkDirectorySyncQueuedSerializer(serializers.Serializer):
@@ -244,13 +246,21 @@ class DingTalkDirectorySyncView(APIView):
         source = self.dingtalk_source
         if not source.enabled:
             raise DingTalkDirectoryConflict(gettext_lazy("DingTalk source is disabled."))
-        corp_id = request.data.get("corp_id") or request.data.get("corpId")
-        if not corp_id:
-            raise ValidationError({"corp_id": gettext_lazy("This field is required.")})
+        payload = request.data
+        if not payload.get("corp_id") and payload.get("corpId"):
+            if hasattr(payload, "copy"):
+                payload = payload.copy()
+                payload["corp_id"] = payload.get("corpId")
+            else:
+                payload = {**payload, "corp_id": payload.get("corpId")}
+        serializer = DingTalkDirectorySyncRequestSerializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+        corp_id = serializer.validated_data["corp_id"]
+        full = serializer.validated_data["full"]
         run_id, should_enqueue = queue_dingtalk_directory_sync(source, str(corp_id))
         if should_enqueue:
             try:
-                dingtalk_directory_sync.send(str(source.pk), str(corp_id), str(run_id))
+                dingtalk_directory_sync.send(str(source.pk), str(corp_id), str(run_id), full=full)
             except RuntimeError as exc:
                 finalize_dingtalk_directory_sync_error(
                     source=source,

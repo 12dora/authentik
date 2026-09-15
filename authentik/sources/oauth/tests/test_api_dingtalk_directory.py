@@ -96,6 +96,7 @@ class TestDingTalkDirectoryAPI(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["sync"][0]["generation"], 9)
+        self.assertIn("last_full_success_at", response.json()["sync"][0])
 
     def test_status_hides_legacy_raw_error_text(self):
         DingTalkDirectorySyncStatus.objects.create(
@@ -237,9 +238,41 @@ class TestDingTalkDirectoryAPI(APITestCase):
         self.assertEqual(duplicate.status_code, 200)
         self.assertFalse(duplicate.json()["queued"])
         self.assertEqual(send_mock.call_count, 1)
+        self.assertTrue(send_mock.call_args.kwargs["full"])
         status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
         self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.QUEUED)
         self.assertIsNotNone(status.active_run_id)
+
+    @patch("authentik.sources.oauth.api.dingtalk_directory.dingtalk_directory_sync.send")
+    def test_sync_post_without_full_defaults_to_full_refresh(self, send_mock):
+        self.authenticate(create_test_admin_user())
+
+        response = self.client.post(
+            reverse("authentik_api:dingtalk-directory-sync", kwargs={"source_slug": "dingtalk"}),
+            data={"corp_id": "CORP"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["queued"])
+        send_mock.assert_called_once()
+        self.assertEqual(send_mock.call_args.args[1], "CORP")
+        self.assertTrue(send_mock.call_args.kwargs["full"])
+
+    @patch("authentik.sources.oauth.api.dingtalk_directory.dingtalk_directory_sync.send")
+    def test_sync_post_full_false_queues_incremental(self, send_mock):
+        self.authenticate(create_test_admin_user())
+
+        response = self.client.post(
+            reverse("authentik_api:dingtalk-directory-sync", kwargs={"source_slug": "dingtalk"}),
+            data={"corp_id": "CORP", "full": False},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["queued"])
+        send_mock.assert_called_once()
+        self.assertFalse(send_mock.call_args.kwargs["full"])
 
     @patch("authentik.sources.oauth.api.dingtalk_directory.dingtalk_directory_sync.send")
     def test_sync_post_marks_error_when_broker_rejects(self, send_mock):

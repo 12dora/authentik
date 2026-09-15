@@ -62,6 +62,14 @@ Open **DingTalk Directory** on the source to start a sync and view its status.
 Automatic sync runs every two hours for companies found in the allowlist or in
 existing DingTalk source connections.
 
+Scheduled runs are incremental when a full refresh succeeded less than 20 hours
+ago: they still walk every department and user list, but skip the per-user
+detail call when the listed row matches the cached row and reuse the stored
+manager id. A full refresh (detail for every user) runs when that interval has
+elapsed, and on demand. Manual admin-UI syncs and EasyAuth's event-driven
+`POST sync/` (body `{"corp_id": ...}`) stay full refreshes. Pass `"full": false`
+on that request to force an incremental run.
+
 Sync reads DingTalk departments, users, and manager relationships into
 source-and-company-scoped cache tables. OIDC and SAML mappings read this cache
 instead of calling DingTalk. A successful sync older than 24 hours is reported

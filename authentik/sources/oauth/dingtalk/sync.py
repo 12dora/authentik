@@ -79,12 +79,42 @@ DINGTALK_SYNC_ERROR_MAX_PARAMS = 10
 
 
 def _typed_counters(
-    *, departments: int = 0, users: int = 0, warnings: list[str] | None = None
+    *,
+    departments: int = 0,
+    users: int = 0,
+    warnings: list[str] | None = None,
+    mode: str = "",
+    requests: int = 0,
+    user_detail_requests: int = 0,
 ) -> dict[str, Any]:
     return {
         "departments": int(departments),
         "users": int(users),
         "warnings": list(warnings or []),
+        "mode": str(mode),
+        "requests": int(requests),
+        "user_detail_requests": int(user_detail_requests),
+    }
+
+
+def _client_requests_used(client: DingTalkDirectoryClient) -> int:
+    used = getattr(getattr(client, "request_budget", None), "used", 0)
+    try:
+        return max(0, int(used))
+    except TypeError, ValueError:
+        return 0
+
+
+def _canonical_json(value: Any) -> str:
+    return dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _cached_users_for_incremental(source: OAuthSource, corp_id: str) -> dict[str, tuple[Any, str]]:
+    return {
+        str(user_id): (raw, str(manager_user_id or ""))
+        for user_id, raw, manager_user_id in DingTalkDirectoryUser.objects.filter(
+            source=source, corp_id=corp_id, is_deleted=False
+        ).values_list("user_id", "raw", "manager_user_id")
     }
 
 
@@ -563,8 +593,18 @@ def _stage_user(
     client: DingTalkDirectoryClient,
     corp_id: str,
     raw_user: dict[str, Any],
-) -> dict[str, Any]:
+    *,
+    full: bool,
+    cached_users: dict[str, tuple[Any, str]],
+) -> tuple[dict[str, Any], bool]:
     user = normalize_dingtalk_user(raw_user, corp_id)
+    if not full:
+        cached = cached_users.get(user["user_id"])
+        if cached is not None:
+            cached_raw, cached_manager = cached
+            if _canonical_json(raw_user) == _canonical_json(cached_raw):
+                user["manager_user_id"] = cached_manager
+                return user, False
     try:
         detail = client.get_user_detail(user["user_id"])
     except (ValueError, RequestException) as exc:
@@ -572,7 +612,7 @@ def _stage_user(
     manager_id = detail.get("manager_userid") or detail.get("managerUserId") or ""
     if manager_id:
         user["manager_user_id"] = str(manager_id)
-    return user
+    return user, True
 
 
 def _stage_directory_snapshot(
@@ -580,7 +620,9 @@ def _stage_directory_snapshot(
     corp_id: str,
     run_id: UUID,
     client: DingTalkDirectoryClient,
-) -> None:
+    *,
+    full: bool = True,
+) -> int:
     DingTalkDirectoryDepartmentStage.objects.filter(
         source=source, corp_id=corp_id, run_id=run_id
     ).delete()
@@ -592,7 +634,11 @@ def _stage_directory_snapshot(
     department_count = 0
     user_count = 0
     raw_payload_bytes = 0
+    user_detail_requests = 0
     seen_user_ids: set[str] = set()
+    cached_users: dict[str, tuple[Any, str]] = {}
+    if not full:
+        cached_users = _cached_users_for_incremental(source, corp_id)
     for department in _iter_departments(client):
         department_batch.append(department)
         department_count += 1
@@ -607,7 +653,11 @@ def _stage_directory_snapshot(
             listed_id = raw_user.get("userid") or raw_user.get("userId") or raw_user.get("user_id")
             if listed_id is not None and str(listed_id) in seen_user_ids:
                 continue
-            user = _stage_user(client, corp_id, raw_user)
+            user, fetched_detail = _stage_user(
+                client, corp_id, raw_user, full=full, cached_users=cached_users
+            )
+            if fetched_detail:
+                user_detail_requests += 1
             if user["user_id"] in seen_user_ids:
                 continue
             seen_user_ids.add(user["user_id"])
@@ -623,6 +673,7 @@ def _stage_directory_snapshot(
     _flush_department_stage(source, corp_id, run_id, department_batch)
     _flush_user_stage(source, corp_id, run_id, user_batch)
     _record_stage_checkpoint(source, corp_id, run_id, department_count, user_count, "")
+    return user_detail_requests
 
 
 def _snapshot_warnings(
@@ -658,20 +709,32 @@ def _cleanup_staging(source: OAuthSource, corp_id: str, run_id: UUID) -> None:
     ).delete()
 
 
-def _publish_snapshot(
+def _publish_snapshot(  # noqa: PLR0913
     source: OAuthSource,
     corp_id: str,
     started_at: datetime,
     warnings: list[str],
     run: tuple[UUID, int],
+    *,
+    full: bool = True,
+    requests: int = 0,
+    user_detail_requests: int = 0,
 ) -> dict[str, Any]:
     run_id, run_sequence = run
+    mode = "full" if full else "incremental"
     with transaction.atomic():
         status = DingTalkDirectorySyncStatus.objects.select_for_update().get(
             source=source, corp_id=corp_id
         )
         if status.active_run_id != run_id or status.run_sequence != run_sequence:
-            return {"departments": 0, "users": 0, "warnings": [], "stale": True}
+            return {
+                **_typed_counters(
+                    mode=mode,
+                    requests=requests,
+                    user_detail_requests=user_detail_requests,
+                ),
+                "stale": True,
+            }
         _bulk_finalize_departments(source, corp_id, run_id, started_at)
         _bulk_finalize_users(source, corp_id, run_id, started_at)
         _soft_delete_missing_from_staging(source, corp_id, run_id)
@@ -683,6 +746,9 @@ def _publish_snapshot(
                 source=source, corp_id=corp_id, is_deleted=False
             ).count(),
             warnings=warnings,
+            mode=mode,
+            requests=requests,
+            user_detail_requests=user_detail_requests,
         )
         status.status = DingTalkDirectorySyncStatusChoices.SUCCESS
         status.generation = run_sequence
@@ -694,6 +760,8 @@ def _publish_snapshot(
         status.counters = counters
         status.finished_at = now()
         status.last_success_at = status.finished_at
+        if full:
+            status.last_full_success_at = status.finished_at
         status.save()
     return counters
 
@@ -809,7 +877,11 @@ def _soft_delete_missing_from_staging(source: OAuthSource, corp_id: str, run_id:
 
 
 def sync_dingtalk_directory(
-    source: OAuthSource, corp_id: str, queued_run_id: str | UUID | None = None
+    source: OAuthSource,
+    corp_id: str,
+    queued_run_id: str | UUID | None = None,
+    *,
+    full: bool = True,
 ) -> dict[str, Any]:
     """Sync departments and users for one DingTalk source/corp pair."""
     if source.provider_type != "dingtalk":
@@ -824,7 +896,9 @@ def sync_dingtalk_directory(
     try:
         with _sync_concurrency_lease():
             _verify_sync_corp(source, corp_id, client)
-            _stage_directory_snapshot(source, corp_id, run_id, client)
+            user_detail_requests = _stage_directory_snapshot(
+                source, corp_id, run_id, client, full=full
+            )
 
             # An all-empty result after enrichment almost always means the org never maintained
             # the direct-manager field in the DingTalk admin backend (contacts editor / smart HR
@@ -846,8 +920,23 @@ def sync_dingtalk_directory(
                 started_at,
                 warnings,
                 (run_id, run_sequence),
+                full=full,
+                requests=_client_requests_used(client),
+                user_detail_requests=user_detail_requests,
             )
             _cleanup_staging(source, corp_id, run_id)
+            LOGGER.info(
+                (
+                    "dingtalk_directory_sync_stale"
+                    if result.get("stale")
+                    else "dingtalk_directory_sync_finished"
+                ),
+                source_slug=source.slug,
+                corp_id=str(corp_id),
+                mode=result.get("mode"),
+                requests=result.get("requests"),
+                user_detail_requests=result.get("user_detail_requests"),
+            )
             return result
     except Exception as exc:
         finalize_dingtalk_directory_sync_error(
