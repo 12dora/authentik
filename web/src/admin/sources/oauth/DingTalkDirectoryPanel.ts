@@ -7,6 +7,10 @@ import "#elements/timestamp/ak-timestamp";
 import { confirmDingTalkDestructiveAction } from "./DingTalkDestructiveActionModal";
 import { DingTalkDirectoryClient, GeneratedDingTalkDirectoryClient } from "./DingTalkDirectoryApi";
 import {
+    localizeDingTalkDirectoryCounterKey,
+    localizeDingTalkDirectoryCounterValue,
+} from "./DingTalkDirectoryCounters";
+import {
     canDeleteDingTalkDirectoryStatus,
     dingtalkDirectoryStatusSummary,
     DingTalkDirectoryStatusSummary,
@@ -654,27 +658,6 @@ export class DingTalkDirectoryPanel extends AKElement {
         return html`<ak-timestamp .timestamp=${timestamp} datetime></ak-timestamp>`;
     }
 
-    // The counters JSON field carries known keys (departments/users) plus a warnings
-    // list; localize what we recognize and fall back to the raw key otherwise.
-    private localizeCounterKey(key: string): string {
-        switch (key) {
-            case "departments":
-                return msg("Departments", {
-                    id: "sources.oauth.dingtalk-directory.counters.departments",
-                });
-            case "users":
-                return msg("Users", {
-                    id: "sources.oauth.dingtalk-directory.counters.users",
-                });
-            case "warnings":
-                return msg("Warnings", {
-                    id: "sources.oauth.dingtalk-directory.counters.warnings",
-                });
-            default:
-                return key;
-        }
-    }
-
     private renderCounterValue(value: unknown, depth = 0): TemplateResult | string {
         if (value === null || value === undefined) {
             return msg("-", { id: "sources.oauth.dingtalk-directory.counters.empty" });
@@ -716,13 +699,13 @@ export class DingTalkDirectoryPanel extends AKElement {
 
     private renderCounterList(entries: [string, unknown][], depth = 0): TemplateResult {
         return html`<ul class="ak-dingtalk-directory-counters">
-            ${entries.map(
-                ([key, value]) =>
-                    html`<li>
-                        <span>${this.localizeCounterKey(key)}</span>:
-                        <span>${this.renderCounterValue(value, depth)}</span>
-                    </li>`,
-            )}
+            ${entries.map(([key, value]) => {
+                const localized = localizeDingTalkDirectoryCounterValue(key, value);
+                return html`<li>
+                    <span>${localizeDingTalkDirectoryCounterKey(key)}</span>:
+                    <span>${localized ?? this.renderCounterValue(value, depth)}</span>
+                </li>`;
+            })}
         </ul>`;
     }
 

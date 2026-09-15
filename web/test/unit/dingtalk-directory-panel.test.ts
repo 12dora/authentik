@@ -1,3 +1,10 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import {
+    localizeDingTalkDirectoryCounterKey,
+    localizeDingTalkDirectoryCounterValue,
+} from "#admin/sources/oauth/DingTalkDirectoryCounters";
 import {
     canDeleteDingTalkDirectoryStatus,
     DINGTALK_DIRECTORY_SYNC_DESTROY_CONTRACT,
@@ -11,6 +18,38 @@ import {
 } from "#admin/sources/oauth/DingTalkDirectoryPanelController";
 
 import { describe, expect, it } from "vitest";
+
+const directoryPanel = readFileSync(
+    resolve(import.meta.dirname, "../../src/admin/sources/oauth/DingTalkDirectoryPanel.ts"),
+    "utf8",
+);
+
+const enSource = readFileSync(resolve(import.meta.dirname, "../../xliff/en.xlf"), "utf8");
+const zhHans = readFileSync(resolve(import.meta.dirname, "../../xliff/zh-Hans.xlf"), "utf8");
+
+function escapeMessageID(id: string): string {
+    return id.replaceAll(".", String.raw`\.`);
+}
+
+/** The English `<source>` an XLIFF catalogue carries for a message id. */
+function xliffSource(catalogue: string, id: string): string | null {
+    const match = new RegExp(
+        String.raw`<trans-unit id="${escapeMessageID(id)}">\s*<source>([^<]*)</source>`,
+        "u",
+    ).exec(catalogue);
+
+    return match?.[1] ?? null;
+}
+
+/** The translated `<target>` an XLIFF catalogue carries for a message id. */
+function xliffTarget(catalogue: string, id: string): string | null {
+    const match = new RegExp(
+        String.raw`<trans-unit id="${escapeMessageID(id)}">\s*<source>[^<]*</source>\s*<target>([^<]*)</target>`,
+        "u",
+    ).exec(catalogue);
+
+    return match?.[1] ?? null;
+}
 
 function makeSyncStatus(
     corpId: string,
@@ -234,5 +273,85 @@ describe("DINGTALK_DIRECTORY_SYNC_DESTROY_CONTRACT", () => {
             method: "DELETE",
             corpIdQueryParameter: "corp_id",
         });
+    });
+});
+
+describe("localizeDingTalkDirectoryCounterKey", () => {
+    it.each([
+        ["departments", "Departments"],
+        ["users", "Users"],
+        ["warnings", "Warnings"],
+        ["mode", "Sync mode"],
+        ["requests", "DingTalk API requests"],
+        ["user_detail_requests", "User detail requests"],
+    ])("labels the %s counter reported by a sync run", (key, label) => {
+        expect(localizeDingTalkDirectoryCounterKey(key)).toBe(label);
+    });
+
+    it("falls back to the raw key for a counter the UI does not know", () => {
+        expect(localizeDingTalkDirectoryCounterKey("skipped_users")).toBe("skipped_users");
+    });
+});
+
+describe("localizeDingTalkDirectoryCounterValue", () => {
+    it("renders the sync mode as copy rather than the backend token", () => {
+        expect(localizeDingTalkDirectoryCounterValue("mode", "full")).toBe("Full");
+        expect(localizeDingTalkDirectoryCounterValue("mode", "incremental")).toBe("Incremental");
+    });
+
+    it.each([["" as unknown], [null], [undefined]])(
+        "shows the empty message while a queued run has no mode yet (%p)",
+        (value) => {
+            expect(localizeDingTalkDirectoryCounterValue("mode", value)).toBe("-");
+        },
+    );
+
+    it("defers to the generic rendering for an unrecognized mode", () => {
+        expect(localizeDingTalkDirectoryCounterValue("mode", "delta")).toBeNull();
+    });
+
+    it("defers to the generic rendering for every counter that is not the mode", () => {
+        expect(localizeDingTalkDirectoryCounterValue("requests", 42)).toBeNull();
+        expect(localizeDingTalkDirectoryCounterValue("user_detail_requests", 7)).toBeNull();
+        expect(localizeDingTalkDirectoryCounterValue("warnings", ["missing manager"])).toBeNull();
+    });
+});
+
+describe("DingTalk directory counter catalogues", () => {
+    const counterMessages = [
+        ["sources.oauth.dingtalk-directory.counters.mode", "Sync mode", "同步方式"],
+        [
+            "sources.oauth.dingtalk-directory.counters.requests",
+            "DingTalk API requests",
+            "钉钉接口调用",
+        ],
+        [
+            "sources.oauth.dingtalk-directory.counters.user-detail-requests",
+            "User detail requests",
+            "人员详情调用",
+        ],
+        ["sources.oauth.dingtalk-directory.counters.mode.full", "Full", "全量"],
+        ["sources.oauth.dingtalk-directory.counters.mode.incremental", "Incremental", "增量"],
+    ];
+
+    it.each(counterMessages)("carries the English source for %s", (id, source) => {
+        expect(xliffSource(enSource, id)).toBe(source);
+    });
+
+    it.each(counterMessages)(
+        "carries the Simplified Chinese target for %s",
+        (id, _source, target) => {
+            expect(xliffTarget(zhHans, id)).toBe(target);
+        },
+    );
+});
+
+describe("DingTalkDirectoryPanel counter rendering", () => {
+    it("localizes each counter row through the shared helpers", () => {
+        expect(directoryPanel).toContain(
+            "const localized = localizeDingTalkDirectoryCounterValue(key, value);",
+        );
+        expect(directoryPanel).toContain("${localizeDingTalkDirectoryCounterKey(key)}");
+        expect(directoryPanel).toContain("${localized ?? this.renderCounterValue(value, depth)}");
     });
 });

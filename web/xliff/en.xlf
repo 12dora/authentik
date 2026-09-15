@@ -10317,6 +10317,15 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-directory.counters.warnings">
   <source>Warnings</source>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.mode">
+  <source>Sync mode</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.requests">
+  <source>DingTalk API requests</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.user-detail-requests">
+  <source>User detail requests</source>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.counters.empty">
   <source>-</source>
 </trans-unit>
@@ -10325,6 +10334,12 @@ Bindings to groups/users are checked against the user of the event.</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.counters.more-omitted">
   <source><x id="0" equiv-text="${value.length - visibleItems.length}"/> more omitted</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.mode.full">
+  <source>Full</source>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.mode.incremental">
+  <source>Incremental</source>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.error.empty">
   <source>-</source>

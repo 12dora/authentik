@@ -13443,6 +13443,18 @@ Bindings to groups/users are checked against the user of the event.</source>
   <source>Warnings</source>
         <target>警告</target>
 </trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.mode">
+  <source>Sync mode</source>
+        <target>同步方式</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.requests">
+  <source>DingTalk API requests</source>
+        <target>钉钉接口调用</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.user-detail-requests">
+  <source>User detail requests</source>
+        <target>人员详情调用</target>
+</trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.counters.empty">
   <source>-</source>
         <target>-</target>
@@ -13454,6 +13466,14 @@ Bindings to groups/users are checked against the user of the event.</source>
 <trans-unit id="sources.oauth.dingtalk-directory.counters.more-omitted">
   <source><x id="0" equiv-text="${value.length - visibleItems.length}"/> more omitted</source>
         <target>另有 <x id="0" equiv-text="${value.length - visibleItems.length}"/> 项已省略</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.mode.full">
+  <source>Full</source>
+        <target>全量</target>
+</trans-unit>
+<trans-unit id="sources.oauth.dingtalk-directory.counters.mode.incremental">
+  <source>Incremental</source>
+        <target>增量</target>
 </trans-unit>
 <trans-unit id="sources.oauth.dingtalk-directory.error.empty">
   <source>-</source>
