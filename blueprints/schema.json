@@ -11171,6 +11171,7 @@
                         "authentik.tasks.schedules",
                         "authentik.brands",
                         "authentik.blueprints",
+                        "authentik.custom.easyauth",
                         "authentik.enterprise.agents",
                         "authentik.enterprise.audit",
                         "authentik.enterprise.endpoints.connectors.agent",
@@ -11189,8 +11190,7 @@
                         "authentik.enterprise.stages.account_lockdown",
                         "authentik.enterprise.stages.authenticator_endpoint_gdtc",
                         "authentik.enterprise.stages.mtls",
-                        "authentik.enterprise.stages.source",
-                        "authentik.custom.easyauth"
+                        "authentik.enterprise.stages.source"
                     ],
                     "title": "App",
                     "description": "Match events created by selected application. When left empty, all applications are matched."

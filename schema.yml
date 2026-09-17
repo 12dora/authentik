@@ -36573,6 +36573,7 @@ components:
       - authentik.tasks.schedules
       - authentik.brands
       - authentik.blueprints
+      - authentik.custom.easyauth
       - authentik.enterprise.agents
       - authentik.enterprise.audit
       - authentik.enterprise.endpoints.connectors.agent
@@ -36592,7 +36593,6 @@ components:
       - authentik.enterprise.stages.authenticator_endpoint_gdtc
       - authentik.enterprise.stages.mtls
       - authentik.enterprise.stages.source
-      - authentik.custom.easyauth
       type: string
     AppleChallengeResponseRequest:
       type: object
