@@ -1,22 +1,27 @@
 """DingTalk directory cache API."""
 
+from copy import deepcopy
 from types import SimpleNamespace
+from typing import Any
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.utils.timezone import now
 from django.utils.translation import gettext_lazy
-from drf_spectacular.utils import OpenApiParameter, extend_schema
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import generics, serializers
 from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.status import HTTP_201_CREATED
 from rest_framework.views import APIView
 
 from authentik.api.pagination import Pagination
 from authentik.core.api.utils import ModelSerializer
+from authentik.core.models import USER_ATTRIBUTE_SOURCES, User, UserTypes
+from authentik.events.models import Event, EventAction
 from authentik.sources.oauth.dingtalk.selectors import (
     get_dingtalk_org_context,
     source_scoped_dingtalk_identity,
@@ -34,6 +39,7 @@ from authentik.sources.oauth.models import (
     DingTalkDirectorySyncStatusChoices,
     DingTalkDirectoryUser,
     OAuthSource,
+    UserOAuthSourceConnection,
 )
 from authentik.sources.oauth.tasks import dingtalk_directory_sync
 
@@ -103,6 +109,32 @@ class CanViewDingTalkDirectoryUser(CanViewDingTalkDirectory):
         return super().has_permission(request, view) and request.user.has_perm(
             "authentik_sources_oauth.view_dingtalkdirectoryuser"
         )
+
+
+class CanMaterializeDingTalkDirectoryUser(BasePermission):
+    """Require source change access and global user-create permission."""
+
+    def has_permission(self, request: Request, view) -> bool:
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if not request.user.has_perm("authentik_core.add_user"):
+            return False
+        try:
+            source = get_dingtalk_source(view.kwargs["source_slug"])
+        except Http404:
+            # Authorized callers get a 404 from the view; everyone else stays at 403
+            # so missing slugs are not distinguishable from forbidden ones.
+            return bool(request.user.has_perm("authentik_sources_oauth.change_oauthsource"))
+        view.dingtalk_source = source
+        return can_change_dingtalk_directory(request, source)
+
+
+class DingTalkDirectoryMaterializeError(APIException):
+    """Coded 404/409 for DingTalk directory user materialization."""
+
+    def __init__(self, status_code: int, code: str, detail: str):
+        self.status_code = status_code
+        super().__init__(detail={"code": code, "detail": detail}, code=code)
 
 
 class DingTalkDirectorySyncStatusSerializer(ModelSerializer):
@@ -350,6 +382,179 @@ class DingTalkDirectoryUsersView(generics.ListAPIView):
         return DingTalkDirectoryUser.objects.filter(source=source, is_deleted=False).order_by(
             "corp_id", "user_id"
         )
+
+
+class DingTalkDirectoryMaterializeRequestSerializer(serializers.Serializer):
+    """Empty body; materialize is fully identified by the URL."""
+
+
+class DingTalkDirectoryMaterializedUserSerializer(serializers.Serializer):
+    pk = serializers.IntegerField()
+    uuid = serializers.UUIDField()
+    username = serializers.CharField()
+    name = serializers.CharField()
+    is_active = serializers.BooleanField()
+
+
+class DingTalkDirectoryMaterializeResponseSerializer(serializers.Serializer):
+    created = serializers.BooleanField()
+    user = DingTalkDirectoryMaterializedUserSerializer()
+
+
+def dingtalk_attributes_from_directory_user(
+    source: OAuthSource, directory_user: DingTalkDirectoryUser
+) -> dict[str, Any]:
+    """Build the login-shaped ``dingtalk`` attribute blob from a directory row.
+
+    Omits fields the directory cache does not store (raw_profile, role_list, state_code).
+    """
+    return {
+        "source_pk": str(source.pk),
+        "source_slug": source.slug,
+        "union_id": directory_user.union_id,
+        "open_id": directory_user.open_id,
+        "user_id": directory_user.user_id,
+        "corp_id": directory_user.corp_id,
+        "nick": directory_user.name,
+        "name": directory_user.name,
+        "avatar": directory_user.avatar,
+        "title": directory_user.title,
+        "mobile": directory_user.mobile,
+        "dept_id_list": directory_user.dept_id_list,
+        "job_number": directory_user.job_number,
+    }
+
+
+def materialize_dingtalk_directory_user(
+    *,
+    source: OAuthSource,
+    corp_id: str,
+    user_id: str,
+    request: Request,
+) -> tuple[User, bool]:
+    """Create or return the Authentik user bound to this DingTalk directory row."""
+    try:
+        with transaction.atomic():
+            try:
+                directory_user = DingTalkDirectoryUser.objects.select_for_update().get(
+                    source=source,
+                    corp_id=corp_id,
+                    user_id=user_id,
+                    is_deleted=False,
+                )
+            except DingTalkDirectoryUser.DoesNotExist:
+                raise DingTalkDirectoryMaterializeError(
+                    404,
+                    "directory_user_not_found",
+                    gettext_lazy("DingTalk directory user was not found."),
+                ) from None
+            if not directory_user.active:
+                raise DingTalkDirectoryMaterializeError(
+                    409,
+                    "directory_user_inactive",
+                    gettext_lazy("DingTalk directory user is not active."),
+                )
+            if not directory_user.union_id:
+                raise DingTalkDirectoryMaterializeError(
+                    409,
+                    "union_id_missing",
+                    gettext_lazy("DingTalk directory user is missing a unionId."),
+                )
+            connections = list(
+                UserOAuthSourceConnection.objects.select_for_update()
+                .select_related("user")
+                .filter(source=source, identifier=directory_user.union_id)
+            )
+            if len(connections) == 1:
+                return connections[0].user, False
+            if len(connections) > 1:
+                raise DingTalkDirectoryMaterializeError(
+                    409,
+                    "binding_conflict",
+                    gettext_lazy("Multiple Authentik users are bound to this DingTalk identity."),
+                )
+            if User.objects.filter(username=directory_user.user_id).exists():
+                raise DingTalkDirectoryMaterializeError(
+                    409,
+                    "username_conflict",
+                    gettext_lazy("An Authentik user with this username already exists."),
+                )
+            dingtalk = dingtalk_attributes_from_directory_user(source, directory_user)
+            user = User(
+                username=directory_user.user_id,
+                name=directory_user.name,
+                email=directory_user.email or "",
+                type=UserTypes.INTERNAL,
+                path=source.get_user_path(),
+                is_active=True,
+                attributes={
+                    "dingtalk": dingtalk,
+                    "dingtalk_sources": {str(source.pk): deepcopy(dingtalk)},
+                    USER_ATTRIBUTE_SOURCES: [source.name],
+                    "dingtalk_materialized": {
+                        "at": now().isoformat(),
+                        "by": request.user.username,
+                    },
+                },
+            )
+            user.set_unusable_password()
+            user.save()
+            UserOAuthSourceConnection.objects.create(
+                user=user,
+                source=source,
+                identifier=directory_user.union_id,
+            )
+            Event.new(
+                EventAction.USER_WRITE,
+                created=True,
+                username=user.username,
+                name=user.name,
+                source_slug=source.slug,
+                corp_id=directory_user.corp_id,
+                user_id=directory_user.user_id,
+            ).from_http(request)
+            return user, True
+    except IntegrityError as exc:
+        raise DingTalkDirectoryMaterializeError(
+            409,
+            "username_conflict",
+            gettext_lazy("An Authentik user with this username already exists."),
+        ) from exc
+
+
+class DingTalkDirectoryUserMaterializeView(APIView):
+    permission_classes = [CanMaterializeDingTalkDirectoryUser]
+
+    @extend_schema(
+        request=DingTalkDirectoryMaterializeRequestSerializer,
+        responses={
+            200: DingTalkDirectoryMaterializeResponseSerializer,
+            201: OpenApiResponse(response=DingTalkDirectoryMaterializeResponseSerializer),
+        },
+    )
+    def post(self, request: Request, source_slug: str, corp_id: str, user_id: str) -> Response:
+        source = getattr(self, "dingtalk_source", None) or get_dingtalk_source(source_slug)
+        serializer = DingTalkDirectoryMaterializeRequestSerializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        user, created = materialize_dingtalk_directory_user(
+            source=source,
+            corp_id=str(corp_id),
+            user_id=str(user_id),
+            request=request,
+        )
+        payload = DingTalkDirectoryMaterializeResponseSerializer(
+            {
+                "created": created,
+                "user": {
+                    "pk": user.pk,
+                    "uuid": user.uuid,
+                    "username": user.username,
+                    "name": user.name,
+                    "is_active": user.is_active,
+                },
+            }
+        ).data
+        return Response(payload, status=HTTP_201_CREATED if created else 200)
 
 
 class DingTalkDirectoryUserOrgView(APIView):

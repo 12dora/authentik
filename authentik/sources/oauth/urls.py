@@ -14,6 +14,7 @@ from authentik.sources.oauth.api.dingtalk_directory import (
     DingTalkDirectoryDepartmentsView,
     DingTalkDirectoryStatusView,
     DingTalkDirectorySyncView,
+    DingTalkDirectoryUserMaterializeView,
     DingTalkDirectoryUserOrgView,
     DingTalkDirectoryUsersView,
 )
@@ -98,5 +99,10 @@ api_urlpatterns = [
         "sources/oauth/dingtalk-directory/<slug:source_slug>/users/<str:corp_id>/<str:user_id>/org/",
         DingTalkDirectoryUserOrgView.as_view(),
         name="dingtalk-directory-user-org",
+    ),
+    path(
+        "sources/oauth/dingtalk-directory/<slug:source_slug>/users/<str:corp_id>/<str:user_id>/materialize/",
+        DingTalkDirectoryUserMaterializeView.as_view(),
+        name="dingtalk-directory-user-materialize",
     ),
 ]
