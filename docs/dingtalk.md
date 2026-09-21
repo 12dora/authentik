@@ -59,10 +59,15 @@ access a protected application.
 ## Directory cache
 
 Open **DingTalk Directory** on the source to start a sync and view its status.
-A scheduled full refresh runs once a day at 03:{hostname-stable minute} for
-companies found in the allowlist or in existing DingTalk source connections.
-That job always fetches `user/get` for every user. It is a safety net; live
-freshness comes from EasyAuth contact-change events.
+A scheduled full refresh runs once a day at 03:{hostname-stable minute}
+Asia/Shanghai for companies found in the allowlist or in existing DingTalk
+source connections. The crontab is evaluated in UTC, so the spec uses hour 19
+(`{minute} 19 * * *` = 03:00 CST). Existing `Schedule` rows keep their old
+crontab on reconcile; a data migration deletes the
+`dingtalk_directory_sync_all` row so the next process start recreates it from
+the spec with a fresh `next_run`. That job always fetches `user/get` for every
+user. It is a safety net; live freshness comes from EasyAuth contact-change
+events.
 
 For an organization with D=39 departments and U=140 users, a full refresh is
 about 220 billed DingTalk calls (`listsub` + `user/list` for every department,
@@ -96,13 +101,18 @@ and marks its sync status as deleted. It does not change the login allowlist.
 
 ## API usage monitoring
 
-Every outbound DingTalk HTTP attempt is counted in an hourly UTC bucket for the
-source. Retries count as separate attempts. A failure to write a bucket is
-logged and never fails the DingTalk call. The daily directory job deletes
-buckets older than 60 days.
+Every outbound DingTalk HTTP attempt that actually reaches the HTTP call is
+counted in an hourly UTC bucket for the source. App-token resolution happens
+before the directory/login/authInfos attempt is counted, so a `gettoken`
+failure is `ak_token` only. Retries count as separate attempts. Recording is a
+single `INSERT ... ON CONFLICT DO UPDATE count = count + 1` (failures are
+logged and never fail the DingTalk call). The daily directory job deletes
+buckets older than 60 days, including internal throttle rows.
 
 EasyAuth pulls the buckets and pushes a short-lived usage policy. A missing or
-expired policy allows every call.
+expired policy allows every call. The worker memoizes the policy for 30 seconds
+and the process that handles `PUT .../usage-policy/` replaces that memo
+immediately.
 
 Categories and priorities:
 
@@ -110,17 +120,21 @@ Categories and priorities:
 - `ak_login` (P0, billed): login and allowlist-discovery user calls
   (`userAccessToken`, `contact/users/me`, `getbyunionid`, `user/get`).
   Refused only when `block_p0_billed` is true.
-- `ak_auth_info` (P1): `authInfos`.
+- `ak_auth_info` (P1): `authInfos` during login and allowlist discovery.
 - `ak_directory_incremental` (P1): directory client calls during an incremental
-  sync.
-- `ak_directory_full` (P2): directory client calls during a full sync.
+  sync, including that run's corp-verify `authInfos`.
+- `ak_directory_full` (P2): directory client calls during a full sync,
+  including that run's corp-verify `authInfos`.
 - `ak_allowlist` (P2): allowlist department walks.
 
 P1 and P2 are refused when listed in `blocked_priorities`, or when they exceed
-`throttle_per_hour` for that priority. A refused call is not sent and is not
-retried. A directory sync that hits the policy finishes with
-`dingtalk_directory_usage_policy_blocked`. A login refusal is returned as a
-login error.
+`throttle_per_hour` for that priority. Throttle counters are atomic per
+`(source, hour, priority)` rows `_throttle_p1` / `_throttle_p2` in the same
+bucket table; those pseudo-categories are omitted from the usage GET payload
+and from any totals. A refused call is not sent and is not retried. A directory
+sync that hits the policy finishes with
+`dingtalk_directory_usage_policy_blocked`, clears `active_run_id`, and returns
+(no Dramatiq retry). A login refusal is returned as a login error.
 
 `GET /api/v3/sources/oauth/dingtalk-directory/{slug}/usage/?since=<ISO-8601>`
 returns `generated_at` and `buckets` (`hour_start`, `category`, `count`,

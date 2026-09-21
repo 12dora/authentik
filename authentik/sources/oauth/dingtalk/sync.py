@@ -444,7 +444,12 @@ def _verify_sync_corp(source: OAuthSource, corp_id: str, client: DingTalkDirecto
     This check is the only thing standing between that and the per-tenant isolation the
     directory contract promises, so an unverifiable identity fails the run.
     """
-    org_info = fetch_dingtalk_org_auth_info(source, corp_id, session=client.session)
+    org_info = fetch_dingtalk_org_auth_info(
+        source,
+        corp_id,
+        session=client.session,
+        usage_category=client.usage_category,
+    )
     raw = org_info.get("raw") if isinstance(org_info.get("raw"), dict) else {}
     verified_corp_ids = extract_dingtalk_corp_ids(raw)
     if not verified_corp_ids:
@@ -955,6 +960,17 @@ def sync_dingtalk_directory(
                 user_detail_requests=result.get("user_detail_requests"),
             )
             return result
+    except DingTalkUsagePolicyBlocked as exc:
+        finalize_dingtalk_directory_sync_error(
+            source=source,
+            corp_id=corp_id,
+            run_id=run_id,
+            exc=exc,
+            error_params={"run_sequence": run_sequence},
+        )
+        # Do not re-raise: Dramatiq would retry (backoff up to 1h) and each retry
+        # fails at _claim_sync_run after this run is no longer current.
+        return None
     except Exception as exc:
         finalize_dingtalk_directory_sync_error(
             source=source,

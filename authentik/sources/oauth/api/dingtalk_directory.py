@@ -39,6 +39,7 @@ from authentik.sources.oauth.dingtalk.sync import (
     queue_dingtalk_directory_sync,
 )
 from authentik.sources.oauth.dingtalk.usage import (
+    INTERNAL_USAGE_CATEGORIES,
     USAGE_SINCE_MAX_DAYS,
     current_hour_start,
     format_utc_z,
@@ -703,10 +704,14 @@ class DingTalkDirectoryUsageView(APIView):
         query = DingTalkDirectoryUsageQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
         since = current_hour_start(query.validated_data["since"])
-        rows = DingTalkApiUsageBucket.objects.filter(
-            source=source,
-            hour_start__gte=since,
-        ).order_by("hour_start", "category")
+        rows = (
+            DingTalkApiUsageBucket.objects.filter(
+                source=source,
+                hour_start__gte=since,
+            )
+            .exclude(category__in=INTERNAL_USAGE_CATEGORIES)
+            .order_by("hour_start", "category")
+        )
         return Response(
             {
                 "generated_at": format_utc_z(now()),

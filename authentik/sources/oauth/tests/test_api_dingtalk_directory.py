@@ -339,6 +339,28 @@ class TestDingTalkDirectoryAPI(APITestCase):
 
         self.assertEqual(response.status_code, 400)
 
+    def test_sync_post_user_ids_rejected_when_too_long(self):
+        self.authenticate(create_test_admin_user())
+
+        response = self.client.post(
+            reverse("authentik_api:dingtalk-directory-sync", kwargs={"source_slug": "dingtalk"}),
+            data={"corp_id": "CORP", "full": False, "user_ids": ["U" * 129]},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_sync_post_user_ids_rejected_when_full_omitted(self):
+        self.authenticate(create_test_admin_user())
+
+        response = self.client.post(
+            reverse("authentik_api:dingtalk-directory-sync", kwargs={"source_slug": "dingtalk"}),
+            data={"corp_id": "CORP", "user_ids": ["U1"]},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
     @patch("authentik.sources.oauth.api.dingtalk_directory.dingtalk_directory_sync.send")
     def test_sync_post_marks_error_when_broker_rejects(self, send_mock):
         send_mock.side_effect = RuntimeError("broker unavailable")

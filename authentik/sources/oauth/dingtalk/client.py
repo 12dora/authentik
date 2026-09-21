@@ -130,12 +130,15 @@ class DingTalkDirectoryClient:
     def _post_json(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         for attempt in range(DINGTALK_MAX_REQUEST_ATTEMPTS):
             check(self.source, self.usage_category)
+            # Resolve the app token before counting this as a directory HTTP attempt:
+            # gettoken failures never reach DingTalk directory endpoints.
+            access_token = self.app_token
             self.request_budget.consume()
             record(self.source, self.usage_category, blocked=False)
             try:
                 response = self.session.post(
                     url,
-                    params={"access_token": self.app_token},
+                    params={"access_token": access_token},
                     json=payload,
                 )
             except RequestsConnectionError, Timeout:

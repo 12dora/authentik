@@ -1040,7 +1040,58 @@ class TestDingTalkDirectorySync(TestCase):
         )
         self.assertEqual(
             spec.crontab,
-            f"{fqdn_rand('dingtalk_directory_sync_all')} 3 * * *",
+            f"{fqdn_rand('dingtalk_directory_sync_all')} 19 * * *",
+        )
+
+    def test_directory_sync_schedule_reconcile_recreates_deleted_row(self):
+        from importlib import import_module
+        from types import SimpleNamespace
+
+        migration = import_module(
+            "authentik.sources.oauth.migrations.0027_dingtalk_directory_sync_all_schedule"
+        )
+        DINGTALK_DIRECTORY_SYNC_ALL_ACTOR = migration.DINGTALK_DIRECTORY_SYNC_ALL_ACTOR  # noqa: N806
+        delete_stale_dingtalk_directory_sync_all_schedules = (
+            migration.delete_stale_dingtalk_directory_sync_all_schedules
+        )
+        from authentik.tasks.schedules.models import Schedule
+
+        config = apps.get_app_config("authentik_sources_oauth")
+        spec = next(
+            item
+            for item in config.tenant_schedule_specs
+            if item.actor is dingtalk_directory_sync_all
+        )
+        expected = f"{fqdn_rand('dingtalk_directory_sync_all')} 19 * * *"
+        existing = spec.update_or_create()
+        Schedule.objects.filter(pk=existing.pk).update(
+            crontab=f"{fqdn_rand('dingtalk_directory_sync_all')} */2 * * *"
+        )
+        spec.update_or_create()
+        existing.refresh_from_db()
+        self.assertIn("*/2", existing.crontab)
+
+        delete_stale_dingtalk_directory_sync_all_schedules(
+            apps, SimpleNamespace(connection=connection)
+        )
+        self.assertFalse(
+            Schedule.objects.filter(actor_name=DINGTALK_DIRECTORY_SYNC_ALL_ACTOR).exists()
+        )
+
+        recreated = spec.update_or_create()
+        self.assertEqual(recreated.crontab, expected)
+        self.assertIsNotNone(recreated.next_run)
+
+        missing_table = SimpleNamespace(
+            connection=SimpleNamespace(
+                alias="default",
+                introspection=SimpleNamespace(table_names=lambda: []),
+            )
+        )
+        spec.update_or_create()
+        delete_stale_dingtalk_directory_sync_all_schedules(apps, missing_table)
+        self.assertTrue(
+            Schedule.objects.filter(actor_name=DINGTALK_DIRECTORY_SYNC_ALL_ACTOR).exists()
         )
 
     @patch("authentik.sources.oauth.types.dingtalk.get_dingtalk_allowlist_binding")

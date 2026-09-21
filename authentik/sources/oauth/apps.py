@@ -60,6 +60,9 @@ class AuthentikSourceOAuthConfig(ManagedAppConfig):
             ),
             ScheduleSpec(
                 actor=dingtalk_directory_sync_all,
-                crontab=f"{fqdn_rand('dingtalk_directory_sync_all')} 3 * * *",
+                # Crontab is evaluated in UTC (TIME_ZONE=UTC). Hour 19 is 03:00
+                # Asia/Shanghai (CST, UTC+8), so the daily full directory sync
+                # runs at night in China rather than 11:00 CST (hour 3 UTC).
+                crontab=f"{fqdn_rand('dingtalk_directory_sync_all')} 19 * * *",
             ),
         ]

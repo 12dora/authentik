@@ -4,7 +4,9 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from django.core.cache import cache
+from django.db import connection
 from django.test import RequestFactory, TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from requests_mock import Mocker
 from rest_framework.test import APITestCase
@@ -26,9 +28,13 @@ from authentik.sources.oauth.dingtalk.usage import (
     CATEGORY_DIRECTORY_INCREMENTAL,
     CATEGORY_LOGIN,
     CATEGORY_TOKEN,
+    INTERNAL_USAGE_CATEGORIES,
+    THROTTLE_CATEGORY_P2,
     USAGE_POLICY_BLOCKED_MESSAGE,
     DingTalkUsagePolicyBlocked,
+    _increment_throttle,
     check,
+    clear_policy_memo,
     current_hour_start,
     directory_usage_category,
     format_utc_z,
@@ -51,6 +57,7 @@ from authentik.sources.oauth.types.dingtalk import (
     DINGTALK_ORG_AUTH_INFO_URL,
     DINGTALK_PROFILE_URL,
     DINGTALK_USER_DETAIL_URL,
+    DingTalkAppTokenError,
     DingTalkOAuth2Client,
     _fetch_dingtalk_app_token,
     _fetch_dingtalk_user_profile,
@@ -67,6 +74,7 @@ def _future_expires(hours: int = 1) -> datetime:
 class DingTalkUsageTestCase(TestCase):
     def setUp(self):
         cache.clear()
+        clear_policy_memo()
         self.source = OAuthSource.objects.create(
             name="DingTalk",
             slug="dingtalk",
@@ -182,6 +190,26 @@ class TestDingTalkUsageRecording(DingTalkUsageTestCase):
             client.get_user_detail("USER")
 
         self.assertEqual(self.counts(CATEGORY_DIRECTORY_INCREMENTAL), (2, 0))
+
+    def test_directory_token_failure_is_not_counted_as_directory(self):
+        with Mocker() as mocker:
+            mocker.get(DINGTALK_APP_ACCESS_TOKEN_URL, json={"errcode": 40001})
+            with self.assertRaises(DingTalkAppTokenError):
+                list(DingTalkDirectoryClient(self.source, full=True).iter_departments())
+
+        self.assertEqual(self.counts(CATEGORY_DIRECTORY_FULL), (0, 0))
+        self.assertEqual(self.counts(CATEGORY_TOKEN), (1, 0))
+
+    def test_recording_is_single_on_conflict_statement(self):
+        with CaptureQueriesContext(connection) as captured:
+            prepare_outbound_call(self.source, CATEGORY_LOGIN)
+        bucket_sql = [
+            query["sql"]
+            for query in captured.captured_queries
+            if "dingtalkapiusagebucket" in query["sql"].lower()
+        ]
+        self.assertEqual(len(bucket_sql), 1)
+        self.assertIn("ON CONFLICT", bucket_sql[0].upper())
 
     def test_allowlist_walk_counts_ak_allowlist(self):
         with Mocker() as mocker:
@@ -377,15 +405,124 @@ class TestDingTalkUsagePolicy(DingTalkUsageTestCase):
         ):
             mocker.get(DINGTALK_APP_ACCESS_TOKEN_URL, json={"access_token": "APP_TOKEN"})
             post = mocker.post(DINGTALK_DEPARTMENT_LIST_URL, json={"errcode": 0, "result": []})
-            with self.assertRaises(DingTalkUsagePolicyBlocked):
-                sync_dingtalk_directory(self.source, "CORP", full=True)
+            result = sync_dingtalk_directory(self.source, "CORP", full=True)
 
+        self.assertIsNone(result)
         self.assertEqual(post.call_count, 0)
         status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
         self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.ERROR)
         self.assertEqual(status.error, DINGTALK_SYNC_ERROR_USAGE_POLICY_BLOCKED)
         self.assertEqual(status.error_code, DINGTALK_SYNC_ERROR_USAGE_POLICY_BLOCKED)
         self.assertEqual(status.error_params["reason"], "blocked by usage policy")
+        self.assertIsNone(status.active_run_id)
+
+    def test_incremental_sync_blocked_by_p1_returns_without_raise(self):
+        self.push_policy(blocked_priorities=["p1"])
+        with Mocker() as mocker:
+            mocker.get(DINGTALK_APP_ACCESS_TOKEN_URL, json={"access_token": "APP_TOKEN"})
+            mocker.get(
+                DINGTALK_ORG_AUTH_INFO_URL,
+                json={"auth_org_info": {"corpid": "CORP", "corp_name": "Example"}},
+            )
+            post = mocker.post(DINGTALK_DEPARTMENT_LIST_URL, json={"errcode": 0, "result": []})
+            result = sync_dingtalk_directory(self.source, "CORP", full=False)
+
+        self.assertIsNone(result)
+        self.assertEqual(post.call_count, 0)
+        status = DingTalkDirectorySyncStatus.objects.get(source=self.source, corp_id="CORP")
+        self.assertEqual(status.status, DingTalkDirectorySyncStatusChoices.ERROR)
+        self.assertEqual(status.error_code, DINGTALK_SYNC_ERROR_USAGE_POLICY_BLOCKED)
+        self.assertIsNone(status.active_run_id)
+        self.assertEqual(self.counts(CATEGORY_DIRECTORY_INCREMENTAL), (0, 1))
+        self.assertEqual(self.counts(CATEGORY_AUTH_INFO), (0, 0))
+
+    def test_full_sync_corp_verify_uses_directory_category_not_auth_info(self):
+        self.push_policy(blocked_priorities=["p1"])
+        with Mocker() as mocker:
+            mocker.get(DINGTALK_APP_ACCESS_TOKEN_URL, json={"access_token": "APP_TOKEN"})
+            mocker.get(
+                DINGTALK_ORG_AUTH_INFO_URL,
+                json={"auth_org_info": {"corpid": "CORP", "corp_name": "Example"}},
+            )
+            mocker.post(DINGTALK_DEPARTMENT_LIST_URL, json={"errcode": 0, "result": []})
+            mocker.post(
+                DINGTALK_DEPARTMENT_USER_LIST_URL,
+                json={"errcode": 0, "result": {"list": [], "has_more": False}},
+            )
+            result = sync_dingtalk_directory(self.source, "CORP", full=True)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(self.counts(CATEGORY_AUTH_INFO), (0, 0))
+        self.assertGreaterEqual(self.counts(CATEGORY_DIRECTORY_FULL)[0], 1)
+        self.assertEqual(self.counts(CATEGORY_DIRECTORY_FULL)[1], 0)
+
+    def test_throttle_returning_upsert_serializes_slots(self):
+        self.push_policy(throttle_per_hour={"p1": None, "p2": 1})
+        first = _increment_throttle(self.source, "p2")
+        second = _increment_throttle(self.source, "p2")
+        self.assertEqual([first, second], [1, 2])
+        self.assertEqual(sum(1 for value in (first, second) if value <= 1), 1)
+        row = DingTalkApiUsageBucket.objects.get(source=self.source, category=THROTTLE_CATEGORY_P2)
+        self.assertEqual(row.count, 2)
+        self.assertIn(THROTTLE_CATEGORY_P2, INTERNAL_USAGE_CATEGORIES)
+
+    def test_throttle_interleaved_calls_do_not_over_allow(self):
+        self.push_policy(throttle_per_hour={"p1": None, "p2": 2})
+        outcomes = []
+        from authentik.sources.oauth.dingtalk import usage as usage_mod
+
+        real = usage_mod._increment_throttle
+
+        def interleaved(source, priority):
+            # Simulate a second worker taking a slot before this call decides.
+            real(source, priority)
+            return real(source, priority)
+
+        with patch.object(usage_mod, "_increment_throttle", interleaved):
+            for _ in range(2):
+                try:
+                    prepare_outbound_call(self.source, CATEGORY_ALLOWLIST)
+                    outcomes.append("allow")
+                except DingTalkUsagePolicyBlocked:
+                    outcomes.append("block")
+
+        self.assertEqual(outcomes.count("allow"), 1)
+        self.assertEqual(outcomes.count("block"), 1)
+        self.assertEqual(
+            DingTalkApiUsageBucket.objects.get(
+                source=self.source, category=THROTTLE_CATEGORY_P2
+            ).count,
+            4,
+        )
+
+    def test_policy_memo_ttl_and_put_invalidation(self):
+        clock = {"now": 1000.0}
+
+        def fake_monotonic():
+            return clock["now"]
+
+        with patch("authentik.sources.oauth.dingtalk.usage.monotonic", fake_monotonic):
+            self.push_policy(blocked_priorities=["p2"])
+            with self.assertRaises(DingTalkUsagePolicyBlocked):
+                check(self.source, CATEGORY_ALLOWLIST)
+            cache.set(
+                f"authentik/sources/oauth/dingtalk/usage/policy/{self.source.pk}",
+                {
+                    "blocked_priorities": [],
+                    "throttle_per_hour": {},
+                    "block_p0_billed": False,
+                    "expires_at": format_utc_z(_future_expires()),
+                },
+                timeout=3600,
+            )
+            clock["now"] = 1020.0
+            with self.assertRaises(DingTalkUsagePolicyBlocked):
+                check(self.source, CATEGORY_ALLOWLIST)
+            clock["now"] = 1031.0
+            check(self.source, CATEGORY_ALLOWLIST)
+            self.push_policy(blocked_priorities=["p2"])
+            with self.assertRaises(DingTalkUsagePolicyBlocked):
+                check(self.source, CATEGORY_ALLOWLIST)
 
     def test_purge_deletes_buckets_older_than_sixty_days(self):
         old = DingTalkApiUsageBucket.objects.create(
@@ -400,6 +537,12 @@ class TestDingTalkUsagePolicy(DingTalkUsageTestCase):
             category=CATEGORY_LOGIN,
             count=3,
         )
+        old_throttle = DingTalkApiUsageBucket.objects.create(
+            source=self.source,
+            hour_start=datetime.now(UTC) - timedelta(days=61),
+            category=THROTTLE_CATEGORY_P2,
+            count=4,
+        )
         with (
             patch(
                 "authentik.sources.oauth.types.dingtalk.get_dingtalk_allowlist_binding",
@@ -410,6 +553,7 @@ class TestDingTalkUsagePolicy(DingTalkUsageTestCase):
             dingtalk_directory_sync_all()
 
         self.assertFalse(DingTalkApiUsageBucket.objects.filter(pk=old.pk).exists())
+        self.assertFalse(DingTalkApiUsageBucket.objects.filter(pk=old_throttle.pk).exists())
         self.assertTrue(DingTalkApiUsageBucket.objects.filter(pk=recent.pk).exists())
         self.assertEqual(purge_expired_usage_buckets(), 0)
 
@@ -417,6 +561,7 @@ class TestDingTalkUsagePolicy(DingTalkUsageTestCase):
 class TestDingTalkUsageAPI(APITestCase):
     def setUp(self):
         cache.clear()
+        clear_policy_memo()
         self.source = OAuthSource.objects.create(
             name="DingTalk",
             slug="dingtalk",
@@ -508,6 +653,18 @@ class TestDingTalkUsageAPI(APITestCase):
 
         earlier = self.client.get(self.usage_url(), {"since": format_utc_z(older)})
         self.assertEqual(len(earlier.json()["buckets"]), 2)
+
+        DingTalkApiUsageBucket.objects.create(
+            source=self.source,
+            hour_start=hour,
+            category=THROTTLE_CATEGORY_P2,
+            count=7,
+        )
+        filtered = self.client.get(self.usage_url(), {"since": format_utc_z(hour)})
+        self.assertEqual(filtered.status_code, 200)
+        categories = [item["category"] for item in filtered.json()["buckets"]]
+        self.assertEqual(categories, [CATEGORY_DIRECTORY_FULL])
+        self.assertNotIn(THROTTLE_CATEGORY_P2, categories)
 
     def test_policy_put_validation_echo_and_permissions(self):
         expires = format_utc_z(_future_expires())

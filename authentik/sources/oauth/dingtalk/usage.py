@@ -1,11 +1,12 @@
 """DingTalk outbound API usage buckets and EasyAuth usage-policy enforcement."""
 
 from datetime import UTC, datetime, timedelta
+from threading import Lock
+from time import monotonic
 from typing import Any
 
 from django.core.cache import cache
-from django.db import IntegrityError, transaction
-from django.db.models import F
+from django.db import connection
 from django.utils.translation import gettext as _
 from structlog.stdlib import get_logger
 
@@ -29,12 +30,25 @@ CATEGORY_PRIORITY: dict[str, str] = {
     CATEGORY_ALLOWLIST: "p2",
 }
 
+# Per-(source, hour, priority) throttle counters live as reserved bucket rows so the
+# increment is one atomic INSERT ... ON CONFLICT DO UPDATE (DatabaseCache has no incr).
+THROTTLE_CATEGORY_P1 = "_throttle_p1"
+THROTTLE_CATEGORY_P2 = "_throttle_p2"
+THROTTLE_CATEGORIES: dict[str, str] = {
+    "p1": THROTTLE_CATEGORY_P1,
+    "p2": THROTTLE_CATEGORY_P2,
+}
+INTERNAL_USAGE_CATEGORIES: frozenset[str] = frozenset(THROTTLE_CATEGORIES.values())
+
 USAGE_POLICY_BLOCKED_MESSAGE = "DingTalk call was blocked by usage policy."
 USAGE_RETENTION_DAYS = 60
 USAGE_SINCE_MAX_DAYS = 45
-USAGE_THROTTLE_CACHE_TTL = 2 * 3600
+POLICY_MEMO_TTL_SECONDS = 30.0
 _POLICY_CACHE_PREFIX = "authentik/sources/oauth/dingtalk/usage/policy"
-_THROTTLE_CACHE_PREFIX = "authentik/sources/oauth/dingtalk/usage/throttle"
+_POLICY_MEMO: dict[str, tuple[float, dict[str, Any] | None]] = {}
+_POLICY_MEMO_LOCK = Lock()
+_POLICY_MEMO_MISS = object()
+_BUCKET_INCREMENT_FIELDS = frozenset({"count", "blocked_count"})
 
 
 class DingTalkUsagePolicyBlocked(Exception):
@@ -69,12 +83,37 @@ def directory_usage_category(*, full: bool) -> str:
     return CATEGORY_DIRECTORY_FULL if full else CATEGORY_DIRECTORY_INCREMENTAL
 
 
+def clear_policy_memo() -> None:
+    """Drop the process-local usage-policy memo. Used by tests."""
+    with _POLICY_MEMO_LOCK:
+        _POLICY_MEMO.clear()
+
+
 def _policy_cache_key(source: OAuthSource) -> str:
     return f"{_POLICY_CACHE_PREFIX}/{source.pk}"
 
 
-def _throttle_cache_key(source: OAuthSource, priority: str, hour_start: datetime) -> str:
-    return f"{_THROTTLE_CACHE_PREFIX}/{source.pk}/{hour_start.strftime('%Y%m%d%H')}/{priority}"
+def _policy_memo_key(source: OAuthSource) -> str:
+    return str(source.pk)
+
+
+def _set_policy_memo(source: OAuthSource, payload: dict[str, Any] | None) -> None:
+    with _POLICY_MEMO_LOCK:
+        _POLICY_MEMO[_policy_memo_key(source)] = (
+            monotonic() + POLICY_MEMO_TTL_SECONDS,
+            payload,
+        )
+
+
+def _get_policy_memo(source: OAuthSource) -> Any:
+    key = _policy_memo_key(source)
+    now_ts = monotonic()
+    with _POLICY_MEMO_LOCK:
+        entry = _POLICY_MEMO.get(key)
+        if entry is None or entry[0] <= now_ts:
+            _POLICY_MEMO.pop(key, None)
+            return _POLICY_MEMO_MISS
+        return entry[1]
 
 
 def _parse_expires_at(value: Any) -> datetime | None:
@@ -92,8 +131,21 @@ def _parse_expires_at(value: Any) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
+def _fresh_policy(payload: Any) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    expires_at = _parse_expires_at(payload.get("expires_at"))
+    if expires_at is None or expires_at <= datetime.now(UTC):
+        return None
+    return payload
+
+
 def store_policy(source: OAuthSource, policy: dict[str, Any]) -> dict[str, Any]:
-    """Persist the EasyAuth usage policy in the shared cache until ``expires_at``."""
+    """Persist the EasyAuth usage policy in the shared cache until ``expires_at``.
+
+    The process that handles the PUT also replaces its 30 s in-memory memo
+    immediately so the next check in this worker sees the new document.
+    """
     expires_at = _parse_expires_at(policy.get("expires_at"))
     payload = {
         "blocked_priorities": list(policy.get("blocked_priorities") or []),
@@ -104,16 +156,19 @@ def store_policy(source: OAuthSource, policy: dict[str, Any]) -> dict[str, Any]:
     key = _policy_cache_key(source)
     if expires_at is None:
         cache.delete(key)
+        _set_policy_memo(source, None)
         return payload
     ttl = int((expires_at - datetime.now(UTC)).total_seconds())
     if ttl <= 0:
         cache.delete(key)
+        _set_policy_memo(source, None)
         return payload
     cache.set(key, payload, timeout=ttl)
+    _set_policy_memo(source, payload)
     return payload
 
 
-def _load_policy(source: OAuthSource) -> dict[str, Any] | None:
+def _load_policy_from_cache(source: OAuthSource) -> dict[str, Any] | None:
     try:
         payload = cache.get(_policy_cache_key(source))
     except Exception as exc:  # noqa: BLE001 - missing policy must fail open
@@ -123,27 +178,56 @@ def _load_policy(source: OAuthSource) -> dict[str, Any] | None:
             source_slug=source.slug,
             exception_type=type(exc).__name__,
         )
+        raise
+    return _fresh_policy(payload)
+
+
+def _load_policy(source: OAuthSource) -> dict[str, Any] | None:
+    memoized = _get_policy_memo(source)
+    if memoized is not _POLICY_MEMO_MISS:
+        return _fresh_policy(memoized)
+    try:
+        payload = _load_policy_from_cache(source)
+    except Exception:  # noqa: BLE001 - infrastructure failures fail open and are not memoized
         return None
-    if not isinstance(payload, dict):
-        return None
-    expires_at = _parse_expires_at(payload.get("expires_at"))
-    if expires_at is None or expires_at <= datetime.now(UTC):
-        return None
+    _set_policy_memo(source, payload)
     return payload
 
 
-def _increment_throttle(source: OAuthSource, priority: str) -> int:
+def _increment_bucket_field(source: OAuthSource, category: str, field: str) -> int:
+    """Atomically add 1 to ``field`` and return the new value.
+
+    Single ``INSERT ... ON CONFLICT DO UPDATE ... RETURNING`` with no wrapping
+    ``atomic()`` of our own, so we do not extend a caller's transaction.
+    """
+    if field not in _BUCKET_INCREMENT_FIELDS:
+        raise ValueError(f"Unsupported usage bucket field {field}.")
     hour_start = current_hour_start()
-    key = _throttle_cache_key(source, priority, hour_start)
-    try:
-        return int(cache.incr(key))
-    except ValueError:
-        cache.add(key, 0, USAGE_THROTTLE_CACHE_TTL)
-        try:
-            return int(cache.incr(key))
-        except ValueError:
-            cache.set(key, 1, USAGE_THROTTLE_CACHE_TTL)
-            return 1
+    count = 1 if field == "count" else 0
+    blocked_count = 1 if field == "blocked_count" else 0
+    quote = connection.ops.quote_name
+    table = quote(DingTalkApiUsageBucket._meta.db_table)
+    field_sql = quote(field)
+    sql = (
+        f"INSERT INTO {table} "
+        f"({quote('source_id')}, {quote('hour_start')}, {quote('category')}, "
+        f"{quote('count')}, {quote('blocked_count')}) "
+        f"VALUES (%s, %s, %s, %s, %s) "
+        f"ON CONFLICT ({quote('source_id')}, {quote('hour_start')}, {quote('category')}) "
+        f"DO UPDATE SET {field_sql} = {table}.{field_sql} + 1 "
+        f"RETURNING {field_sql}"
+    )
+    with connection.cursor() as cursor:
+        cursor.execute(sql, [source.pk, hour_start, category, count, blocked_count])
+        row = cursor.fetchone()
+    return int(row[0]) if row else 0
+
+
+def _increment_throttle(source: OAuthSource, priority: str) -> int:
+    category = THROTTLE_CATEGORIES.get(priority)
+    if category is None:
+        return 0
+    return _increment_bucket_field(source, category, "count")
 
 
 def _throttle_limit(policy: dict[str, Any], priority: str) -> int | None:
@@ -173,30 +257,13 @@ def _should_refuse(source: OAuthSource, category: str) -> bool:
     if priority in blocked_priorities:
         return True
     limit = _throttle_limit(policy, priority)
-    if limit is None:
+    if limit is None or priority not in THROTTLE_CATEGORIES:
         return False
     return _increment_throttle(source, priority) > limit
 
 
 def _increment_bucket(source: OAuthSource, category: str, field: str) -> None:
-    hour_start = current_hour_start()
-    lookup = {
-        "source": source,
-        "hour_start": hour_start,
-        "category": category,
-    }
-    updated = DingTalkApiUsageBucket.objects.filter(**lookup).update(**{field: F(field) + 1})
-    if updated:
-        return
-    try:
-        with transaction.atomic():
-            DingTalkApiUsageBucket.objects.create(
-                **lookup,
-                count=int(field == "count"),
-                blocked_count=int(field == "blocked_count"),
-            )
-    except IntegrityError:
-        DingTalkApiUsageBucket.objects.filter(**lookup).update(**{field: F(field) + 1})
+    _increment_bucket_field(source, category, field)
 
 
 def record(source: OAuthSource, category: str, *, blocked: bool = False) -> None:

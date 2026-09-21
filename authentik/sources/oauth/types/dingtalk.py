@@ -47,7 +47,9 @@ from authentik.sources.oauth.dingtalk.usage import (
     CATEGORY_LOGIN,
     CATEGORY_TOKEN,
     DingTalkUsagePolicyBlocked,
+    check,
     prepare_outbound_call,
+    record,
 )
 from authentik.sources.oauth.models import OAuthSource
 from authentik.sources.oauth.types.registry import SourceType, registry
@@ -972,12 +974,15 @@ def fetch_dingtalk_org_auth_info(
     source: OAuthSource,
     corp_id: str,
     session: Session | None = None,
+    *,
+    usage_category: str = CATEGORY_AUTH_INFO,
 ) -> dict[str, Any]:
     session = session or get_http_session()
     data = {}
     for attempt in range(2):
-        prepare_outbound_call(source, CATEGORY_AUTH_INFO)
+        check(source, usage_category)
         app_token = fetch_dingtalk_app_token_cached(source, session, force=attempt > 0)
+        record(source, usage_category, blocked=False)
         response = session.get(
             DINGTALK_ORG_AUTH_INFO_URL,
             params={"targetCorpId": corp_id},
@@ -1235,8 +1240,9 @@ class DingTalkOAuth2Client(OAuth2Client):
 
     def _post_dingtalk_app_json(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         for attempt in range(2):
-            prepare_outbound_call(self.source, CATEGORY_LOGIN)
+            check(self.source, CATEGORY_LOGIN)
             app_token = fetch_dingtalk_app_token_cached(self.source, force=attempt > 0)
+            record(self.source, CATEGORY_LOGIN, blocked=False)
             response = self.do_request(
                 "post",
                 url,
