@@ -30,6 +30,12 @@ export interface DingTalkDirectorySyncRequestRequest {
      * @memberof DingTalkDirectorySyncRequestRequest
      */
     full?: boolean;
+    /**
+     *
+     * @type {Array<string>}
+     * @memberof DingTalkDirectorySyncRequestRequest
+     */
+    userIds?: Array<string>;
 }
 
 /**
@@ -64,6 +70,7 @@ export function DingTalkDirectorySyncRequestRequestFromJSONTyped(
     return {
         corpId: json["corp_id"],
         full: json["full"] == null ? undefined : json["full"],
+        userIds: json["user_ids"] == null ? undefined : json["user_ids"],
     };
 }
 
@@ -84,5 +91,6 @@ export function DingTalkDirectorySyncRequestRequestToJSONTyped(
     return {
         corp_id: value["corpId"],
         full: value["full"],
+        user_ids: value["userIds"],
     };
 }

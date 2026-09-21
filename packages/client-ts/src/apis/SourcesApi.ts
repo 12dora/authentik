@@ -59,6 +59,18 @@ import {
     DingTalkDirectorySyncRequestRequestToJSON,
 } from "../models/DingTalkDirectorySyncRequestRequest";
 import {
+    type DingTalkDirectoryUsagePolicy,
+    DingTalkDirectoryUsagePolicyFromJSON,
+} from "../models/DingTalkDirectoryUsagePolicy";
+import {
+    type DingTalkDirectoryUsagePolicyRequest,
+    DingTalkDirectoryUsagePolicyRequestToJSON,
+} from "../models/DingTalkDirectoryUsagePolicyRequest";
+import {
+    type DingTalkDirectoryUsageResponse,
+    DingTalkDirectoryUsageResponseFromJSON,
+} from "../models/DingTalkDirectoryUsageResponse";
+import {
     type DingTalkManagedUsersResponse,
     DingTalkManagedUsersResponseFromJSON,
 } from "../models/DingTalkManagedUsersResponse";
@@ -862,6 +874,16 @@ export interface SourcesOauthDingtalkDirectorySyncCreateRequest {
 
 export interface SourcesOauthDingtalkDirectorySyncDestroyRequest {
     corpId: string;
+    sourceSlug: string;
+}
+
+export interface SourcesOauthDingtalkDirectoryUsagePolicyUpdateRequest {
+    sourceSlug: string;
+    dingTalkDirectoryUsagePolicyRequest: DingTalkDirectoryUsagePolicyRequest;
+}
+
+export interface SourcesOauthDingtalkDirectoryUsageRetrieveRequest {
+    since: string;
     sourceSlug: string;
 }
 
@@ -7403,6 +7425,165 @@ export class SourcesApi extends runtime.BaseAPI {
         initOverrides?: RequestInit | runtime.InitOverrideFunction,
     ): Promise<DingTalkDirectorySyncDeleted> {
         const response = await this.sourcesOauthDingtalkDirectorySyncDestroyRaw(
+            requestParameters,
+            initOverrides,
+        );
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for sourcesOauthDingtalkDirectoryUsagePolicyUpdate without sending the request
+     */
+    async sourcesOauthDingtalkDirectoryUsagePolicyUpdateRequestOpts(
+        requestParameters: SourcesOauthDingtalkDirectoryUsagePolicyUpdateRequest,
+    ): Promise<runtime.RequestOpts> {
+        if (requestParameters["sourceSlug"] == null) {
+            throw new runtime.RequiredError(
+                "sourceSlug",
+                'Required parameter "sourceSlug" was null or undefined when calling sourcesOauthDingtalkDirectoryUsagePolicyUpdate().',
+            );
+        }
+
+        if (requestParameters["dingTalkDirectoryUsagePolicyRequest"] == null) {
+            throw new runtime.RequiredError(
+                "dingTalkDirectoryUsagePolicyRequest",
+                'Required parameter "dingTalkDirectoryUsagePolicyRequest" was null or undefined when calling sourcesOauthDingtalkDirectoryUsagePolicyUpdate().',
+            );
+        }
+
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        headerParameters["Content-Type"] = "application/json";
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("authentik", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+
+        let urlPath = `/sources/oauth/dingtalk-directory/{source_slug}/usage-policy/`;
+        urlPath = urlPath.replace(
+            "{source_slug}",
+            encodeURIComponent(String(requestParameters["sourceSlug"])),
+        );
+
+        return {
+            path: urlPath,
+            method: "PUT",
+            headers: headerParameters,
+            query: queryParameters,
+            body: DingTalkDirectoryUsagePolicyRequestToJSON(
+                requestParameters["dingTalkDirectoryUsagePolicyRequest"],
+            ),
+        };
+    }
+
+    /**
+     */
+    async sourcesOauthDingtalkDirectoryUsagePolicyUpdateRaw(
+        requestParameters: SourcesOauthDingtalkDirectoryUsagePolicyUpdateRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<runtime.ApiResponse<DingTalkDirectoryUsagePolicy>> {
+        const requestOptions =
+            await this.sourcesOauthDingtalkDirectoryUsagePolicyUpdateRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) =>
+            DingTalkDirectoryUsagePolicyFromJSON(jsonValue),
+        );
+    }
+
+    /**
+     */
+    async sourcesOauthDingtalkDirectoryUsagePolicyUpdate(
+        requestParameters: SourcesOauthDingtalkDirectoryUsagePolicyUpdateRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<DingTalkDirectoryUsagePolicy> {
+        const response = await this.sourcesOauthDingtalkDirectoryUsagePolicyUpdateRaw(
+            requestParameters,
+            initOverrides,
+        );
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for sourcesOauthDingtalkDirectoryUsageRetrieve without sending the request
+     */
+    async sourcesOauthDingtalkDirectoryUsageRetrieveRequestOpts(
+        requestParameters: SourcesOauthDingtalkDirectoryUsageRetrieveRequest,
+    ): Promise<runtime.RequestOpts> {
+        if (requestParameters["since"] == null) {
+            throw new runtime.RequiredError(
+                "since",
+                'Required parameter "since" was null or undefined when calling sourcesOauthDingtalkDirectoryUsageRetrieve().',
+            );
+        }
+
+        if (requestParameters["sourceSlug"] == null) {
+            throw new runtime.RequiredError(
+                "sourceSlug",
+                'Required parameter "sourceSlug" was null or undefined when calling sourcesOauthDingtalkDirectoryUsageRetrieve().',
+            );
+        }
+
+        const queryParameters: any = {};
+
+        if (requestParameters["since"] != null) {
+            queryParameters["since"] = requestParameters["since"];
+        }
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("authentik", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+
+        let urlPath = `/sources/oauth/dingtalk-directory/{source_slug}/usage/`;
+        urlPath = urlPath.replace(
+            "{source_slug}",
+            encodeURIComponent(String(requestParameters["sourceSlug"])),
+        );
+
+        return {
+            path: urlPath,
+            method: "GET",
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     */
+    async sourcesOauthDingtalkDirectoryUsageRetrieveRaw(
+        requestParameters: SourcesOauthDingtalkDirectoryUsageRetrieveRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<runtime.ApiResponse<DingTalkDirectoryUsageResponse>> {
+        const requestOptions =
+            await this.sourcesOauthDingtalkDirectoryUsageRetrieveRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse(response, (jsonValue) =>
+            DingTalkDirectoryUsageResponseFromJSON(jsonValue),
+        );
+    }
+
+    /**
+     */
+    async sourcesOauthDingtalkDirectoryUsageRetrieve(
+        requestParameters: SourcesOauthDingtalkDirectoryUsageRetrieveRequest,
+        initOverrides?: RequestInit | runtime.InitOverrideFunction,
+    ): Promise<DingTalkDirectoryUsageResponse> {
+        const response = await this.sourcesOauthDingtalkDirectoryUsageRetrieveRaw(
             requestParameters,
             initOverrides,
         );

@@ -26021,6 +26021,65 @@ paths:
           $ref: '#/components/responses/ValidationErrorResponse'
         '403':
           $ref: '#/components/responses/GenericErrorResponse'
+  /sources/oauth/dingtalk-directory/{source_slug}/usage/:
+    get:
+      operationId: sources_oauth_dingtalk_directory_usage_retrieve
+      parameters:
+      - in: query
+        name: since
+        schema:
+          type: string
+        required: true
+      - in: path
+        name: source_slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - sources
+      security:
+      - authentik: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DingTalkDirectoryUsageResponse'
+          description: ''
+        '400':
+          $ref: '#/components/responses/ValidationErrorResponse'
+        '403':
+          $ref: '#/components/responses/GenericErrorResponse'
+  /sources/oauth/dingtalk-directory/{source_slug}/usage-policy/:
+    put:
+      operationId: sources_oauth_dingtalk_directory_usage_policy_update
+      parameters:
+      - in: path
+        name: source_slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - sources
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DingTalkDirectoryUsagePolicyRequest'
+        required: true
+      security:
+      - authentik: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DingTalkDirectoryUsagePolicy'
+          description: ''
+        '400':
+          $ref: '#/components/responses/ValidationErrorResponse'
+        '403':
+          $ref: '#/components/responses/GenericErrorResponse'
   /sources/oauth/dingtalk-directory/{source_slug}/users/:
     get:
       operationId: sources_oauth_dingtalk_directory_users_list
@@ -38200,6 +38259,12 @@ components:
       - POST
       - POST_AUTO
       type: string
+    BlockedPrioritiesEnum:
+      enum:
+      - p0
+      - p1
+      - p2
+      type: string
     BlueprintFile:
       type: object
       properties:
@@ -40328,6 +40393,13 @@ components:
         full:
           type: boolean
           default: true
+        user_ids:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+          maxItems: 200
       required:
       - corp_id
     DingTalkDirectorySyncStatus:
@@ -40396,6 +40468,58 @@ components:
       - error
       - deleted
       type: string
+    DingTalkDirectoryUsagePolicy:
+      type: object
+      properties:
+        blocked_priorities:
+          type: array
+          items:
+            $ref: '#/components/schemas/BlockedPrioritiesEnum'
+        throttle_per_hour:
+          type: object
+          additionalProperties: {}
+        block_p0_billed:
+          type: boolean
+        expires_at:
+          type: string
+          format: date-time
+      required:
+      - block_p0_billed
+      - blocked_priorities
+      - expires_at
+      - throttle_per_hour
+    DingTalkDirectoryUsagePolicyRequest:
+      type: object
+      properties:
+        blocked_priorities:
+          type: array
+          items:
+            $ref: '#/components/schemas/BlockedPrioritiesEnum'
+        throttle_per_hour:
+          type: object
+          additionalProperties: {}
+        block_p0_billed:
+          type: boolean
+        expires_at:
+          type: string
+          format: date-time
+      required:
+      - block_p0_billed
+      - blocked_priorities
+      - expires_at
+      - throttle_per_hour
+    DingTalkDirectoryUsageResponse:
+      type: object
+      properties:
+        generated_at:
+          type: string
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/DingTalkUsageBucket'
+      required:
+      - buckets
+      - generated_at
     DingTalkDirectoryUser:
       type: object
       properties:
@@ -40541,6 +40665,22 @@ components:
       - source_slug
       - stale
       - users
+    DingTalkUsageBucket:
+      type: object
+      properties:
+        hour_start:
+          type: string
+        category:
+          type: string
+        count:
+          type: integer
+        blocked_count:
+          type: integer
+      required:
+      - blocked_count
+      - category
+      - count
+      - hour_start
     Disk:
       type: object
       properties:
