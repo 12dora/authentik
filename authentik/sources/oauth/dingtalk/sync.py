@@ -16,6 +16,7 @@ from structlog.stdlib import get_logger
 from authentik.sources.oauth.dingtalk.client import DingTalkDirectoryClient
 from authentik.sources.oauth.dingtalk.config import normalize_dingtalk_id_list
 from authentik.sources.oauth.dingtalk.redaction import redact_dingtalk_detail
+from authentik.sources.oauth.dingtalk.usage import DingTalkUsagePolicyBlocked
 from authentik.sources.oauth.models import (
     DingTalkDirectoryDepartment,
     DingTalkDirectoryDepartmentStage,
@@ -56,6 +57,7 @@ DINGTALK_SYNC_ERROR_UNSUPPORTED_SOURCE = "dingtalk_directory_unsupported_source"
 DINGTALK_SYNC_ERROR_USER_LIMIT = "dingtalk_directory_user_limit"
 DINGTALK_SYNC_ERROR_USER_DETAIL_FAILED = "dingtalk_directory_user_detail_failed"
 DINGTALK_SYNC_ERROR_UNKNOWN = "dingtalk_directory_sync_failed"
+DINGTALK_SYNC_ERROR_USAGE_POLICY_BLOCKED = "dingtalk_directory_usage_policy_blocked"
 DINGTALK_SYNC_ERROR_CODES = frozenset(
     {
         DINGTALK_SYNC_ERROR_APP_TOKEN_FAILED,
@@ -73,6 +75,7 @@ DINGTALK_SYNC_ERROR_CODES = frozenset(
         DINGTALK_SYNC_ERROR_USER_LIMIT,
         DINGTALK_SYNC_ERROR_USER_DETAIL_FAILED,
         DINGTALK_SYNC_ERROR_UNKNOWN,
+        DINGTALK_SYNC_ERROR_USAGE_POLICY_BLOCKED,
     }
 )
 DINGTALK_SYNC_ERROR_MAX_PARAMS = 10
@@ -194,6 +197,11 @@ _SYNC_ERROR_BY_MESSAGE: tuple[tuple[tuple[str, ...], str, dict[str, Any]], ...] 
 
 def classify_dingtalk_sync_error(exc: Exception) -> tuple[str, dict[str, Any]]:
     """Return stable public error metadata for a DingTalk sync failure."""
+    if isinstance(exc, DingTalkUsagePolicyBlocked):
+        params: dict[str, Any] = {"reason": "blocked by usage policy"}
+        if exc.category:
+            params["category"] = exc.category
+        return DINGTALK_SYNC_ERROR_USAGE_POLICY_BLOCKED, params
     if isinstance(exc, RequestException):
         return DINGTALK_SYNC_ERROR_HTTP_REQUEST_FAILED, _http_error_params(exc)
     for exc_type, error_code in _SYNC_ERROR_BY_TYPE:
@@ -901,7 +909,7 @@ def sync_dingtalk_directory(
     corp_id = str(corp_id)
     parsed_run_id = UUID(str(queued_run_id)) if queued_run_id else None
     run_id, run_sequence = _claim_sync_run(source, corp_id, started_at, parsed_run_id)
-    client = DingTalkDirectoryClient(source)
+    client = DingTalkDirectoryClient(source, full=full)
     try:
         with _sync_concurrency_lease():
             _verify_sync_corp(source, corp_id, client)

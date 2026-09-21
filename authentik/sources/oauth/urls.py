@@ -14,6 +14,8 @@ from authentik.sources.oauth.api.dingtalk_directory import (
     DingTalkDirectoryDepartmentsView,
     DingTalkDirectoryStatusView,
     DingTalkDirectorySyncView,
+    DingTalkDirectoryUsagePolicyView,
+    DingTalkDirectoryUsageView,
     DingTalkDirectoryUserMaterializeView,
     DingTalkDirectoryUserOrgView,
     DingTalkDirectoryUsersView,
@@ -84,6 +86,16 @@ api_urlpatterns = [
         "sources/oauth/dingtalk-directory/<slug:source_slug>/sync/",
         DingTalkDirectorySyncView.as_view(),
         name="dingtalk-directory-sync",
+    ),
+    path(
+        "sources/oauth/dingtalk-directory/<slug:source_slug>/usage/",
+        DingTalkDirectoryUsageView.as_view(),
+        name="dingtalk-directory-usage",
+    ),
+    path(
+        "sources/oauth/dingtalk-directory/<slug:source_slug>/usage-policy/",
+        DingTalkDirectoryUsagePolicyView.as_view(),
+        name="dingtalk-directory-usage-policy",
     ),
     path(
         "sources/oauth/dingtalk-directory/<slug:source_slug>/departments/",

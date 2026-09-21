@@ -1,6 +1,7 @@
 """DingTalk directory cache API."""
 
 from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -37,7 +38,14 @@ from authentik.sources.oauth.dingtalk.sync import (
     finalize_dingtalk_directory_sync_error,
     queue_dingtalk_directory_sync,
 )
+from authentik.sources.oauth.dingtalk.usage import (
+    USAGE_SINCE_MAX_DAYS,
+    current_hour_start,
+    format_utc_z,
+    store_policy,
+)
 from authentik.sources.oauth.models import (
+    DingTalkApiUsageBucket,
     DingTalkDirectoryDepartment,
     DingTalkDirectorySyncStatus,
     DingTalkDirectorySyncStatusChoices,
@@ -612,3 +620,119 @@ class DingTalkDirectoryUserOrgView(APIView):
             else SimpleNamespace(attributes={"dingtalk": {"corp_id": corp_id, "user_id": user_id}})
         )
         return Response(get_dingtalk_org_context(context_user, source_slug=source_slug))
+
+
+class DingTalkDirectoryUsageQuerySerializer(serializers.Serializer):
+    since = serializers.DateTimeField(required=True)
+
+    def validate_since(self, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        else:
+            value = value.astimezone(UTC)
+        cutoff = now() - timedelta(days=USAGE_SINCE_MAX_DAYS)
+        if value < cutoff:
+            raise serializers.ValidationError(gettext_lazy("since must not be older than 45 days."))
+        return value
+
+
+class DingTalkUsageBucketSerializer(serializers.Serializer):
+    hour_start = serializers.CharField()
+    category = serializers.CharField()
+    count = serializers.IntegerField()
+    blocked_count = serializers.IntegerField()
+
+
+class DingTalkDirectoryUsageResponseSerializer(serializers.Serializer):
+    generated_at = serializers.CharField()
+    buckets = DingTalkUsageBucketSerializer(many=True)
+
+
+class DingTalkDirectoryUsagePolicySerializer(serializers.Serializer):
+    blocked_priorities = serializers.ListField(
+        child=serializers.ChoiceField(choices=["p0", "p1", "p2"]),
+        required=True,
+    )
+    throttle_per_hour = serializers.DictField(required=True)
+    block_p0_billed = serializers.BooleanField(required=True)
+    expires_at = serializers.DateTimeField(required=True)
+
+    def validate_expires_at(self, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+    def validate_throttle_per_hour(self, value: Any) -> dict[str, int | None]:
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("Must be an object.")
+        allowed = {"p0", "p1", "p2"}
+        extra = set(value) - allowed
+        if extra:
+            raise serializers.ValidationError(
+                f"Unknown throttle priorities: {', '.join(sorted(extra))}."
+            )
+        cleaned: dict[str, int | None] = {}
+        for key, raw in value.items():
+            if raw is None:
+                cleaned[str(key)] = None
+                continue
+            if type(raw) is bool or not isinstance(raw, int):
+                raise serializers.ValidationError(f"{key} must be an integer or null.")
+            if raw < 0:
+                raise serializers.ValidationError(f"{key} must be >= 0.")
+            cleaned[str(key)] = raw
+        return cleaned
+
+
+class DingTalkDirectoryUsageView(APIView):
+    permission_classes = [CanViewDingTalkDirectory]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="since",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=True,
+            )
+        ],
+        responses={200: DingTalkDirectoryUsageResponseSerializer},
+    )
+    def get(self, request: Request, source_slug: str) -> Response:
+        source = self.dingtalk_source
+        query = DingTalkDirectoryUsageQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        since = current_hour_start(query.validated_data["since"])
+        rows = DingTalkApiUsageBucket.objects.filter(
+            source=source,
+            hour_start__gte=since,
+        ).order_by("hour_start", "category")
+        return Response(
+            {
+                "generated_at": format_utc_z(now()),
+                "buckets": [
+                    {
+                        "hour_start": format_utc_z(row.hour_start),
+                        "category": row.category,
+                        "count": row.count,
+                        "blocked_count": row.blocked_count,
+                    }
+                    for row in rows
+                ],
+            }
+        )
+
+
+class DingTalkDirectoryUsagePolicyView(APIView):
+    permission_classes = [CanChangeDingTalkDirectory]
+
+    @extend_schema(
+        request=DingTalkDirectoryUsagePolicySerializer,
+        responses={200: DingTalkDirectoryUsagePolicySerializer},
+    )
+    def put(self, request: Request, source_slug: str) -> Response:
+        source = self.dingtalk_source
+        serializer = DingTalkDirectoryUsagePolicySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = store_policy(source, serializer.validated_data)
+        return Response(payload)

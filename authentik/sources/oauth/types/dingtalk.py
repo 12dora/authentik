@@ -41,6 +41,14 @@ from authentik.sources.oauth.dingtalk.messages import (
     DINGTALK_DENY_TEMPORARILY_UNABLE,
 )
 from authentik.sources.oauth.dingtalk.redaction import redact_dingtalk_detail
+from authentik.sources.oauth.dingtalk.usage import (
+    CATEGORY_ALLOWLIST,
+    CATEGORY_AUTH_INFO,
+    CATEGORY_LOGIN,
+    CATEGORY_TOKEN,
+    DingTalkUsagePolicyBlocked,
+    prepare_outbound_call,
+)
 from authentik.sources.oauth.models import OAuthSource
 from authentik.sources.oauth.types.registry import SourceType, registry
 from authentik.sources.oauth.views.callback import OAuthCallback
@@ -206,6 +214,7 @@ def _extract_dingtalk_corp_label(data: dict[str, Any]) -> str:
 
 
 def _fetch_dingtalk_app_token(source: OAuthSource, session: Session) -> str:
+    prepare_outbound_call(source, CATEGORY_TOKEN)
     try:
         token_response = session.get(
             DINGTALK_APP_ACCESS_TOKEN_URL,
@@ -803,6 +812,7 @@ def dingtalk_oauth_callback_url(request: HttpRequest, source: OAuthSource) -> st
 def _fetch_dingtalk_user_profile(
     source: OAuthSource, code: str, session: Session
 ) -> dict[str, Any]:
+    prepare_outbound_call(source, CATEGORY_LOGIN)
     token_response = session.post(
         DINGTALK_ACCESS_TOKEN_URL,
         json={
@@ -820,6 +830,7 @@ def _fetch_dingtalk_user_profile(
     access_token = token.get("accessToken") or token.get("access_token")
     if not access_token:
         raise ValueError(_("DingTalk token response did not include an access token."))
+    prepare_outbound_call(source, CATEGORY_LOGIN)
     profile_response = session.get(
         DINGTALK_PROFILE_URL,
         headers={"x-acs-dingtalk-access-token": access_token},
@@ -911,6 +922,21 @@ def handle_dingtalk_discovery_callback(request: HttpRequest, source: OAuthSource
             detail=_redact_dingtalk_detail(exc),
         )
         return _discovery_response(_dingtalk_discovery_error_payload(exc))
+    except DingTalkUsagePolicyBlocked as exc:
+        LOGGER.warning(
+            "dingtalk_allowlist_discovery_usage_policy_blocked",
+            source_slug=source.slug,
+            category=exc.category,
+            detail=_redact_dingtalk_detail(exc),
+        )
+        return _discovery_response(
+            _dingtalk_discovery_error_payload(
+                DingTalkDiscoveryPublicError(
+                    "provider_unavailable",
+                    _("Could not complete DingTalk discovery. Try again."),
+                )
+            )
+        )
     except RequestException as exc:
         LOGGER.warning(
             "dingtalk_allowlist_discovery_provider_request_failed",
@@ -950,6 +976,7 @@ def fetch_dingtalk_org_auth_info(
     session = session or get_http_session()
     data = {}
     for attempt in range(2):
+        prepare_outbound_call(source, CATEGORY_AUTH_INFO)
         app_token = fetch_dingtalk_app_token_cached(source, session, force=attempt > 0)
         response = session.get(
             DINGTALK_ORG_AUTH_INFO_URL,
@@ -987,23 +1014,33 @@ def fetch_dingtalk_org_auth_info(
 def fetch_dingtalk_departments(source: OAuthSource, corp_id: str) -> dict[str, Any]:
     from authentik.sources.oauth.dingtalk.client import DingTalkDirectoryClient
 
-    org_info = fetch_dingtalk_org_auth_info(source, corp_id)
+    try:
+        org_info = fetch_dingtalk_org_auth_info(source, corp_id)
 
-    departments = []
-    client = DingTalkDirectoryClient(
-        source,
-        max_department_depth=DINGTALK_MAX_DEPARTMENT_DEPTH,
-        max_departments=DINGTALK_MAX_DEPARTMENTS,
-    )
-    for department in client.iter_departments():
-        departments.append(
-            {
-                "dept_id": department["dept_id"],
-                "name": department["name"],
-                "parent_id": department["parent_dept_id"],
-            }
+        departments = []
+        client = DingTalkDirectoryClient(
+            source,
+            max_department_depth=DINGTALK_MAX_DEPARTMENT_DEPTH,
+            max_departments=DINGTALK_MAX_DEPARTMENTS,
+            usage_category=CATEGORY_ALLOWLIST,
         )
-    return {"corp_id": corp_id, "label": org_info.get("label", ""), "departments": departments}
+        for department in client.iter_departments():
+            departments.append(
+                {
+                    "dept_id": department["dept_id"],
+                    "name": department["name"],
+                    "parent_id": department["parent_dept_id"],
+                }
+            )
+        return {
+            "corp_id": corp_id,
+            "label": org_info.get("label", ""),
+            "departments": departments,
+        }
+    except DingTalkUsagePolicyBlocked as exc:
+        raise DingTalkDepartmentLoadFailed(
+            "DingTalk department lookup was blocked by usage policy."
+        ) from exc
 
 
 class DingTalkOAuth2Client(OAuth2Client):
@@ -1043,6 +1080,7 @@ class DingTalkOAuth2Client(OAuth2Client):
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
         data = {}
         try:
+            prepare_outbound_call(self.source, CATEGORY_LOGIN)
             response = self.do_request(
                 "post",
                 self.source.source_type.access_token_url,
@@ -1065,6 +1103,12 @@ class DingTalkOAuth2Client(OAuth2Client):
                 self.logger.warning("Unable to parse dingtalk token", exc=exc)
                 return data, {"error": _("DingTalk token exchange failed.")}
             response.raise_for_status()
+        except DingTalkUsagePolicyBlocked as exc:
+            self.logger.warning(
+                "dingtalk_usage_policy_blocked",
+                category=exc.category or CATEGORY_LOGIN,
+            )
+            return data, {"error": str(exc)}
         except RequestException as exc:
             self.logger.warning("Unable to fetch dingtalk token", exc=exc)
             return data, {"error": self._get_error(data) or _("DingTalk token exchange failed.")}
@@ -1111,12 +1155,15 @@ class DingTalkOAuth2Client(OAuth2Client):
     def get_profile_info(self, token: dict[str, Any]) -> dict[str, Any] | None:
         """Fetch DingTalk profile and enrich with directory data when available."""
         try:
+            prepare_outbound_call(self.source, CATEGORY_LOGIN)
             response = self.do_request(
                 "get",
                 self.source.source_type.profile_url,
                 headers={"x-acs-dingtalk-access-token": token["access_token"]},
             )
             response.raise_for_status()
+        except DingTalkUsagePolicyBlocked as exc:
+            raise ValueError(str(exc)) from exc
         except RequestException as exc:
             self.logger.warning("Unable to fetch dingtalk userinfo", exc=exc)
             return None
@@ -1136,7 +1183,10 @@ class DingTalkOAuth2Client(OAuth2Client):
         if not union_id:
             return profile
 
-        detail = self._get_enhanced_profile(union_id)
+        try:
+            detail = self._get_enhanced_profile(union_id)
+        except DingTalkUsagePolicyBlocked as exc:
+            raise ValueError(str(exc)) from exc
         if detail:
             profile.update(detail)
         return profile
@@ -1165,6 +1215,8 @@ class DingTalkOAuth2Client(OAuth2Client):
             if self._has_legacy_error(detail_data):
                 self.logger.warning("Unable to fetch dingtalk user detail", response=detail_data)
                 return {}
+        except DingTalkUsagePolicyBlocked:
+            raise
         except (JSONDecodeError, RequestException, ValueError) as exc:
             response = getattr(exc, "response", None)
             self.logger.warning(
@@ -1183,6 +1235,7 @@ class DingTalkOAuth2Client(OAuth2Client):
 
     def _post_dingtalk_app_json(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         for attempt in range(2):
+            prepare_outbound_call(self.source, CATEGORY_LOGIN)
             app_token = fetch_dingtalk_app_token_cached(self.source, force=attempt > 0)
             response = self.do_request(
                 "post",

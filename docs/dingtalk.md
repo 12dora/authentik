@@ -94,6 +94,45 @@ as stale.
 Removing a company's directory data from the panel deletes that company's cache
 and marks its sync status as deleted. It does not change the login allowlist.
 
+## API usage monitoring
+
+Every outbound DingTalk HTTP attempt is counted in an hourly UTC bucket for the
+source. Retries count as separate attempts. A failure to write a bucket is
+logged and never fails the DingTalk call. The daily directory job deletes
+buckets older than 60 days.
+
+EasyAuth pulls the buckets and pushes a short-lived usage policy. A missing or
+expired policy allows every call.
+
+Categories and priorities:
+
+- `ak_token` (P0, unbilled): `gettoken`. Never refused.
+- `ak_login` (P0, billed): login and allowlist-discovery user calls
+  (`userAccessToken`, `contact/users/me`, `getbyunionid`, `user/get`).
+  Refused only when `block_p0_billed` is true.
+- `ak_auth_info` (P1): `authInfos`.
+- `ak_directory_incremental` (P1): directory client calls during an incremental
+  sync.
+- `ak_directory_full` (P2): directory client calls during a full sync.
+- `ak_allowlist` (P2): allowlist department walks.
+
+P1 and P2 are refused when listed in `blocked_priorities`, or when they exceed
+`throttle_per_hour` for that priority. A refused call is not sent and is not
+retried. A directory sync that hits the policy finishes with
+`dingtalk_directory_usage_policy_blocked`. A login refusal is returned as a
+login error.
+
+`GET /api/v3/sources/oauth/dingtalk-directory/{slug}/usage/?since=<ISO-8601>`
+returns `generated_at` and `buckets` (`hour_start`, `category`, `count`,
+`blocked_count`) for `hour_start >= since` truncated to the hour. `since` is
+required, must be ISO-8601, and must not be older than 45 days (400 otherwise).
+The endpoint uses the same source read permission as directory status.
+
+`PUT /api/v3/sources/oauth/dingtalk-directory/{slug}/usage-policy/` stores
+`blocked_priorities`, `throttle_per_hour`, `block_p0_billed`, and `expires_at`
+in the shared cache until `expires_at`, persists nothing else, and echoes the
+body. It uses the same source change permission as directory sync.
+
 ## Downstream access
 
 Release DingTalk data only through mappings assigned to the provider that needs

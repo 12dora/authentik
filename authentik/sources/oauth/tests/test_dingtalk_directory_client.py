@@ -54,7 +54,7 @@ class TestDingTalkDirectoryClient(TestCase):
                 ],
             )
 
-            departments = list(DingTalkDirectoryClient(self.source).iter_departments())
+            departments = list(DingTalkDirectoryClient(self.source, full=True).iter_departments())
 
         self.assertEqual(
             departments,
@@ -118,7 +118,11 @@ class TestDingTalkDirectoryClient(TestCase):
             )
 
             with self.assertRaisesMessage(ValueError, "department limit"):
-                list(DingTalkDirectoryClient(self.source, max_departments=0).iter_departments())
+                list(
+                    DingTalkDirectoryClient(
+                        self.source, max_departments=0, full=True
+                    ).iter_departments()
+                )
 
     def test_invalid_cached_token_is_refreshed_once(self):
         with Mocker() as mocker:
@@ -137,7 +141,7 @@ class TestDingTalkDirectoryClient(TestCase):
                 ],
             )
 
-            departments = list(DingTalkDirectoryClient(self.source).iter_departments())
+            departments = list(DingTalkDirectoryClient(self.source, full=True).iter_departments())
 
         self.assertEqual(departments, [])
         token_requests = [
@@ -153,7 +157,7 @@ class TestDingTalkDirectoryClient(TestCase):
             mocker.post(DINGTALK_DEPARTMENT_LIST_URL, json={"errcode": 0})
 
             with self.assertRaisesMessage(ValueError, "did not include result"):
-                list(DingTalkDirectoryClient(self.source).iter_departments())
+                list(DingTalkDirectoryClient(self.source, full=True).iter_departments())
 
     def test_malformed_department_row_fails_instead_of_skipping(self):
         with Mocker() as mocker:
@@ -164,7 +168,7 @@ class TestDingTalkDirectoryClient(TestCase):
             )
 
             with self.assertRaisesMessage(ValueError, "dept_id"):
-                list(DingTalkDirectoryClient(self.source).iter_departments())
+                list(DingTalkDirectoryClient(self.source, full=True).iter_departments())
 
     def test_transient_429_retries_after_bounded_retry_after(self):
         sleeps = []
@@ -191,9 +195,9 @@ class TestDingTalkDirectoryClient(TestCase):
             )
 
             users = list(
-                DingTalkDirectoryClient(self.source, sleeper=sleeps.append).iter_department_users(
-                    "1"
-                )
+                DingTalkDirectoryClient(
+                    self.source, sleeper=sleeps.append, full=True
+                ).iter_department_users("1")
             )
 
         self.assertEqual(users, [{"userid": "USER", "active": True}])
@@ -209,6 +213,7 @@ class TestDingTalkDirectoryClient(TestCase):
                     DingTalkDirectoryClient(
                         self.source,
                         request_budget=DingTalkRequestBudget(max_requests=0),
+                        full=True,
                     ).iter_departments()
                 )
 

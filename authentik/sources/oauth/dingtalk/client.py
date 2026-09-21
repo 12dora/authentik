@@ -16,6 +16,11 @@ from authentik.sources.oauth.dingtalk.config import (
     DINGTALK_MAX_DEPARTMENT_DEPTH,
     DINGTALK_MAX_DEPARTMENTS,
 )
+from authentik.sources.oauth.dingtalk.usage import (
+    check,
+    directory_usage_category,
+    record,
+)
 from authentik.sources.oauth.models import OAuthSource
 from authentik.sources.oauth.types.dingtalk import (
     DINGTALK_DEPARTMENT_LIST_URL,
@@ -85,7 +90,7 @@ class DingTalkRequestBudget:
 class DingTalkDirectoryClient:
     """Small client for read-only DingTalk directory endpoints."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         source: OAuthSource,
         session: Session | None = None,
@@ -93,13 +98,21 @@ class DingTalkDirectoryClient:
         sleeper=sleep,
         max_department_depth: int = DINGTALK_MAX_DEPARTMENT_DEPTH,
         max_departments: int = DINGTALK_MAX_DEPARTMENTS,
+        *,
+        full: bool | None = None,
+        usage_category: str | None = None,
     ):
+        if usage_category is None:
+            if full is None:
+                raise TypeError("DingTalkDirectoryClient requires full= or usage_category=")
+            usage_category = directory_usage_category(full=full)
         self.source = source
         self.session = session or get_http_session()
         self.request_budget = request_budget or DingTalkRequestBudget()
         self.sleeper = sleeper
         self.max_department_depth = max_department_depth
         self.max_departments = max_departments
+        self.usage_category = usage_category
         self._app_token = ""
 
     @property
@@ -116,7 +129,9 @@ class DingTalkDirectoryClient:
 
     def _post_json(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         for attempt in range(DINGTALK_MAX_REQUEST_ATTEMPTS):
+            check(self.source, self.usage_category)
             self.request_budget.consume()
+            record(self.source, self.usage_category, blocked=False)
             try:
                 response = self.session.post(
                     url,

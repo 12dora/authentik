@@ -130,8 +130,10 @@ def dingtalk_directory_sync_all():
         finalize_dingtalk_directory_sync_error,
         queue_dingtalk_directory_sync,
     )
+    from authentik.sources.oauth.dingtalk.usage import purge_expired_usage_buckets
     from authentik.sources.oauth.types.dingtalk import get_dingtalk_allowlist_binding
 
+    purge_expired_usage_buckets()
     for source in OAuthSource.objects.filter(enabled=True, provider_type="dingtalk"):
         corp_ids: set[str] = set()
         # Corps derived from users who have already logged in via this source.

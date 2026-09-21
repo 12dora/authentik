@@ -450,6 +450,23 @@ class DingTalkDirectoryUserStage(InternallyManagedMixin, SerializerModel):
         ]
 
 
+class DingTalkApiUsageBucket(InternallyManagedMixin, SerializerModel):
+    """Hourly outbound DingTalk HTTP attempt counters for one OAuth source."""
+
+    source = models.ForeignKey("OAuthSource", on_delete=models.CASCADE)
+    hour_start = models.DateTimeField()
+    category = models.TextField()
+    count = models.PositiveBigIntegerField(default=0)
+    blocked_count = models.PositiveBigIntegerField(default=0)
+
+    class Meta:
+        unique_together = (("source", "hour_start", "category"),)
+        indexes = [
+            models.Index(fields=["source", "hour_start"], name="ak_dt_usage_src_hour_idx"),
+            models.Index(fields=["hour_start"], name="ak_dt_usage_hour_idx"),
+        ]
+
+
 class OAuthSourcePropertyMapping(PropertyMapping):
     """Map OAuth properties to User or Group object attributes"""
 
