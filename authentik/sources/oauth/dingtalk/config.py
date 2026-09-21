@@ -1,14 +1,14 @@
 """Shared DingTalk OAuth and directory configuration."""
 
-from datetime import timedelta
 from typing import Any
 
 DINGTALK_ALLOWLIST_SCOPES = ["openid", "corpid", "Contact.User.Read"]
 DINGTALK_MAX_DEPARTMENT_DEPTH = 50
 DINGTALK_MAX_DEPARTMENTS = 10000
-# Shorter than the 24 h wall-clock day so one of the twelve 2-hourly scheduled
-# runs is a full refresh even when cron jitter delays a tick.
-DINGTALK_FULL_REFRESH_INTERVAL = timedelta(hours=20)
+# Incremental POST /sync/ may name at most this many DingTalk userIds to force
+# a fresh topapi/v2/user/get even when the user/list row matches the cache.
+DINGTALK_SYNC_FORCE_USER_IDS_MAX = 200
+DINGTALK_SYNC_FORCE_USER_ID_MAX_LENGTH = 128
 
 
 def normalize_dingtalk_id_list(value: Any) -> list[str]:

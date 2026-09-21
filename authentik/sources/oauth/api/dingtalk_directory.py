@@ -22,6 +22,10 @@ from authentik.api.pagination import Pagination
 from authentik.core.api.utils import ModelSerializer
 from authentik.core.models import USER_ATTRIBUTE_SOURCES, User, UserTypes
 from authentik.events.models import Event, EventAction
+from authentik.sources.oauth.dingtalk.config import (
+    DINGTALK_SYNC_FORCE_USER_ID_MAX_LENGTH,
+    DINGTALK_SYNC_FORCE_USER_IDS_MAX,
+)
 from authentik.sources.oauth.dingtalk.selectors import (
     get_dingtalk_org_context,
     source_scoped_dingtalk_identity,
@@ -191,6 +195,31 @@ class DingTalkDirectoryStatusSerializer(serializers.Serializer):
 class DingTalkDirectorySyncRequestSerializer(serializers.Serializer):
     corp_id = serializers.CharField()
     full = serializers.BooleanField(required=False, default=True)
+    user_ids = serializers.ListField(
+        child=serializers.CharField(
+            min_length=1,
+            max_length=DINGTALK_SYNC_FORCE_USER_ID_MAX_LENGTH,
+            allow_blank=False,
+        ),
+        required=False,
+        default=list,
+        max_length=DINGTALK_SYNC_FORCE_USER_IDS_MAX,
+        allow_empty=True,
+    )
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        attrs["user_ids"] = list(
+            dict.fromkeys(str(user_id) for user_id in attrs.get("user_ids") or [])
+        )
+        if attrs["user_ids"] and (attrs.get("full", True) or not attrs.get("corp_id")):
+            raise ValidationError(
+                {
+                    "user_ids": gettext_lazy(
+                        "user_ids is only allowed when full is false and corp_id is given."
+                    )
+                }
+            )
+        return attrs
 
 
 class DingTalkDirectorySyncQueuedSerializer(serializers.Serializer):
@@ -289,10 +318,17 @@ class DingTalkDirectorySyncView(APIView):
         serializer.is_valid(raise_exception=True)
         corp_id = serializer.validated_data["corp_id"]
         full = serializer.validated_data["full"]
+        user_ids = serializer.validated_data.get("user_ids") or []
         run_id, should_enqueue = queue_dingtalk_directory_sync(source, str(corp_id))
         if should_enqueue:
             try:
-                dingtalk_directory_sync.send(str(source.pk), str(corp_id), str(run_id), full=full)
+                dingtalk_directory_sync.send(
+                    str(source.pk),
+                    str(corp_id),
+                    str(run_id),
+                    full=full,
+                    user_ids=user_ids,
+                )
             except RuntimeError as exc:
                 finalize_dingtalk_directory_sync_error(
                     source=source,

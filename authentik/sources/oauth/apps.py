@@ -60,6 +60,6 @@ class AuthentikSourceOAuthConfig(ManagedAppConfig):
             ),
             ScheduleSpec(
                 actor=dingtalk_directory_sync_all,
-                crontab=f"{fqdn_rand('dingtalk_directory_sync_all')} */2 * * *",
+                crontab=f"{fqdn_rand('dingtalk_directory_sync_all')} 3 * * *",
             ),
         ]

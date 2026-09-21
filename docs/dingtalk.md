@@ -59,16 +59,32 @@ access a protected application.
 ## Directory cache
 
 Open **DingTalk Directory** on the source to start a sync and view its status.
-Automatic sync runs every two hours for companies found in the allowlist or in
-existing DingTalk source connections.
+A scheduled full refresh runs once a day at 03:{hostname-stable minute} for
+companies found in the allowlist or in existing DingTalk source connections.
+That job always fetches `user/get` for every user. It is a safety net; live
+freshness comes from EasyAuth contact-change events.
 
-Scheduled runs are incremental when a full refresh succeeded less than 20 hours
-ago: they still walk every department and user list, but skip the per-user
-detail call when the listed row matches the cached row and reuse the stored
-manager id. A full refresh (detail for every user) runs when that interval has
-elapsed, and on demand. Manual admin-UI syncs and EasyAuth's event-driven
-`POST sync/` (body `{"corp_id": ...}`) stay full refreshes. Pass `"full": false`
-on that request to force an incremental run.
+For an organization with D=39 departments and U=140 users, a full refresh is
+about 220 billed DingTalk calls (`listsub` + `user/list` for every department,
+plus one `user/get` per user). An incremental run is about 80 calls: it still
+walks every department and user list, but skips `user/get` when the listed row
+matches the cache and reuses the stored manager id. The previous two-hourly
+schedule mixed those modes and cost about 1,100 calls/day; the daily full
+refresh is about 220/day plus EasyAuth's event-driven incrementals.
+
+EasyAuth `POST .../sync/` (body `{"corp_id": ...}`) still defaults to
+`"full": true`. Pass `"full": false` for an incremental run. Incremental
+requests may include `"user_ids": [...]` — DingTalk userIds mentioned by
+contact-change events, max 200 items, each max 128 characters, de-duplicated
+server-side — to force a fresh `user/get` for those users even when their
+`user/list` row is unchanged. `manager_userid` is only returned by `user/get`.
+`user_ids` is allowed only when `full` is false and `corp_id` is given;
+otherwise the API returns 400. A listed userId that is not found in the tree
+walk is ignored (the walk still tombstones departed users). If a sync for that
+(source, corp) is already queued or running, the response is `queued: false`
+and those `user_ids` are not recorded.
+
+Manual admin-UI syncs stay full refreshes.
 
 Sync reads DingTalk departments, users, and manager relationships into
 source-and-company-scoped cache tables. OIDC and SAML mappings read this cache

@@ -273,6 +273,71 @@ class TestDingTalkDirectoryAPI(APITestCase):
         self.assertTrue(response.json()["queued"])
         send_mock.assert_called_once()
         self.assertFalse(send_mock.call_args.kwargs["full"])
+        self.assertEqual(send_mock.call_args.kwargs["user_ids"], [])
+
+    @patch("authentik.sources.oauth.api.dingtalk_directory.dingtalk_directory_sync.send")
+    def test_sync_post_user_ids_queues_incremental_with_forced_ids(self, send_mock):
+        self.authenticate(create_test_admin_user())
+
+        response = self.client.post(
+            reverse("authentik_api:dingtalk-directory-sync", kwargs={"source_slug": "dingtalk"}),
+            data={"corp_id": "CORP", "full": False, "user_ids": ["U1", "U1", "U2"]},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["queued"])
+        send_mock.assert_called_once()
+        self.assertFalse(send_mock.call_args.kwargs["full"])
+        self.assertEqual(send_mock.call_args.kwargs["user_ids"], ["U1", "U2"])
+
+    def test_sync_post_user_ids_rejected_when_full(self):
+        self.authenticate(create_test_admin_user())
+
+        response = self.client.post(
+            reverse("authentik_api:dingtalk-directory-sync", kwargs={"source_slug": "dingtalk"}),
+            data={"corp_id": "CORP", "full": True, "user_ids": ["U1"]},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_sync_post_user_ids_rejected_without_corp_id(self):
+        self.authenticate(create_test_admin_user())
+
+        response = self.client.post(
+            reverse("authentik_api:dingtalk-directory-sync", kwargs={"source_slug": "dingtalk"}),
+            data={"full": False, "user_ids": ["U1"]},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_sync_post_user_ids_rejected_when_too_many(self):
+        self.authenticate(create_test_admin_user())
+
+        response = self.client.post(
+            reverse("authentik_api:dingtalk-directory-sync", kwargs={"source_slug": "dingtalk"}),
+            data={
+                "corp_id": "CORP",
+                "full": False,
+                "user_ids": [f"U{index}" for index in range(201)],
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_sync_post_user_ids_rejected_when_empty_string(self):
+        self.authenticate(create_test_admin_user())
+
+        response = self.client.post(
+            reverse("authentik_api:dingtalk-directory-sync", kwargs={"source_slug": "dingtalk"}),
+            data={"corp_id": "CORP", "full": False, "user_ids": [""]},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
 
     @patch("authentik.sources.oauth.api.dingtalk_directory.dingtalk_directory_sync.send")
     def test_sync_post_marks_error_when_broker_rejects(self, send_mock):

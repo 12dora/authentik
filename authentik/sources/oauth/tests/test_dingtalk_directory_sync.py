@@ -1,9 +1,9 @@
 """DingTalk directory model, sync, and selector tests."""
 
-from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.apps import apps
 from django.db import connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
@@ -13,7 +13,7 @@ from requests.exceptions import RequestException
 from structlog.testing import capture_logs
 
 from authentik.core.tests.utils import create_test_user
-from authentik.sources.oauth.dingtalk.config import DINGTALK_FULL_REFRESH_INTERVAL
+from authentik.lib.utils.time import fqdn_rand
 from authentik.sources.oauth.dingtalk.selectors import get_dingtalk_org_context
 from authentik.sources.oauth.dingtalk.sync import (
     DINGTALK_SYNC_ERROR_APP_TOKEN_FAILED,
@@ -403,6 +403,54 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertEqual(
             DingTalkDirectoryUser.objects.get(user_id="USER").manager_user_id,
             "DETAIL-USER",
+        )
+
+    @patch("authentik.sources.oauth.dingtalk.sync.DingTalkDirectoryClient")
+    def test_incremental_force_user_ids_fetches_listed_unchanged_user_once(self, client_cls):
+        listed = {
+            "userid": "USER",
+            "name": "Ada",
+            "dept_id_list": [1, 2],
+            "active": True,
+        }
+        other = {
+            "userid": "OTHER",
+            "name": "Grace",
+            "dept_id_list": [1],
+            "active": True,
+        }
+        self._cache_directory_user(listed, manager_user_id="CACHED-BOSS")
+        self._cache_directory_user(other, manager_user_id="CACHED-OTHER")
+
+        client = client_cls.return_value
+        client.request_budget.used = 9
+        client.iter_departments.return_value = [
+            {"dept_id": "2", "name": "Engineering", "parent_dept_id": "1", "raw": {"dept_id": 2}},
+        ]
+        client.iter_department_users.side_effect = [[listed, other], [listed]]
+        client.get_user_detail.return_value = {"manager_userid": "CACHED-BOSS"}
+
+        result = sync_dingtalk_directory(
+            self.source,
+            corp_id="CORP",
+            full=False,
+            user_ids=["USER", "USER", "GONE"],
+        )
+
+        self.assertEqual(
+            [call.args[0] for call in client.get_user_detail.call_args_list],
+            ["USER"],
+        )
+        self.assertEqual(result["mode"], "incremental")
+        self.assertEqual(result["user_detail_requests"], 1)
+        self.assertEqual(result["users"], 2)
+        self.assertEqual(
+            DingTalkDirectoryUser.objects.get(user_id="USER").manager_user_id,
+            "CACHED-BOSS",
+        )
+        self.assertEqual(
+            DingTalkDirectoryUser.objects.get(user_id="OTHER").manager_user_id,
+            "CACHED-OTHER",
         )
 
     def test_typed_counters_defaults_include_mode_and_request_keys(self):
@@ -983,58 +1031,39 @@ class TestDingTalkDirectorySync(TestCase):
         self.assertEqual(status.error_code, DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE)
         self.assertIsNotNone(status.error_correlation_id)
 
+    def test_directory_sync_schedule_is_daily(self):
+        config = apps.get_app_config("authentik_sources_oauth")
+        spec = next(
+            item
+            for item in config.tenant_schedule_specs
+            if item.actor is dingtalk_directory_sync_all
+        )
+        self.assertEqual(
+            spec.crontab,
+            f"{fqdn_rand('dingtalk_directory_sync_all')} 3 * * *",
+        )
+
     @patch("authentik.sources.oauth.types.dingtalk.get_dingtalk_allowlist_binding")
     @patch("authentik.sources.oauth.tasks.dingtalk_directory_sync.send")
-    def test_scheduled_sync_selects_full_from_last_full_success_at(self, send_mock, allowlist_mock):
+    def test_scheduled_sync_always_queues_full_refresh(self, send_mock, allowlist_mock):
         allowlist_mock.return_value = (
             None,
             None,
-            {
-                "companies": [
-                    {"corp_id": "NEVER"},
-                    {"corp_id": "MISSING"},
-                    {"corp_id": "STALE"},
-                    {"corp_id": "BOUNDARY"},
-                    {"corp_id": "RECENT"},
-                ]
-            },
-        )
-        frozen = now()
-        DingTalkDirectorySyncStatus.objects.create(
-            source=self.source,
-            corp_id="MISSING",
-            status=DingTalkDirectorySyncStatusChoices.SUCCESS,
-            last_full_success_at=None,
-        )
-        DingTalkDirectorySyncStatus.objects.create(
-            source=self.source,
-            corp_id="STALE",
-            status=DingTalkDirectorySyncStatusChoices.SUCCESS,
-            last_full_success_at=frozen - DINGTALK_FULL_REFRESH_INTERVAL - timedelta(hours=1),
-        )
-        DingTalkDirectorySyncStatus.objects.create(
-            source=self.source,
-            corp_id="BOUNDARY",
-            status=DingTalkDirectorySyncStatusChoices.SUCCESS,
-            last_full_success_at=frozen - DINGTALK_FULL_REFRESH_INTERVAL,
+            {"companies": [{"corp_id": "RECENT"}, {"corp_id": "NEVER"}]},
         )
         DingTalkDirectorySyncStatus.objects.create(
             source=self.source,
             corp_id="RECENT",
             status=DingTalkDirectorySyncStatusChoices.SUCCESS,
-            last_full_success_at=frozen - timedelta(hours=1),
+            last_full_success_at=now(),
         )
 
-        self.assertEqual(DINGTALK_FULL_REFRESH_INTERVAL, timedelta(hours=20))
-        with patch("django.utils.timezone.now", return_value=frozen):
-            dingtalk_directory_sync_all()
+        dingtalk_directory_sync_all()
 
         by_corp = {call.args[1]: call.kwargs["full"] for call in send_mock.call_args_list}
+        self.assertEqual(set(by_corp), {"RECENT", "NEVER"})
+        self.assertTrue(by_corp["RECENT"])
         self.assertTrue(by_corp["NEVER"])
-        self.assertTrue(by_corp["MISSING"])
-        self.assertTrue(by_corp["STALE"])
-        self.assertTrue(by_corp["BOUNDARY"])
-        self.assertFalse(by_corp["RECENT"])
 
 
 class TestDingTalkCorpIdExtraction(TestCase):

@@ -596,9 +596,10 @@ def _stage_user(
     *,
     full: bool,
     cached_users: dict[str, tuple[Any, str]],
+    force_user_ids: set[str],
 ) -> tuple[dict[str, Any], bool]:
     user = normalize_dingtalk_user(raw_user, corp_id)
-    if not full:
+    if not full and user["user_id"] not in force_user_ids:
         cached = cached_users.get(user["user_id"])
         if cached is not None:
             cached_raw, cached_manager = cached
@@ -622,6 +623,7 @@ def _stage_directory_snapshot(
     client: DingTalkDirectoryClient,
     *,
     full: bool = True,
+    user_ids: list[str] | None = None,
 ) -> int:
     DingTalkDirectoryDepartmentStage.objects.filter(
         source=source, corp_id=corp_id, run_id=run_id
@@ -637,6 +639,7 @@ def _stage_directory_snapshot(
     user_detail_requests = 0
     seen_user_ids: set[str] = set()
     cached_users: dict[str, tuple[Any, str]] = {}
+    force_user_ids = {str(uid) for uid in (user_ids or []) if uid}
     if not full:
         cached_users = _cached_users_for_incremental(source, corp_id)
     for department in _iter_departments(client):
@@ -654,7 +657,12 @@ def _stage_directory_snapshot(
             if listed_id is not None and str(listed_id) in seen_user_ids:
                 continue
             user, fetched_detail = _stage_user(
-                client, corp_id, raw_user, full=full, cached_users=cached_users
+                client,
+                corp_id,
+                raw_user,
+                full=full,
+                cached_users=cached_users,
+                force_user_ids=force_user_ids,
             )
             if fetched_detail:
                 user_detail_requests += 1
@@ -882,6 +890,7 @@ def sync_dingtalk_directory(
     queued_run_id: str | UUID | None = None,
     *,
     full: bool = True,
+    user_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Sync departments and users for one DingTalk source/corp pair."""
     if source.provider_type != "dingtalk":
@@ -897,7 +906,7 @@ def sync_dingtalk_directory(
         with _sync_concurrency_lease():
             _verify_sync_corp(source, corp_id, client)
             user_detail_requests = _stage_directory_snapshot(
-                source, corp_id, run_id, client, full=full
+                source, corp_id, run_id, client, full=full, user_ids=user_ids
             )
 
             # An all-empty result after enrichment almost always means the org never maintained

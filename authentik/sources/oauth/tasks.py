@@ -10,7 +10,6 @@ from structlog.stdlib import get_logger
 
 from authentik.lib.utils.http import get_http_session
 from authentik.sources.oauth.models import (
-    DingTalkDirectorySyncStatus,
     OAuthSource,
     UserOAuthSourceConnection,
 )
@@ -83,7 +82,11 @@ def update_well_known_jwks():
 
 @actor(description=_("Sync DingTalk directory cache."))
 def dingtalk_directory_sync(
-    source_pk: str, corp_id: str, run_id: str | None = None, full: bool = True
+    source_pk: str,
+    corp_id: str,
+    run_id: str | None = None,
+    full: bool = True,
+    user_ids: list[str] | None = None,
 ):
     source = OAuthSource.objects.filter(pk=source_pk, provider_type="dingtalk").first()
     if not source:
@@ -114,14 +117,13 @@ def dingtalk_directory_sync(
         return None
     from authentik.sources.oauth.dingtalk.sync import sync_dingtalk_directory
 
-    return sync_dingtalk_directory(source, corp_id, queued_run_id=run_id, full=full)
+    return sync_dingtalk_directory(
+        source, corp_id, queued_run_id=run_id, full=full, user_ids=user_ids
+    )
 
 
 @actor(description=_("Sync all DingTalk directory caches."))
 def dingtalk_directory_sync_all():
-    from django.utils.timezone import now
-
-    from authentik.sources.oauth.dingtalk.config import DINGTALK_FULL_REFRESH_INTERVAL
     from authentik.sources.oauth.dingtalk.selectors import source_scoped_dingtalk_identity
     from authentik.sources.oauth.dingtalk.sync import (
         DINGTALK_SYNC_ERROR_BROKER_UNAVAILABLE,
@@ -149,17 +151,9 @@ def dingtalk_directory_sync_all():
         for corp_id in corp_ids:
             run_id = None
             try:
-                status = DingTalkDirectorySyncStatus.objects.filter(
-                    source=source, corp_id=corp_id
-                ).first()
-                full = (
-                    status is None
-                    or status.last_full_success_at is None
-                    or now() - status.last_full_success_at >= DINGTALK_FULL_REFRESH_INTERVAL
-                )
                 run_id, should_enqueue = queue_dingtalk_directory_sync(source, corp_id)
                 if should_enqueue:
-                    dingtalk_directory_sync.send(str(source.pk), corp_id, str(run_id), full=full)
+                    dingtalk_directory_sync.send(str(source.pk), corp_id, str(run_id), full=True)
             except (DatabaseError, RuntimeError, ValueError) as exc:
                 if run_id and isinstance(exc, RuntimeError):
                     finalize_dingtalk_directory_sync_error(
