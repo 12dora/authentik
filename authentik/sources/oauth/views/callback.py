@@ -1,8 +1,9 @@
 """OAuth Callback Views"""
 
 from datetime import timedelta
+from functools import cached_property
 from json import JSONDecodeError
-from typing import Any
+from typing import Any, cast
 
 from django.conf import settings
 from django.contrib import messages
@@ -14,10 +15,17 @@ from django.views.generic import View
 from guardian.shortcuts import get_anonymous_user
 from structlog.stdlib import get_logger
 
+from authentik.core.models import UserSourceConnection
 from authentik.core.sources.flow_manager import SourceFlowManager
+from authentik.core.sources.matcher import Action
+from authentik.core.sources.reauthentication import (
+    SourceReauthenticationState,
+    source_reauthentication_state,
+)
 from authentik.events.models import Event, EventAction
 from authentik.flows.exceptions import FlowNonApplicableException
-from authentik.flows.planner import PLAN_CONTEXT_SOURCE
+from authentik.flows.models import Flow
+from authentik.flows.planner import PLAN_CONTEXT_SOURCE, PLAN_CONTEXT_SOURCE_REAUTHENTICATION
 from authentik.policies.engine import PolicyEngine
 from authentik.policies.exceptions import PolicyEngineException
 from authentik.policies.types import PolicyResult
@@ -141,6 +149,16 @@ class OAuthSourceFlowManager(SourceFlowManager):
 
         return registry.find_type(self.source.provider_type)()
 
+    @cached_property
+    def reauthentication_state(self) -> SourceReauthenticationState:
+        """Marker state for this callback, evaluated once."""
+        return source_reauthentication_state(self.request)
+
+    @cached_property
+    def reauthentication_pending(self) -> bool:
+        """Whether this callback is a provider re-authentication."""
+        return self.reauthentication_state == SourceReauthenticationState.PENDING
+
     def source_policy_result(self) -> PolicyResult:
         """Evaluate policies bound directly to the source before deciding the source action."""
         user = self.request.user if self.request.user.is_authenticated else get_anonymous_user()
@@ -171,9 +189,52 @@ class OAuthSourceFlowManager(SourceFlowManager):
                 source_policy_result,
             )
             return self.error_handler(FlowNonApplicableException(source_policy_result))
+        # fork: an expired or mismatched marker must not link the incoming identity
+        # to the session user. The state check already removed the marker.
+        if (
+            self.reauthentication_state == SourceReauthenticationState.STALE
+            and self.request.user.is_authenticated
+        ):
+            return self.error_handler(
+                Exception(_("Re-authentication expired. Please start the operation again."))
+            )
         return super().get_flow(**kwargs)
 
+    def get_action(self, **kwargs) -> tuple[Action, UserSourceConnection | None]:
+        """Choose the source action, ignoring the session user during re-auth.
+
+        A provider re-login leaves the Django session authenticated. While the
+        short-lived re-authentication marker is pending, decide as if the request
+        were anonymous so the incoming identity is not linked to that session user.
+        """
+        if self.reauthentication_pending:
+            action, connection = self.matcher.get_user_action(self.identifier, self.user_properties)
+            if connection:
+                connection = self.update_user_connection(
+                    cast(UserOAuthSourceConnection, connection),
+                    **kwargs,
+                )
+            return action, connection
+        return super().get_action(**kwargs)
+
+    def _prepare_flow(
+        self,
+        flow: Flow | None,
+        connection: UserSourceConnection,
+        stages=None,
+        **flow_context,
+    ) -> HttpResponse:
+        # fork: require_unauthenticated is waived only for this flow, and only
+        # while the re-authentication marker is pending.
+        if flow is not None and self.reauthentication_pending:
+            flow_context[PLAN_CONTEXT_SOURCE_REAUTHENTICATION] = str(flow.pk)
+        return super()._prepare_flow(flow, connection, stages, **flow_context)
+
     def handle_existing_link(self, connection: UserOAuthSourceConnection) -> HttpResponse:
+        # fork: a matcher link during re-auth logs that account in. PostSourceStage
+        # saves the connection after the login. The allowlist runs in handle_auth.
+        if self.reauthentication_pending:
+            return self.handle_auth(connection)
         if response := self.source_type().oauth_pre_existing_link(self, connection):
             return response
         return super().handle_existing_link(connection)
@@ -184,6 +245,15 @@ class OAuthSourceFlowManager(SourceFlowManager):
         return super().handle_auth(connection)
 
     def handle_enroll(self, connection: UserOAuthSourceConnection) -> HttpResponse:
+        # fork: enrolling here can write the incoming identity onto the session user.
+        if self.reauthentication_pending:
+            return self.error_handler(
+                Exception(
+                    _(
+                        "Re-authentication requires an existing account connected to {source}."
+                    ).format(source=self.source.name)
+                )
+            )
         if response := self.source_type().oauth_pre_enroll(self, connection):
             return response
         return super().handle_enroll(connection)
