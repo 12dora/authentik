@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.conf import settings
+from django.contrib.auth import SESSION_KEY
 from django.http import HttpRequest
 from django.http.response import HttpResponse
 from django.urls import reverse
@@ -13,17 +14,33 @@ from django.utils.timezone import now
 from authentik.blueprints.tests import apply_blueprint
 from authentik.core import user_switching
 from authentik.core.models import AuthenticatedSession, Session, User, UserSwitchingSession
+from authentik.core.sessions import SessionStore
+from authentik.core.sources.reauthentication import (
+    SESSION_KEY_SOURCE_REAUTHENTICATION,
+    mark_source_reauthentication,
+)
 from authentik.core.tests.utils import create_test_flow, create_test_user
 from authentik.events.models import Event, EventAction
+from authentik.events.signals import get_login_event
 from authentik.events.utils import get_user
 from authentik.flows.markers import StageMarker
 from authentik.flows.models import FlowDesignation, FlowStageBinding
-from authentik.flows.planner import PLAN_CONTEXT_PENDING_USER, FlowPlan
+from authentik.flows.planner import (
+    PLAN_CONTEXT_PENDING_USER,
+    PLAN_CONTEXT_USER_SWITCH_ADD_USER,
+    FlowPlan,
+)
 from authentik.flows.tests import FlowTestCase
 from authentik.flows.tests.test_executor import TO_STAGE_RESPONSE_MOCK
 from authentik.flows.views.executor import NEXT_ARG_NAME, SESSION_KEY_PLAN
 from authentik.lib.generators import generate_id
 from authentik.lib.utils.time import timedelta_from_string
+from authentik.providers.oauth2.views.authorize import (
+    SESSION_KEY_LAST_LOGIN_UID as OAUTH2_LAST_LOGIN_UID,
+)
+from authentik.providers.saml.views.sso import (
+    SESSION_KEY_LAST_LOGIN_UID as SAML_LAST_LOGIN_UID,
+)
 from authentik.root.middleware import ClientIPMiddleware
 from authentik.sources.oauth.types.dingtalk import (
     DINGTALK_ALLOWLIST_PLAN_CONTEXT,
@@ -140,6 +157,132 @@ class TestUserLoginStage(FlowTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(request.session[DINGTALK_ALLOWLIST_SESSION_KEY], marker)
+
+    def _logged_in_reauth_session(self, *, pending: bool = True, flush: bool = False):
+        """Session for self.user with provider last-login ids and, optionally, the marker."""
+        self.client.force_login(self.user)
+        session = self.client.session
+        session[OAUTH2_LAST_LOGIN_UID] = "oauth-login-uid-a"
+        session[SAML_LAST_LOGIN_UID] = None
+        session["unrelated"] = "drop-on-flush"
+        # authentik's SessionStore does not persist Django's auth user id, so a reloaded
+        # session makes login() cycle the key. Set it so login() takes the flush path,
+        # the worst case for keeping the provider ids (opt-in via ``flush``).
+        if flush:
+            session[SESSION_KEY] = str(self.user.pk)
+        if pending:
+            request = HttpRequest()
+            request.session = session
+            mark_source_reauthentication(request)
+        return session
+
+    def _do_login_as(self, session, pending_user: User, *, user_switch: bool = False):
+        """Log pending_user in on session. Returns the response and the request."""
+        plan = FlowPlan(flow_pk=self.flow.pk.hex, bindings=[self.binding], markers=[StageMarker()])
+        plan.context[PLAN_CONTEXT_PENDING_USER] = pending_user
+        if user_switch:
+            plan.context[PLAN_CONTEXT_USER_SWITCH_ADD_USER] = True
+        session[SESSION_KEY_PLAN] = plan
+        request = HttpRequest()
+        request.session = session
+        request.user = self.user
+        request.META["REMOTE_ADDR"] = "127.0.0.1"
+        request.COOKIES = {}
+        executor = SimpleNamespace(
+            plan=plan,
+            current_stage=self.stage,
+            flow=self.flow,
+            stage_ok=Mock(return_value=HttpResponse()),
+        )
+        view = UserLoginStageView(executor)
+        view.request = request
+        return view.do_login(request), request
+
+    def test_cross_user_login_keeps_provider_last_login_uid(self):
+        """A pending re-auth keeps provider last_login_uid values and clears the marker."""
+        session = self._logged_in_reauth_session(flush=True)
+        other = create_test_user()
+
+        response, request = self._do_login_as(session, other)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("unrelated", request.session)
+        self.assertIn(SAML_LAST_LOGIN_UID, request.session)
+        self.assertEqual(request.session[OAUTH2_LAST_LOGIN_UID], "oauth-login-uid-a")
+        self.assertIsNone(request.session[SAML_LAST_LOGIN_UID])
+        self.assertNotIn(SESSION_KEY_SOURCE_REAUTHENTICATION, request.session)
+        login_event = get_login_event(request)
+        self.assertIsNotNone(login_event)
+        self.assertNotEqual(str(login_event.pk), request.session[OAUTH2_LAST_LOGIN_UID])
+        request.session.save()
+        stored = SessionStore(request.session.session_key)
+        self.assertEqual(stored[OAUTH2_LAST_LOGIN_UID], "oauth-login-uid-a")
+        self.assertIsNone(stored[SAML_LAST_LOGIN_UID])
+        self.assertNotIn(SESSION_KEY_SOURCE_REAUTHENTICATION, stored)
+
+    def test_cross_user_login_without_marker_drops_provider_last_login_uid(self):
+        """A different user without a pending marker does not keep the provider ids."""
+        session = self._logged_in_reauth_session(pending=False, flush=True)
+        other = create_test_user()
+
+        response, request = self._do_login_as(session, other)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("unrelated", request.session)
+        self.assertNotIn(OAUTH2_LAST_LOGIN_UID, request.session)
+        self.assertNotIn(SAML_LAST_LOGIN_UID, request.session)
+        self.assertNotIn(SESSION_KEY_SOURCE_REAUTHENTICATION, request.session)
+        request.session.save()
+        stored = SessionStore(request.session.session_key)
+        self.assertNotIn(OAUTH2_LAST_LOGIN_UID, stored)
+        self.assertNotIn(SAML_LAST_LOGIN_UID, stored)
+        self.assertNotIn(SESSION_KEY_SOURCE_REAUTHENTICATION, stored)
+
+    def test_same_user_login_clears_source_reauthentication_marker(self):
+        """Logging in again as the same user drops the marker and keeps session keys."""
+        session = self._logged_in_reauth_session()
+
+        response, request = self._do_login_as(session, self.user)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(request.session["unrelated"], "drop-on-flush")
+        self.assertIn(SAML_LAST_LOGIN_UID, request.session)
+        self.assertEqual(request.session[OAUTH2_LAST_LOGIN_UID], "oauth-login-uid-a")
+        self.assertIsNone(request.session[SAML_LAST_LOGIN_UID])
+        self.assertNotIn(SESSION_KEY_SOURCE_REAUTHENTICATION, request.session)
+        request.session.save()
+        stored = SessionStore(request.session.session_key)
+        self.assertEqual(stored["unrelated"], "drop-on-flush")
+        self.assertEqual(stored[OAUTH2_LAST_LOGIN_UID], "oauth-login-uid-a")
+        self.assertNotIn(SESSION_KEY_SOURCE_REAUTHENTICATION, stored)
+
+    def test_user_switch_does_not_copy_provider_last_login_uid(self):
+        """User-switch does not copy provider ids, and drops the marker on both sessions."""
+        session = self._logged_in_reauth_session()
+        old_key = session.session_key
+        other = create_test_user()
+
+        response, request = self._do_login_as(session, other, user_switch=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotEqual(request.session.session_key, old_key)
+        self.assertNotIn("unrelated", request.session)
+        self.assertNotIn(OAUTH2_LAST_LOGIN_UID, request.session)
+        self.assertNotIn(SAML_LAST_LOGIN_UID, request.session)
+        self.assertNotIn(SESSION_KEY_SOURCE_REAUTHENTICATION, request.session)
+        request.session.save()
+        stored = SessionStore(request.session.session_key)
+        self.assertNotIn(OAUTH2_LAST_LOGIN_UID, stored)
+        self.assertNotIn(SAML_LAST_LOGIN_UID, stored)
+        self.assertNotIn(SESSION_KEY_SOURCE_REAUTHENTICATION, stored)
+        # The previous session stays readable even after it stops being current.
+        raw = Session.objects.get(session_key=old_key).session_data
+        if isinstance(raw, memoryview):
+            raw = raw.tobytes()
+        previous = SessionStore().decode(raw)
+        self.assertEqual(previous[OAUTH2_LAST_LOGIN_UID], "oauth-login-uid-a")
+        self.assertEqual(previous["unrelated"], "drop-on-flush")
+        self.assertNotIn(SESSION_KEY_SOURCE_REAUTHENTICATION, previous)
 
     def test_login_session_finalized_receiver_exception_does_not_abort_login(self):
         """Post-login extension receivers are best-effort and cannot turn login into a 500."""

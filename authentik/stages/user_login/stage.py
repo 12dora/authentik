@@ -14,6 +14,10 @@ from rest_framework.fields import BooleanField, CharField
 from authentik.core import user_switching
 from authentik.core.models import AuthenticatedSession, Session, User
 from authentik.core.sessions import SessionStore
+from authentik.core.sources.reauthentication import (
+    clear_source_reauthentication,
+    source_reauthentication_pending,
+)
 from authentik.events.middleware import audit_ignore
 from authentik.flows.challenge import ChallengeResponse, WithUserInfoChallenge
 from authentik.flows.planner import (
@@ -41,6 +45,14 @@ from authentik.tenants.utils import get_unique_identifier
 COOKIE_NAME_KNOWN_DEVICE = "authentik_device"
 
 PLAN_CONTEXT_METHOD_ARGS_KNOWN_DEVICE = "known_device"
+
+# Mirrored from authentik.providers.oauth2.views.authorize.SESSION_KEY_LAST_LOGIN_UID
+# and authentik.providers.saml.views.sso.SESSION_KEY_LAST_LOGIN_UID. This stage does not
+# import those provider views.
+_PROVIDER_LAST_LOGIN_UID_KEYS = (
+    "authentik/providers/oauth2/last_login_uid",
+    "authentik/providers/saml/last_login_uid",
+)
 
 
 class UserLoginChallenge(WithUserInfoChallenge):
@@ -152,6 +164,9 @@ class UserLoginStageView(ChallengeStageView):
         flow_query_params = old_session.get(SESSION_KEY_GET)
         # Move the active plan so audit events keep context and old logins cannot resume it.
         old_session.pop(SESSION_KEY_PLAN, None)
+        # fork: this session is saved as the previous login. Drop a source
+        # re-authentication marker so it does not stay valid there.
+        clear_source_reauthentication(self.request)
         old_session.save()
         session_keys = old_session.model.Keys
         self.request.session = SessionStore(
@@ -204,11 +219,25 @@ class UserLoginStageView(ChallengeStageView):
             or PLAN_CONTEXT_USER_SWITCH_TARGET_SESSION in self.executor.plan.context
         )
         user_switching_token = getattr(self.request, "user_switching_token", None)
-        if (
+        # fork: login() replaces the login event, so read the marker before it.
+        # Restore provider last_login_uid values only when re-auth is pending and
+        # login() runs on this session. User-switch persists the previous session
+        # from _start_new_session, which drops the marker and does not copy those
+        # keys. The current session's marker is always cleared after login.
+        reauth_pending = source_reauthentication_pending(self.request)
+        starts_new_session = (
             is_user_switch_login
             and self.request.user.is_authenticated
             and self.request.user.pk != user.pk
-        ):
+        )
+        preserved_last_login_uids = {}
+        if reauth_pending and not starts_new_session:
+            preserved_last_login_uids = {
+                key: self.request.session[key]
+                for key in _PROVIDER_LAST_LOGIN_UID_KEYS
+                if key in self.request.session
+            }
+        if starts_new_session:
             self._start_new_session()
             if user_switching_token:
                 Session.objects.filter(
@@ -230,6 +259,10 @@ class UserLoginStageView(ChallengeStageView):
                 user,
                 backend=backend,
             )
+        for key, value in preserved_last_login_uids.items():
+            if key not in self.request.session:
+                self.request.session[key] = value
+        clear_source_reauthentication(self.request)
         # Let extensions persist per-login session state (e.g. the DingTalk allowlist marker)
         # without importing app-specific code into this core stage (see user_login.signals).
         responses = user_login_session_finalized.send_robust(
