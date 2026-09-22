@@ -14,6 +14,7 @@ from authentik.core.tests.utils import (
     RequestFactory,
     create_test_admin_user,
     create_test_flow,
+    create_test_user,
     dummy_get_response,
 )
 from authentik.flows.exceptions import EmptyFlowException, FlowNonApplicableException
@@ -28,6 +29,7 @@ from authentik.flows.planner import (
     PLAN_CONTEXT_IS_REDIRECTED,
     PLAN_CONTEXT_IS_RESTORED,
     PLAN_CONTEXT_PENDING_USER,
+    PLAN_CONTEXT_SOURCE_REAUTHENTICATION,
     FlowPlanner,
     cache_key,
 )
@@ -86,6 +88,29 @@ class TestFlowPlanner(TestCase):
         planner = FlowPlanner(flow)
         planner.allow_empty_flows = True
         planner.plan(request)
+
+    def test_require_unauthenticated_source_reauthentication(self):
+        """A pending source re-auth may plan only the flow whose pk is in the context."""
+        flow = create_test_flow()
+        flow.authentication = FlowAuthenticationRequirement.REQUIRE_UNAUTHENTICATED
+        request = self.request_factory.get(
+            reverse("authentik_api:flow-executor", kwargs={"flow_slug": flow.slug}),
+        )
+        request.user = create_test_user()
+        planner = FlowPlanner(flow)
+        planner.allow_empty_flows = True
+
+        with self.assertRaises(FlowNonApplicableException):
+            planner.plan(request)
+
+        other = create_test_flow()
+        with self.assertRaises(FlowNonApplicableException):
+            planner.plan(request, {PLAN_CONTEXT_SOURCE_REAUTHENTICATION: str(other.pk)})
+        with self.assertRaises(FlowNonApplicableException):
+            planner.plan(request, {PLAN_CONTEXT_SOURCE_REAUTHENTICATION: True})
+
+        plan = planner.plan(request, {PLAN_CONTEXT_SOURCE_REAUTHENTICATION: str(flow.pk)})
+        self.assertEqual(plan.context[PLAN_CONTEXT_SOURCE_REAUTHENTICATION], str(flow.pk))
 
     def test_authentication_redirect_required(self):
         """Test flow authentication (redirect required)"""

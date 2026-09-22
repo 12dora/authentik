@@ -34,6 +34,7 @@ from authentik.common.oauth.constants import (
     UI_LOCALES,
 )
 from authentik.core.models import Application
+from authentik.core.sources.reauthentication import mark_source_reauthentication
 from authentik.events.models import Event, EventAction
 from authentik.events.signals import get_login_event
 from authentik.flows.challenge import (
@@ -546,6 +547,7 @@ class AuthorizationFlowInitView(PolicyAccessView):
                 # Since we already need to re-authenticate the user, set the old login UID
                 # in case this request has both max_age and prompt=login
                 self.request.session[SESSION_KEY_LAST_LOGIN_UID] = login_uid
+                mark_source_reauthentication(self.request)
                 return self.handle_no_permission()
         # If prompt=login, we need to re-authenticate the user regardless
         # Check if we're not already doing the re-authentication
@@ -557,6 +559,7 @@ class AuthorizationFlowInitView(PolicyAccessView):
                 or login_uid == self.request.session[SESSION_KEY_LAST_LOGIN_UID]
             ):
                 self.request.session[SESSION_KEY_LAST_LOGIN_UID] = login_uid
+                mark_source_reauthentication(self.request)
                 return self.handle_no_permission()
         scope_descriptions = UserInfoView().get_scope_descriptions(
             self.params.scope, self.params.provider

@@ -67,6 +67,9 @@ SESSION_KEY_PLAN = "authentik/flows/plan"
 SESSION_KEY_GET = "authentik/flows/get"
 SESSION_KEY_POST = "authentik/flows/post"
 SESSION_KEY_HISTORY = "authentik/flows/history"
+# fork: authentik.core.sources.reauthentication.SESSION_KEY_SOURCE_REAUTHENTICATION.
+# Importing that module cycles through authentik.events.signals, which imports this one.
+_SESSION_KEY_SOURCE_REAUTHENTICATION = "authentik/core/sources/reauthentication"
 QS_KEY_TOKEN = "flow_token"  # nosec
 QS_QUERY = "query"
 
@@ -473,6 +476,8 @@ class FlowExecutorView(APIView):
         keys_to_delete = [
             SESSION_KEY_PLAN,
             SESSION_KEY_GET,
+            # fork: drop a pending source re-authentication marker.
+            _SESSION_KEY_SOURCE_REAUTHENTICATION,
             # We might need the initial POST payloads for later requests
             # SESSION_KEY_POST,
             # We don't delete the history on purpose, as a user might
@@ -494,6 +499,9 @@ class CancelView(View):
         if SESSION_KEY_PLAN in request.session:
             del request.session[SESSION_KEY_PLAN]
             LOGGER.debug("Canceled current plan")
+        # fork: the cancel button lands here, not on FlowExecutorView.cancel.
+        if _SESSION_KEY_SOURCE_REAUTHENTICATION in request.session:
+            del request.session[_SESSION_KEY_SOURCE_REAUTHENTICATION]
         next_url = self.request.GET.get(NEXT_ARG_NAME)
         if next_url and not is_url_absolute(next_url):
             return redirect(next_url)

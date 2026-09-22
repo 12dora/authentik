@@ -1,5 +1,6 @@
 """Test authorize view"""
 
+from time import time
 from unittest.mock import MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 
@@ -15,6 +16,7 @@ from authentik.common.oauth.constants import (
     TOKEN_TYPE,
 )
 from authentik.core.models import Application
+from authentik.core.sources.reauthentication import SESSION_KEY_SOURCE_REAUTHENTICATION
 from authentik.core.tests.utils import (
     RequestFactory,
     create_test_admin_user,
@@ -23,6 +25,7 @@ from authentik.core.tests.utils import (
     create_test_user,
 )
 from authentik.events.models import Event, EventAction
+from authentik.events.signals import SESSION_LOGIN_EVENT
 from authentik.flows.models import FlowStageBinding
 from authentik.flows.stage import PLAN_CONTEXT_PENDING_USER_IDENTIFIER
 from authentik.flows.views.executor import SESSION_KEY_PLAN
@@ -42,6 +45,7 @@ from authentik.providers.oauth2.models import (
 )
 from authentik.providers.oauth2.tests.utils import OAuthTestCase
 from authentik.providers.oauth2.views.authorize import (
+    SESSION_KEY_LAST_LOGIN_UID,
     AuthorizationFlowInitView,
     OAuthAuthorizationParams,
 )
@@ -371,6 +375,48 @@ class TestAuthorize(OAuthTestCase):
             timedelta_from_string(provider.access_code_validity).total_seconds(),
             delta=5,
         )
+
+    def test_prompt_login_sets_source_reauthentication_marker(self):
+        """prompt=login stores the short-lived source re-authentication marker."""
+        flow = create_test_flow()
+        auth_flow = create_test_flow()
+        FlowStageBinding.objects.create(
+            target=auth_flow,
+            stage=DummyStage.objects.create(name=generate_id()),
+            order=0,
+        )
+        provider = OAuth2Provider.objects.create(
+            name=generate_id(),
+            client_id="test",
+            authorization_flow=flow,
+            authentication_flow=auth_flow,
+            redirect_uris=[RedirectURI(RedirectURIMatchingMode.STRICT, "foo://localhost")],
+            access_code_validity="seconds=100",
+            grant_types=[GrantType.AUTHORIZATION_CODE],
+        )
+        Application.objects.create(name="app", slug="app", provider=provider)
+        user = create_test_admin_user()
+        self.client.force_login(user)
+        state = generate_id()
+        response = self.client.get(
+            reverse("authentik_providers_oauth2:authorize"),
+            data={
+                "response_type": "code",
+                "client_id": "test",
+                "state": state,
+                "redirect_uri": "foo://localhost",
+                "prompt": "login",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(auth_flow.slug, response.url)
+        login_event = self.client.session[SESSION_LOGIN_EVENT]
+        login_uid = str(login_event.pk)
+        self.assertEqual(self.client.session[SESSION_KEY_LAST_LOGIN_UID], login_uid)
+        marker = self.client.session[SESSION_KEY_SOURCE_REAUTHENTICATION]
+        self.assertEqual(marker["login_uid"], login_uid)
+        self.assertGreater(marker["expires"], time())
+        self.assertFalse(AuthorizationCode.objects.filter(user=user).exists())
 
     def test_full_code_denies_dingtalk_protected_app_without_allowlist_marker(self):
         """Protected OIDC applications deny logged-in sessions without DingTalk allowlist marker."""

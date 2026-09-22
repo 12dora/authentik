@@ -45,6 +45,8 @@ PLAN_CONTEXT_OUTPOST = "outpost"
 PLAN_CONTEXT_USER_SWITCH_FROM_USER = "user_switch_from_user"
 PLAN_CONTEXT_USER_SWITCH_ADD_USER = "user_switch_add_user"
 PLAN_CONTEXT_USER_SWITCH_TARGET_SESSION = "user_switch_target_session"
+# fork: pk of the source authentication flow a pending provider re-authentication may plan.
+PLAN_CONTEXT_SOURCE_REAUTHENTICATION = "source_reauthentication"
 PLAN_CONTEXT_POST = "goauthentik.io/http/post"
 # Is set by the Flow Planner when a FlowToken was used, and the currently active flow plan
 # was restored.
@@ -219,6 +221,8 @@ class FlowPlanner:
         if (
             self.flow.authentication == FlowAuthenticationRequirement.REQUIRE_UNAUTHENTICATED
             and request.user.is_authenticated
+            # fork: waived only for the source flow whose pk is in the plan context.
+            and context.get(PLAN_CONTEXT_SOURCE_REAUTHENTICATION) != str(self.flow.pk)
         ):
             raise FlowNonApplicableException()
         if (

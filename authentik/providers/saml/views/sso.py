@@ -9,6 +9,7 @@ from django.views.decorators.csrf import csrf_exempt
 from structlog.stdlib import get_logger
 
 from authentik.core.models import Application
+from authentik.core.sources.reauthentication import mark_source_reauthentication
 from authentik.events.models import Event, EventAction
 from authentik.events.signals import get_login_event
 from authentik.flows.apps import ContinuousLogin
@@ -129,6 +130,7 @@ class SAMLSSOView(PolicyAccessView):
             or login_uid == request.session[SESSION_KEY_LAST_LOGIN_UID]
         ):
             request.session[SESSION_KEY_LAST_LOGIN_UID] = login_uid
+            mark_source_reauthentication(request)
             return self.handle_no_permission()
         return None
 
